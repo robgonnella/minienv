@@ -1,0 +1,21 @@
+x-minienv:
+  k8s:
+    context: minikube
+    namespace: $MINIENV_NAMESPACE
+
+services:
+  echo:
+    image: ealen/echo-server:latest
+    ports:
+      - 8080:80
+    healthcheck:
+      test: curl http://localhost/health
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: secret
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: pg_isready -U postgres -d postgres

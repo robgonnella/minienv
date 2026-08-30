@@ -1,5 +1,6 @@
 [env]
 _.file = ".env"
+MINIENV_NAMESPACE = "minienv-review"
 
 [tools]
 go = "1.27"

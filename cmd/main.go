@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/robgonnella/minienv/internal"
+	"github.com/robgonnella/minienv/internal/command"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -49,6 +49,5 @@ func init() {
 }
 
 func main() {
-	log.Info().Str("floci-aws-image", internal.FLOCI_AWS_IMAGE).Msg("")
-	log.Info().Str("floci-gcp-image", internal.FLOCI_GCP_IMAGE).Msg("")
+	command.Execute()
 }
