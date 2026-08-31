@@ -204,7 +204,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             {{- range .Values.service.ports }}
-            - name: {{ .name }}
+            - name: {{ .containerPortName }}
               containerPort: {{ .containerPort }}
               protocol: {{ .protocol }}
             {{- end }}
@@ -266,9 +266,9 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     {{- range .Values.service.ports }}
-    - name: {{ .name }}
-      port: {{ .port }}
-      targetPort: {{ .name }}
+    - name: {{ .servicePortName }}
+      port: {{ .servicePort }}
+      targetPort: {{ .containerPortName }}
       protocol: {{ .protocol }}
     {{- end }}
   selector:

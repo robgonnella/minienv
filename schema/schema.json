@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/robgonnella/minienv/schema/schema.json",
+  "$defs": {
+    "ChartImage": {
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Image Repository for the service image"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "description": "PullPolicy for this image"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Image tag for the service image"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "repository",
+        "tag"
+      ],
+      "description": "Configuration for service image"
+    },
+    "ChartImagePullSecret": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name of the secret for pulling images"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "Pull secrets to enable pulling private images"
+    },
+    "ChartService": {
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Whether or not to create a Kubernetes service"
+        },
+        "type": {
+          "type": "string",
+          "description": "The type of service to create"
+        },
+        "ports": {
+          "items": {
+            "$ref": "#/$defs/ChartServicePort"
+          },
+          "type": "array",
+          "description": "The ports to associate with pod container and service mapping"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ports"
+      ],
+      "description": "Service configuration"
+    },
+    "ChartServiceAccount": {
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Whether or not to create a Kubernetes service account"
+        },
+        "automount": {
+          "type": "boolean",
+          "description": "Whether or not to automount the service account"
+        },
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Additional annotations for the service account"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "ServiceAccount configuration for the deployment service"
+    },
+    "ChartServicePort": {
+      "properties": {
+        "containerPortName": {
+          "type": "string",
+          "description": "Name of the container port"
+        },
+        "containerPort": {
+          "type": "integer",
+          "description": "Container port to expose to service"
+        },
+        "servicePortName": {
+          "type": "string",
+          "description": "Name of the service port"
+        },
+        "servicePort": {
+          "type": "integer",
+          "description": "Service port to map to the container port"
+        },
+        "protocol": {
+          "type": "string",
+          "description": "Protocol to use for these ports"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "containerPortName",
+        "containerPort",
+        "servicePortName",
+        "servicePort",
+        "protocol"
+      ],
+      "description": "Port configuration use in services and deployment pod container"
+    },
+    "Values": {
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "description": "The number of replicas for this deployment"
+        },
+        "image": {
+          "$ref": "#/$defs/ChartImage",
+          "description": "The image for this deployment. Will try to use compose service image if not set"
+        },
+        "imagePullSecrets": {
+          "items": {
+            "$ref": "#/$defs/ChartImagePullSecret"
+          },
+          "type": "array",
+          "description": "Any image pull secrets required to pull images on the cluster"
+        },
+        "service": {
+          "$ref": "#/$defs/ChartService",
+          "description": "Service configuration including container and service port specifications"
+        },
+        "serviceAccount": {
+          "$ref": "#/$defs/ChartServiceAccount",
+          "description": "Service account configuration"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Container environment configuration"
+        },
+        "podAnnotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Annotations to add to the deployment pods"
+        },
+        "podLabels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Labels to add to the deployment pods"
+        },
+        "podSecurityContext": {
+          "type": "object",
+          "description": "Security context for the deployment pods"
+        },
+        "securityContext": {
+          "type": "object",
+          "description": "Security context for the container in each pod"
+        },
+        "resources": {
+          "type": "object",
+          "description": "Resources configuration for deployment pods"
+        },
+        "startupProbe": {
+          "type": "object",
+          "description": "Container startup probe configuration"
+        },
+        "livenessProbe": {
+          "type": "object",
+          "description": "Container liveness probe configuration"
+        },
+        "readinessProbe": {
+          "type": "object",
+          "description": "Container readiness probe configuration"
+        },
+        "volumes": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array",
+          "description": "Volumes configuration for the deployment pods"
+        },
+        "volumeMounts": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array",
+          "description": "VolumeMounts configuration for the container"
+        },
+        "nodeSelector": {
+          "type": "object",
+          "description": "NodeSelector configuration for the deployment pods"
+        },
+        "tolerations": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array",
+          "description": "Tolerations configuration for the deployment pods"
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Affinity configuration for the deployment pods"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "XMiniEnv": {
+      "properties": {
+        "k8s": {
+          "$ref": "#/$defs/XMiniEnvK8s",
+          "description": "K8s configuration for deploying to Kubernetes"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "XMiniEnv top-level extension configuration for deploying to various targets"
+    },
+    "XMiniEnvK8s": {
+      "properties": {
+        "context": {
+          "type": "string",
+          "description": "Targets a specific cluster when deploying"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Targets a specific namespace when deploying"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "context",
+        "namespace"
+      ],
+      "description": "Required fields for deploying to Kubernetes"
+    },
+    "XMiniEnvK8sService": {
+      "properties": {
+        "skip": {
+          "type": "boolean",
+          "description": "Prevents the targeted service from being deployed to the cluster"
+        },
+        "deploymentTimeout": {
+          "type": "string",
+          "description": "Controls the Helm timeout for deploying the targeted service"
+        },
+        "values": {
+          "$ref": "#/$defs/Values",
+          "description": "Chart value overrides for the Helm deployment"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Service level configuration for controlling Kubernetes deployment properties"
+    },
+    "service": {
+      "allOf": [
+        {
+          "$ref": "https://raw.githubusercontent.com/compose-spec/compose-go/master/schema/compose-spec.json#/$defs/service",
+          "description": "The official docker-compose service spec"
+        }
+      ],
+      "properties": {
+        "x-minienv-k8s-service": {
+          "$ref": "#/$defs/XMiniEnvK8sService"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "https://raw.githubusercontent.com/compose-spec/compose-go/master/schema/compose-spec.json",
+      "description": "The official docker-compose spec"
+    }
+  ],
+  "properties": {
+    "x-minienv": {
+      "$ref": "#/$defs/XMiniEnv"
+    },
+    "services": {
+      "patternProperties": {
+        "^[a-zA-Z0-9._-]+$": {
+          "$ref": "#/$defs/service"
+        }
+      },
+      "description": "Wrapped docker-compose service spec with minienv extensions"
+    }
+  },
+  "description": "Minienv schema wrapping official docker-compose schema but with minienv extensions"
+}

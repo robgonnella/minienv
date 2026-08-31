@@ -1,3 +1,5 @@
+# $schema: ./schema/schema.json
+
 x-minienv:
   k8s:
     context: minikube

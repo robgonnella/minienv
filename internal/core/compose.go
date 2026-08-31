@@ -17,7 +17,7 @@ type ComposeFlags struct {
 	ProjectName      string
 }
 
-func LoadComposeProject(flags *ComposeFlags) (*types.Project, error) {
+func loadComposeProject(flags *ComposeFlags) (*types.Project, error) {
 	// Same option set the compose CLI builds in its own toProjectOptions, so
 	// project name, .env loading, COMPOSE_FILE and default config-file discovery
 	// all resolve exactly the way `docker compose` resolves them.
@@ -42,9 +42,9 @@ func LoadComposeProject(flags *ComposeFlags) (*types.Project, error) {
 	return project, nil
 }
 
-func LoadMainExtensionConfig(
+func loadMainExtensionConfig(
 	project *types.Project,
-) (*config.MainExtensionConfig, error) {
+) (*config.XMiniEnv, error) {
 	ex, ok := project.Extensions[config.TOP_LEVEL_EXTENSION]
 	if !ok {
 		return nil, fmt.Errorf(
@@ -52,7 +52,7 @@ func LoadMainExtensionConfig(
 		)
 	}
 
-	var extConfig config.MainExtensionConfig
+	var extConfig config.XMiniEnv
 	if err := mapstructure.Decode(ex, &extConfig); err != nil {
 		return nil, fmt.Errorf(
 			"failed to parse x-minienv top-level extension: %s",

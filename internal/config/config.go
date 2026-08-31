@@ -1,5 +1,7 @@
 package config
 
-type MainExtensionConfig struct {
-	K8s *K8sTopLevelConfig `yaml:"k8s" mapstructure:"k8s"`
+// XMiniEnv top-level extension configuration for deploying to various targets
+type XMiniEnv struct {
+	// K8s configuration for deploying to Kubernetes
+	K8s *XMiniEnvK8s `json:"k8s,omitempty" yaml:"k8s,omitempty" mapstructure:"k8s,omitempty"`
 }

@@ -5,9 +5,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var downCmd = &cobra.Command{
-	Use:   "down",
-	Short: "Destroys your remote minienv according to compose configuration",
+var destroyCmd = &cobra.Command{
+	Use:     "destroy",
+	Aliases: []string{"down"},
+	Short:   "Destroys your remote minienv according to compose configuration",
 	Long: `Uses your docker compose configuration, including the the minienv
 extension fields, to destroy your minienv in the targeted remote environment.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -16,21 +17,11 @@ extension fields, to destroy your minienv in the targeted remote environment.`,
 }
 
 func init() {
-	rootCmd.AddCommand(downCmd)
+	rootCmd.AddCommand(destroyCmd)
 }
 
 func executeDown(cmd *cobra.Command) error {
 	flags, err := getComposeFlags(cmd)
-	if err != nil {
-		return err
-	}
-
-	project, err := core.LoadComposeProject(flags)
-	if err != nil {
-		return err
-	}
-
-	ext, err := core.LoadMainExtensionConfig(project)
 	if err != nil {
 		return err
 	}
@@ -40,5 +31,5 @@ func executeDown(cmd *cobra.Command) error {
 		return err
 	}
 
-	return core.K8ServicesDown(project, ext, dryRun)
+	return core.Destroy(flags, dryRun)
 }

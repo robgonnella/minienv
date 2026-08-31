@@ -18,9 +18,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func K8sServicesUp(
+func k8sServicesDeploy(
 	project *types.Project,
-	extConfig *config.MainExtensionConfig,
+	extConfig *config.XMiniEnv,
 	dryRun bool,
 ) error {
 	actionConfig, err := getHelmActionConfig(extConfig)
@@ -44,10 +44,10 @@ func K8sServicesUp(
 
 			log.Info().Str("service", svc.Name).Msg("processing service")
 
-			var svcExtConfig config.K8sServiceConfig
+			var svcExtConfig config.XMiniEnvK8sService
 			if err := mapstructure.Decode(svcExt, &svcExtConfig); err != nil {
 				return fmt.Errorf(
-					"failed to parse x-minienv-k8s service extension: %s",
+					"failed to parse x-minienv-k8s-service extension: %s",
 					err,
 				)
 			}
@@ -71,9 +71,9 @@ func K8sServicesUp(
 	return nil
 }
 
-func K8ServicesDown(
+func k8sServicesDestroy(
 	project *types.Project,
-	extConfig *config.MainExtensionConfig,
+	extConfig *config.XMiniEnv,
 	dryRun bool,
 ) error {
 	actionConfig, err := getHelmActionConfig(extConfig)
@@ -90,10 +90,10 @@ func K8ServicesDown(
 
 			log.Info().Str("service", svc.Name).Msg("processing service")
 
-			var svcExtConfig config.K8sServiceConfig
+			var svcExtConfig config.XMiniEnvK8sService
 			if err := mapstructure.Decode(svcExt, &svcExtConfig); err != nil {
 				return fmt.Errorf(
-					"failed to parse x-minienv-k8s service extension: %s",
+					"failed to parse x-minienv-k8s-service extension: %s",
 					err,
 				)
 			}
@@ -118,8 +118,8 @@ func K8ServicesDown(
 
 func upgradeOrInstallService(
 	actionConfig *helmaction.Configuration,
-	mainExt *config.MainExtensionConfig,
-	svcExt *config.K8sServiceConfig,
+	mainExt *config.XMiniEnv,
+	svcExt *config.XMiniEnvK8sService,
 	svc *types.ServiceConfig,
 	dryRun bool,
 ) error {
@@ -139,12 +139,12 @@ func upgradeOrInstallService(
 
 func installChart(
 	actionConfig *helmaction.Configuration,
-	mainExt *config.MainExtensionConfig,
-	svcExt *config.K8sServiceConfig,
+	mainExt *config.XMiniEnv,
+	svcExt *config.XMiniEnvK8sService,
 	svc *types.ServiceConfig,
 	dryRun bool,
 ) error {
-	values, err := svcExt.ChartValues.Resolve(svc)
+	values, err := svcExt.Values.Resolve(svc)
 	if err != nil {
 		return err
 	}
@@ -191,12 +191,12 @@ func installChart(
 
 func upgradeChart(
 	actionConfig *helmaction.Configuration,
-	mainExt *config.MainExtensionConfig,
-	svcExt *config.K8sServiceConfig,
+	mainExt *config.XMiniEnv,
+	svcExt *config.XMiniEnvK8sService,
 	svc *types.ServiceConfig,
 	dryRun bool,
 ) error {
-	values, err := svcExt.ChartValues.Resolve(svc)
+	values, err := svcExt.Values.Resolve(svc)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func upgradeChart(
 
 func destroyService(
 	actionConfig *helmaction.Configuration,
-	mainExt *config.MainExtensionConfig,
+	mainExt *config.XMiniEnv,
 	svc *types.ServiceConfig,
 	dryRun bool,
 ) error {
@@ -266,7 +266,7 @@ func destroyService(
 }
 
 func getHelmActionConfig(
-	extConfig *config.MainExtensionConfig,
+	extConfig *config.XMiniEnv,
 ) (*helmaction.Configuration, error) {
 	settings := helmcli.New()
 	settings.SetNamespace(extConfig.K8s.Namespace)
