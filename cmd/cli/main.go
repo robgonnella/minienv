@@ -26,13 +26,17 @@ func init() {
 				return formatWithColor(zerolog.LevelColors[zerolog.DebugLevel])
 			}
 
+			// Intentionally swaps levels to get minienv custom color scheme
+			// Trace -> Debug
+			// Debug -> Info
+			// Info  -> Trace
 			switch strings.ToLower(levelStr) {
 			case strings.ToLower(zerolog.TraceLevel.String()):
-				level = zerolog.TraceLevel
-			case strings.ToLower(zerolog.DebugLevel.String()):
 				level = zerolog.DebugLevel
-			case strings.ToLower(zerolog.InfoLevel.String()):
+			case strings.ToLower(zerolog.DebugLevel.String()):
 				level = zerolog.InfoLevel
+			case strings.ToLower(zerolog.InfoLevel.String()):
+				level = zerolog.TraceLevel
 			case strings.ToLower(zerolog.WarnLevel.String()):
 				level = zerolog.WarnLevel
 			case strings.ToLower(zerolog.ErrorLevel.String()):

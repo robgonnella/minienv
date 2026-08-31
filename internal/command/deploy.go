@@ -22,7 +22,7 @@ func init() {
 }
 
 func executeDeploy(cmd *cobra.Command) error {
-	flags, err := getComposeFlags(cmd)
+	project, ext, err := loadProject(cmd)
 	if err != nil {
 		return err
 	}
@@ -32,5 +32,7 @@ func executeDeploy(cmd *cobra.Command) error {
 		return err
 	}
 
-	return core.Deploy(flags, dryRun)
+	c := core.New(ext, project, dryRun)
+
+	return c.Deploy()
 }

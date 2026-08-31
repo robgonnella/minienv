@@ -1,0 +1,4 @@
+[[package]]
+name = "minienv"
+tag_prefix = "v"
+release_type = "go"

@@ -4,18 +4,13 @@ x-minienv:
   k8s:
     context: minikube
     namespace: $MINIENV_NAMESPACE
+    deploymentTimeout: 15s
 
 services:
   echo:
     x-minienv-k8s-service:
-      exposeServicePort: 8080
-      service:
-        ports:
-          - containerPortName: http
-            containerPort: 80
-            servicePortName: http
-            servicePort: 8080
-            protocol: TCP
+      ngrok:
+        port: 8080
     image: ealen/echo-server:latest
     ports:
       - 8080:80
@@ -23,8 +18,6 @@ services:
       test: curl http://localhost/health
 
   postgres:
-    x-minienv-k8s-service:
-      skip: true
     image: postgres:15
     environment:
       POSTGRES_PASSWORD: secret

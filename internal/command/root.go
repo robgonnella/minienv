@@ -1,10 +1,21 @@
 package command
 
 import (
-	"github.com/robgonnella/minienv/internal/core"
+	"context"
+	"fmt"
+
+	composecli "github.com/compose-spec/compose-go/v2/cli"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/robgonnella/minienv/internal/config"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
+
+type ComposeFlags struct {
+	Files            []string
+	ProjectDirectory string
+	ProjectName      string
+}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -31,7 +42,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("dry-run", false, "Executes in dry-run mode")
 }
 
-func getComposeFlags(cmd *cobra.Command) (*core.ComposeFlags, error) {
+func getComposeFlags(cmd *cobra.Command) (*ComposeFlags, error) {
 	projectDirectory, err := cmd.Flags().GetString("project-directory")
 	if err != nil {
 		return nil, err
@@ -47,9 +58,81 @@ func getComposeFlags(cmd *cobra.Command) (*core.ComposeFlags, error) {
 		return nil, err
 	}
 
-	return &core.ComposeFlags{
+	return &ComposeFlags{
 		Files:            files,
 		ProjectDirectory: projectDirectory,
 		ProjectName:      projectName,
 	}, nil
+}
+
+func loadComposeProject(flags *ComposeFlags) (*config.ComposeProject, error) {
+	// Same option set the compose CLI builds in its own toProjectOptions, so
+	// project name, .env loading, COMPOSE_FILE and default config-file discovery
+	// all resolve exactly the way `docker compose` resolves them.
+	projectOpts, err := composecli.NewProjectOptions(
+		flags.Files,
+		composecli.WithWorkingDirectory(flags.ProjectDirectory),
+		composecli.WithOsEnv,
+		composecli.WithDotEnv,
+		composecli.WithConfigFileEnv,
+		composecli.WithDefaultConfigPath,
+		composecli.WithName(flags.ProjectName),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	project, err := projectOpts.LoadProject(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return project, nil
+}
+
+func loadMainExtensionConfig(
+	project *config.ComposeProject,
+) (*config.XMiniEnv, error) {
+	ex, ok := project.Extensions[config.TOP_LEVEL_EXTENSION]
+	if !ok {
+		return nil, fmt.Errorf(
+			"no minienv extension config found in docker compose configs",
+		)
+	}
+
+	var extConfig config.XMiniEnv
+	if err := mapstructure.Decode(ex, &extConfig); err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse x-minienv top-level extension: %s",
+			err,
+		)
+	}
+
+	log.
+		Info().
+		Interface(config.TOP_LEVEL_EXTENSION, ex).
+		Msg("loaded top-level extension")
+
+	return &extConfig, nil
+}
+
+func loadProject(
+	cmd *cobra.Command,
+) (*config.ComposeProject, *config.XMiniEnv, error) {
+	flags, err := getComposeFlags(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	project, err := loadComposeProject(flags)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ext, err := loadMainExtensionConfig(project)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return project, ext, nil
 }

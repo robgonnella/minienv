@@ -21,7 +21,7 @@ func init() {
 }
 
 func executeDown(cmd *cobra.Command) error {
-	flags, err := getComposeFlags(cmd)
+	project, ext, err := loadProject(cmd)
 	if err != nil {
 		return err
 	}
@@ -31,5 +31,7 @@ func executeDown(cmd *cobra.Command) error {
 		return err
 	}
 
-	return core.Destroy(flags, dryRun)
+	c := core.New(ext, project, dryRun)
+
+	return c.Destroy()
 }

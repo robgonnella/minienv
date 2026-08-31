@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/rs/zerolog/log"
 	helmaction "helm.sh/helm/v3/pkg/action"
@@ -19,46 +18,156 @@ import (
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func loadChart(svcName string) (*helmchart.Chart, error) {
+type Helm struct {
+	ext          *config.XMiniEnv
+	actionConfig *helmaction.Configuration
+	dryRun       bool
+}
+
+func NewHelm(ext *config.XMiniEnv, dryRun bool) *Helm {
+	return &Helm{
+		ext:          ext,
+		actionConfig: nil,
+		dryRun:       dryRun,
+	}
+}
+
+func (h *Helm) Active() bool {
+	return h.ext.K8s != nil
+}
+
+func (h *Helm) ConfigField() string {
+	return "k8s"
+}
+
+func (h *Helm) String() string {
+	return "Helm"
+}
+
+func (h *Helm) Init(project *config.ComposeProject) error {
+	if h.ext.K8s == nil {
+		return nil
+	}
+
+	settings := helmcli.New()
+	settings.SetNamespace(h.ext.K8s.Namespace)
+	settings.KubeContext = h.ext.K8s.Context
+
+	actionConfig := new(helmaction.Configuration)
+
+	if err := actionConfig.Init(
+		settings.RESTClientGetter(),
+		settings.Namespace(),
+		os.Getenv("HELM_DRIVER"),
+		log.Printf,
+	); err != nil {
+		return err
+	}
+
+	h.actionConfig = actionConfig
+	return nil
+}
+
+func (h *Helm) Deploy(project *config.ComposeProject) error {
+	if h.ext.K8s == nil {
+		return nil
+	}
+
+	if err := h.createNamespaceIfNotExists(); err != nil {
+		return err
+	}
+
+	for _, svc := range project.Services {
+		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc)
+		if err != nil {
+			return err
+		}
+
+		if svcExt.Skip != nil && *svcExt.Skip {
+			log.
+				Warn().
+				Str("service", svc.Name).
+				Msg("detected skip: omitting service from deployment")
+			continue
+		}
+
+		if err := h.upgradeOrInstallService(svcExt, svc); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (h *Helm) Destroy(project *config.ComposeProject) error {
+	if h.ext.K8s == nil {
+		return nil
+	}
+
+	for name, svc := range project.Services {
+		if err := h.uninstallChart(svc); err != nil {
+			return fmt.Errorf("failed to destroy service %s: %s", name, err)
+		}
+	}
+
+	return nil
+}
+
+func (h *Helm) upgradeOrInstallService(
+	svcExt *config.XMiniEnvK8sService,
+	svc config.ComposeService,
+) error {
+	exists := h.serviceReleaseExists(svc.Name)
+
+	if exists {
+		log.Info().Str("release", svc.Name).Msg("upgrading release")
+		return h.upgradeChart(svcExt, svc)
+	} else {
+		log.Info().Str("release", svc.Name).Msg("installing release")
+		return h.installChart(svcExt, svc)
+	}
+}
+
+func (h *Helm) loadChart(svcName string) (*helmchart.Chart, error) {
 	files := []*helmloader.BufferedFile{
 		{
 			Name: "Chart.yaml",
-			Data: []byte(getHelmChartYamlTxt(svcName)),
+			Data: []byte(h.getHelmChartYamlTxt(svcName)),
 		},
 		{
 			Name: "values.yaml",
-			Data: []byte(getHelmChartValuesTxt()),
+			Data: []byte(h.getHelmChartValuesTxt()),
 		},
 		{
 			Name: "templates/_helpers.tpl",
-			Data: []byte(getHelmHelpersTxt(svcName)),
+			Data: []byte(h.getHelmHelpersTxt(svcName)),
 		},
 		{
 			Name: "templates/deployment.yaml",
-			Data: []byte(getHelmDeploymentTxt(svcName)),
+			Data: []byte(h.getHelmDeploymentTxt(svcName)),
 		},
 		{
 			Name: "templates/service.yaml",
-			Data: []byte(getHelmServiceTxt(svcName)),
+			Data: []byte(h.getHelmServiceTxt(svcName)),
 		},
 		{
 			Name: "templates/serviceaccount.yaml",
-			Data: []byte(getHelmServiceAccountTxt(svcName)),
+			Data: []byte(h.getHelmServiceAccountTxt(svcName)),
 		},
 		{
 			Name: "templates/configmap.yaml",
-			Data: []byte(getHelmConfigMapTxt()),
+			Data: []byte(h.getHelmConfigMapTxt(svcName)),
 		},
 		{
 			Name: "templates/secret.yaml",
-			Data: []byte(getHelmSecretTxt()),
+			Data: []byte(h.getHelmSecretTxt()),
 		},
 	}
 
 	return helmloader.LoadFiles(files)
 }
 
-func getHelmChartYamlTxt(svcName string) string {
+func (h *Helm) getHelmChartYamlTxt(svcName string) string {
 	return fmt.Sprintf(`
 type: application
 name: %[1]s
@@ -68,7 +177,7 @@ description: A chart for deploying %[1]s service
 `, svcName)
 }
 
-func getHelmChartValuesTxt() string {
+func (h *Helm) getHelmChartValuesTxt() string {
 	return `
 replicaCount: 1
 
@@ -86,7 +195,8 @@ env: {}
 ngrok:
   enabled: false
   port: ""
-  on_http_request: ""
+  url: ""
+  trafficPolicy: ""
 
 serviceAccount:
   create: true
@@ -118,7 +228,7 @@ affinity: {}
 `
 }
 
-func getHelmHelpersTxt(svcName string) string {
+func (h *Helm) getHelmHelpersTxt(svcName string) string {
 	return fmt.Sprintf(`
 {{/*
 Expand the name of the chart.
@@ -185,24 +295,33 @@ Create the name of the service account to use
 `, svcName)
 }
 
-func getHelmConfigMapTxt() string {
+func (h *Helm) getHelmConfigMapTxt(svcName string) string {
 	return fmt.Sprintf(`
 {{- if .Values.ngrok.enabled -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: %s
+  name: %[1]s
 data:
-  %s: |
-    {{ .Values.ngrok.trafficPolicy | toYaml | nindent 4 }}
+  %[2]s: |
+    version: 3
+    endpoints:
+      - name: {{ include "%[3]s.fullname" . }}
+        url: {{ .Values.ngrok.url }}
+        description: "endpoint for %[3]s"
+        upstream:
+          url: {{ include "%[3]s.fullname" . }}:{{ .Values.ngrok.port }}
+        traffic_policy:
+          {{ .Values.ngrok.trafficPolicy }}
 {{- end -}}
 `,
 		config.NGROK_CONFIG_MAP_NAME,
-		config.NGROK_TRAFFIC_POLICY_CONFIG_KEY,
+		config.NGROK_CONFIG_KEY,
+		svcName,
 	)
 }
 
-func getHelmSecretTxt() string {
+func (h *Helm) getHelmSecretTxt() string {
 	return fmt.Sprintf(`
 {{- if .Values.ngrok.enabled -}}
 apiVersion: v1
@@ -218,7 +337,7 @@ data:
 	)
 }
 
-func getHelmDeploymentTxt(svcName string) string {
+func (h *Helm) getHelmDeploymentTxt(svcName string) string {
 	return fmt.Sprintf(`
 apiVersion: apps/v1
 kind: Deployment
@@ -299,10 +418,9 @@ spec:
           imagePullPolicy: IfNotPresent
           command:
             - ngrok
-            - http
-            - %[1]s:{{ .Values.ngrok.port }}
-            - --traffic-policy-file
-            - %[5]s/%[6]s
+            - start
+            - {{ include "%[1]s.fullname" . }}
+            - --log=stdout
           envFrom:
             - secretRef:
                 name: %[3]s
@@ -332,11 +450,10 @@ spec:
 		config.NGROK_SECRET_NAME,
 		config.NGROK_CONFIG_MAP_NAME,
 		config.NGROK_CONFIG_VOL_MOUNT_PATH,
-		config.NGROK_TRAFFIC_POLICY_CONFIG_KEY,
 	)
 }
 
-func getHelmServiceTxt(svcName string) string {
+func (h *Helm) getHelmServiceTxt(svcName string) string {
 	return fmt.Sprintf(`
 {{- if .Values.service.create -}}
 apiVersion: v1
@@ -360,7 +477,7 @@ spec:
 `, svcName)
 }
 
-func getHelmServiceAccountTxt(svcName string) string {
+func (h *Helm) getHelmServiceAccountTxt(svcName string) string {
 	return fmt.Sprintf(`
 {{- if .Values.serviceAccount.create -}}
 apiVersion: v1
@@ -378,22 +495,18 @@ automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
 `, svcName)
 }
 
-func installChart(
-	actionConfig *helmaction.Configuration,
-	mainExt *config.XMiniEnv,
+func (h *Helm) installChart(
 	svcExt *config.XMiniEnvK8sService,
-	svc *types.ServiceConfig,
-	dryRun bool,
+	svc config.ComposeService,
 ) error {
 	values, err := svcExt.ToValuesMap()
 	if err != nil {
 		return err
 	}
 
-	defaultTimeout := "2m"
 	timeout := svcExt.DeploymentTimeout
 	if timeout == nil {
-		timeout = &defaultTimeout
+		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
 	}
 
 	parsedTimeout, err := time.ParseDuration(*timeout)
@@ -401,17 +514,17 @@ func installChart(
 		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
 	}
 
-	client := helmaction.NewInstall(actionConfig)
+	client := helmaction.NewInstall(h.actionConfig)
 	client.ReleaseName = svc.Name
-	client.Namespace = mainExt.K8s.Namespace
+	client.Namespace = h.ext.K8s.Namespace
 	client.CreateNamespace = false
 	client.Wait = true
 	client.Atomic = true
 	client.Wait = true
-	client.DryRun = dryRun
+	client.DryRun = h.dryRun
 	client.Timeout = parsedTimeout
 
-	chart, err := loadChart(svc.Name)
+	chart, err := h.loadChart(svc.Name)
 	if err != nil {
 		return fmt.Errorf("failed to load in-memory chart: %s", err)
 	}
@@ -422,30 +535,26 @@ func installChart(
 
 	log.
 		Info().
-		Str("context", mainExt.K8s.Context).
-		Str("namespace", mainExt.K8s.Namespace).
+		Str("context", h.ext.K8s.Context).
+		Str("namespace", h.ext.K8s.Namespace).
 		Str("service", svc.Name).
 		Msg("successfully installed service chart")
 
 	return nil
 }
 
-func upgradeChart(
-	actionConfig *helmaction.Configuration,
-	mainExt *config.XMiniEnv,
+func (h *Helm) upgradeChart(
 	svcExt *config.XMiniEnvK8sService,
-	svc *types.ServiceConfig,
-	dryRun bool,
+	svc config.ComposeService,
 ) error {
 	values, err := svcExt.ToValuesMap()
 	if err != nil {
 		return err
 	}
 
-	defaultTimeout := "2m"
 	timeout := svcExt.DeploymentTimeout
 	if timeout == nil {
-		timeout = &defaultTimeout
+		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
 	}
 
 	parsedTimeout, err := time.ParseDuration(*timeout)
@@ -453,15 +562,15 @@ func upgradeChart(
 		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
 	}
 
-	client := helmaction.NewUpgrade(actionConfig)
-	client.Namespace = mainExt.K8s.Namespace
+	client := helmaction.NewUpgrade(h.actionConfig)
+	client.Namespace = h.ext.K8s.Namespace
 	client.Atomic = true
 	client.Wait = true
 	client.CleanupOnFail = true
-	client.DryRun = dryRun
+	client.DryRun = h.dryRun
 	client.Timeout = parsedTimeout
 
-	chart, err := loadChart(svc.Name)
+	chart, err := h.loadChart(svc.Name)
 	if err != nil {
 		return fmt.Errorf("failed to load in-memory chart: %s", err)
 	}
@@ -472,24 +581,19 @@ func upgradeChart(
 
 	log.
 		Info().
-		Str("context", mainExt.K8s.Context).
-		Str("namespace", mainExt.K8s.Namespace).
+		Str("context", h.ext.K8s.Context).
+		Str("namespace", h.ext.K8s.Namespace).
 		Str("service", svc.Name).
 		Msg("successfully upgraded service chart")
 
 	return nil
 }
 
-func uninstallChart(
-	actionConfig *helmaction.Configuration,
-	mainExt *config.XMiniEnv,
-	svc *types.ServiceConfig,
-	dryRun bool,
-) error {
-	client := helmaction.NewUninstall(actionConfig)
+func (h *Helm) uninstallChart(svc config.ComposeService) error {
+	client := helmaction.NewUninstall(h.actionConfig)
 	client.Wait = true
 	client.IgnoreNotFound = true
-	client.DryRun = dryRun
+	client.DryRun = h.dryRun
 
 	response, err := client.Run(svc.Name)
 	if err != nil {
@@ -503,7 +607,7 @@ func uninstallChart(
 
 	log.
 		Info().
-		Str("context", mainExt.K8s.Context).
+		Str("context", h.ext.K8s.Context).
 		Str("service", response.Release.Name).
 		Str("namespace", response.Release.Namespace).
 		Msg("successfully uninstalled service")
@@ -511,32 +615,8 @@ func uninstallChart(
 	return nil
 }
 
-func getHelmActionConfig(
-	extConfig *config.XMiniEnv,
-) (*helmaction.Configuration, error) {
-	settings := helmcli.New()
-	settings.SetNamespace(extConfig.K8s.Namespace)
-	settings.KubeContext = extConfig.K8s.Context
-
-	actionConfig := new(helmaction.Configuration)
-
-	if err := actionConfig.Init(
-		settings.RESTClientGetter(),
-		settings.Namespace(),
-		os.Getenv("HELM_DRIVER"),
-		log.Printf,
-	); err != nil {
-		return nil, err
-	}
-
-	return actionConfig, nil
-}
-
-func createNamespaceIfNotExists(
-	actionConfig *helmaction.Configuration,
-	namespace string,
-) error {
-	clientset, err := actionConfig.KubernetesClientSet()
+func (h *Helm) createNamespaceIfNotExists() error {
+	clientset, err := h.actionConfig.KubernetesClientSet()
 	if err != nil {
 		return err
 	}
@@ -546,7 +626,7 @@ func createNamespaceIfNotExists(
 	_, err = clientset.
 		CoreV1().
 		Namespaces().
-		Get(context.TODO(), namespace, k8smetav1.GetOptions{})
+		Get(context.TODO(), h.ext.K8s.Namespace, k8smetav1.GetOptions{})
 
 	if err != nil && k8s_errors.IsNotFound(err) {
 		create = true
@@ -563,18 +643,15 @@ func createNamespaceIfNotExists(
 		Namespaces().
 		Create(
 			context.TODO(),
-			&k8sv1.Namespace{Name: namespace},
+			&k8sv1.Namespace{Name: h.ext.K8s.Namespace},
 			k8smetav1.CreateOptions{},
 		)
 
 	return err
 }
 
-func serviceReleaseExists(
-	actionConfig *helmaction.Configuration,
-	name string,
-) bool {
-	client := helmaction.NewGet(actionConfig)
+func (h *Helm) serviceReleaseExists(name string) bool {
+	client := helmaction.NewGet(h.actionConfig)
 	release, _ := client.Run(name)
 	return release != nil
 }

@@ -126,6 +126,14 @@
     },
     "Ngrok": {
       "properties": {
+        "port": {
+          "type": "integer",
+          "description": "Exposes the specified service port publicly via ngrok. This port must match\none of the configured service ports. If ports were auto-discovered from\ndocker-compose config, this value should match the Host side of the\nmapping, not container."
+        },
+        "url": {
+          "type": "string",
+          "description": "Ngrok url configuration for the service endpoint"
+        },
         "trafficPolicy": {
           "type": "string",
           "description": "Ngrok \"on_http_request\" configuration"
@@ -133,6 +141,9 @@
       },
       "additionalProperties": false,
       "type": "object",
+      "required": [
+        "port"
+      ],
       "description": "Ngrok configuration for exposing services publicly"
     },
     "XMiniEnv": {
@@ -159,6 +170,10 @@
         "namespace": {
           "type": "string",
           "description": "Targets a specific namespace when deploying"
+        },
+        "deploymentTimeout": {
+          "type": "string",
+          "description": "Controls the Helm timeout. This is applied to all services but can be\noverriden using the service-level extension"
         }
       },
       "additionalProperties": false,
@@ -178,10 +193,6 @@
         "skip": {
           "type": "boolean",
           "description": "Prevents the targeted service from being deployed to the cluster"
-        },
-        "exposeServicePort": {
-          "type": "integer",
-          "description": "Exposes the specified service port publicly via ngrok. This port must match\none of the configured service ports. If ports were auto-discovered from\ndocker-compose config, this value should match one of the mappings for\nthe host port, not container port"
         },
         "replicas": {
           "type": "integer",

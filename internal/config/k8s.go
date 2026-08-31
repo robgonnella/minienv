@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/rs/zerolog/log"
 )
@@ -118,6 +117,9 @@ type XMiniEnvK8s struct {
 	Context string `json:"context" yaml:"context" mapstructure:"context"`
 	// Targets a specific namespace when deploying
 	Namespace string `json:"namespace" yaml:"namespace" mapstructure:"namespace"`
+	// Controls the Helm timeout. This is applied to all services but can be
+	// overriden using the service-level extension
+	DeploymentTimeout *string `json:"deploymentTimeout,omitempty" yaml:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
 }
 
 // Service level configuration for controlling Kubernetes deployment properties
@@ -132,7 +134,7 @@ type XMiniEnvK8sService struct {
 
 func NewXMiniEnvK8sService(
 	mainExt *XMiniEnv,
-	svc *types.ServiceConfig,
+	svc ComposeService,
 ) (*XMiniEnvK8sService, error) {
 	svcExt, ok := svc.Extensions[SERVICE_K8S_EXTENSION]
 	if !ok {
@@ -159,7 +161,7 @@ func NewXMiniEnvK8sService(
 func (s *XMiniEnvK8sService) resolve(
 	mainExt *XMiniEnv,
 	rawSvcExt any,
-	svc *types.ServiceConfig,
+	svc ComposeService,
 ) error {
 	if s == nil {
 		s = &XMiniEnvK8sService{}
@@ -183,7 +185,15 @@ func (s *XMiniEnvK8sService) resolve(
 
 	s.resolveHealthCheck(svc)
 	s.resolveEnvironment(svc)
-	s.resolveNgrokProperties(mainExt, svc)
+	s.resolveNgrokVolumes(mainExt, svc)
+
+	if s.DeploymentTimeout == nil {
+		if mainExt.K8s.DeploymentTimeout != nil {
+			s.DeploymentTimeout = mainExt.K8s.DeploymentTimeout
+		} else {
+			s.DeploymentTimeout = &HELM_DEFAULT_DEPLOYMENT_TIMEOUT
+		}
+	}
 
 	return nil
 }
@@ -208,8 +218,8 @@ func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
 		return false
 	}
 
-	if NGROK_AUTHTOKEN != "" && s.ExposeServicePort != nil {
-		if !hasServicePort(*s.ExposeServicePort) {
+	if NGROK_AUTHTOKEN != "" && s.Ngrok != nil {
+		if !hasServicePort(s.Ngrok.Port) {
 			return nil, fmt.Errorf(
 				"exposeServicePort must match a mapped port either in extension or" +
 					"from host port mapping in docker compose config",
@@ -218,7 +228,7 @@ func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
 
 		ngrok := map[string]any{
 			"enabled": true,
-			"port":    s.ExposeServicePort,
+			"port":    s.Ngrok.Port,
 		}
 
 		if s.Ngrok != nil && s.Ngrok.TrafficPolicy != nil {
@@ -260,15 +270,15 @@ func (s *XMiniEnvK8sService) resolveChartValues(rawSvcExt any) error {
 	return nil
 }
 
-func (s *XMiniEnvK8sService) resolveNgrokProperties(
+func (s *XMiniEnvK8sService) resolveNgrokVolumes(
 	mainExt *XMiniEnv,
-	svc *types.ServiceConfig,
+	svc ComposeService,
 ) {
 	if s.Ngrok == nil && mainExt.Ngrok != nil {
 		s.Ngrok = mainExt.Ngrok
 	}
 
-	if NGROK_AUTHTOKEN != "" && s.ExposeServicePort != nil {
+	if NGROK_AUTHTOKEN != "" && s.Ngrok != nil {
 		volumes := []map[string]any{}
 		if s.Volumes != nil {
 			volumes = slices.Concat(volumes, *s.Volumes)
@@ -279,8 +289,8 @@ func (s *XMiniEnvK8sService) resolveNgrokProperties(
 				"name": NGROK_CONFIG_MAP_NAME,
 				"items": []map[string]any{
 					{
-						"key":  NGROK_TRAFFIC_POLICY_CONFIG_KEY,
-						"path": NGROK_TRAFFIC_POLICY_CONFIG_KEY,
+						"key":  NGROK_CONFIG_KEY,
+						"path": NGROK_CONFIG_KEY,
 					},
 				},
 			},
@@ -289,7 +299,7 @@ func (s *XMiniEnvK8sService) resolveNgrokProperties(
 	}
 }
 
-func (s *XMiniEnvK8sService) resolveServiceImage(svc *types.ServiceConfig) error {
+func (s *XMiniEnvK8sService) resolveServiceImage(svc ComposeService) error {
 	split := strings.SplitN(svc.Image, ":", 2)
 	svcImageRepo := ""
 	svcImageTag := ""
@@ -333,7 +343,7 @@ func (s *XMiniEnvK8sService) resolveServiceImage(svc *types.ServiceConfig) error
 	return err
 }
 
-func (s *XMiniEnvK8sService) resolveServicePorts(svc *types.ServiceConfig) error {
+func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 	shouldCreate := true
 
 	if s.Service == nil {
@@ -400,7 +410,7 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc *types.ServiceConfig) error
 	return nil
 }
 
-func (s *XMiniEnvK8sService) resolveEnvironment(svc *types.ServiceConfig) {
+func (s *XMiniEnvK8sService) resolveEnvironment(svc ComposeService) {
 	if len(svc.Environment) > 0 {
 		mapping := map[string]string{}
 
@@ -416,7 +426,7 @@ func (s *XMiniEnvK8sService) resolveEnvironment(svc *types.ServiceConfig) {
 	}
 }
 
-func (s *XMiniEnvK8sService) resolveHealthCheck(svc *types.ServiceConfig) {
+func (s *XMiniEnvK8sService) resolveHealthCheck(svc ComposeService) {
 	if svc.HealthCheck.Disable {
 		return
 	}
