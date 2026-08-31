@@ -33,7 +33,7 @@ func main() {
 
 	serviceDefProperties := jsonschema.NewProperties()
 	serviceDefProperties.Set(
-		"x-minienv-k8s-service",
+		config.SERVICE_K8S_EXTENSION,
 		&jsonschema.Schema{Ref: xMiniEnvK8sServiceSchema.Ref},
 	)
 
@@ -61,7 +61,10 @@ func main() {
 	}
 
 	schemaProperties := jsonschema.NewProperties()
-	schemaProperties.Set("x-minienv", &jsonschema.Schema{Ref: xMiniEnvSchema.Ref})
+	schemaProperties.Set(
+		config.TOP_LEVEL_EXTENSION,
+		&jsonschema.Schema{Ref: xMiniEnvSchema.Ref},
+	)
 	schemaProperties.Set("services", &servicesSchema)
 
 	schema := jsonschema.Schema{

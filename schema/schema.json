@@ -70,6 +70,10 @@
           "type": "boolean",
           "description": "Whether or not to create a Kubernetes service account"
         },
+        "name": {
+          "type": "string",
+          "description": "The name for the service account"
+        },
         "automount": {
           "type": "boolean",
           "description": "Whether or not to automount the service account"
@@ -120,8 +124,65 @@
       ],
       "description": "Port configuration use in services and deployment pod container"
     },
-    "Values": {
+    "Ngrok": {
       "properties": {
+        "trafficPolicy": {
+          "type": "string",
+          "description": "Ngrok \"on_http_request\" configuration"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Ngrok configuration for exposing services publicly"
+    },
+    "XMiniEnv": {
+      "properties": {
+        "ngrok": {
+          "$ref": "#/$defs/Ngrok",
+          "description": "Ngrok configuration for exposing services publicly"
+        },
+        "k8s": {
+          "$ref": "#/$defs/XMiniEnvK8s",
+          "description": "K8s configuration for deploying to Kubernetes"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "XMiniEnv top-level extension configuration for deploying to various targets"
+    },
+    "XMiniEnvK8s": {
+      "properties": {
+        "context": {
+          "type": "string",
+          "description": "Targets a specific cluster when deploying"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Targets a specific namespace when deploying"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "context",
+        "namespace"
+      ],
+      "description": "Required fields for deploying to Kubernetes"
+    },
+    "XMiniEnvK8sService": {
+      "properties": {
+        "ngrok": {
+          "$ref": "#/$defs/Ngrok",
+          "description": "Ngrok configuration for exposing services publicly"
+        },
+        "skip": {
+          "type": "boolean",
+          "description": "Prevents the targeted service from being deployed to the cluster"
+        },
+        "exposeServicePort": {
+          "type": "integer",
+          "description": "Exposes the specified service port publicly via ngrok. This port must match\none of the configured service ports. If ports were auto-discovered from\ndocker-compose config, this value should match one of the mappings for\nthe host port, not container port"
+        },
         "replicas": {
           "type": "integer",
           "description": "The number of replicas for this deployment"
@@ -218,54 +279,10 @@
         "affinity": {
           "type": "object",
           "description": "Affinity configuration for the deployment pods"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "XMiniEnv": {
-      "properties": {
-        "k8s": {
-          "$ref": "#/$defs/XMiniEnvK8s",
-          "description": "K8s configuration for deploying to Kubernetes"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "description": "XMiniEnv top-level extension configuration for deploying to various targets"
-    },
-    "XMiniEnvK8s": {
-      "properties": {
-        "context": {
-          "type": "string",
-          "description": "Targets a specific cluster when deploying"
-        },
-        "namespace": {
-          "type": "string",
-          "description": "Targets a specific namespace when deploying"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "context",
-        "namespace"
-      ],
-      "description": "Required fields for deploying to Kubernetes"
-    },
-    "XMiniEnvK8sService": {
-      "properties": {
-        "skip": {
-          "type": "boolean",
-          "description": "Prevents the targeted service from being deployed to the cluster"
         },
         "deploymentTimeout": {
           "type": "string",
           "description": "Controls the Helm timeout for deploying the targeted service"
-        },
-        "values": {
-          "$ref": "#/$defs/Values",
-          "description": "Chart value overrides for the Helm deployment"
         }
       },
       "additionalProperties": false,

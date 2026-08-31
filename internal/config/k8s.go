@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,25 +19,59 @@ import (
 
 var urlRegex = regexp.MustCompile(`(?m)http:\/\/localhost(:?\:\d+)?(:?\/.*)?`)
 
-// Required fields for deploying to Kubernetes
-type XMiniEnvK8s struct {
-	// Targets a specific cluster when deploying
-	Context string `json:"context" yaml:"context" mapstructure:"context"`
-	// Targets a specific namespace when deploying
-	Namespace string `json:"namespace" yaml:"namespace" mapstructure:"namespace"`
+// Configuration for service image
+type ChartImage struct {
+	// Image Repository for the service image
+	Repository string `json:"repository" yaml:"repository" mapstructure:"repository"`
+	// PullPolicy for this image
+	PullPolicy *string `json:"pullPolicy,omitempty" yaml:"pullPolicy,omitempty" mapstructure:"pullPolicy,omitempty"`
+	// Image tag for the service image
+	Tag string `json:"tag" yaml:"tag" mapstructure:"tag"`
 }
 
-// Service level configuration for controlling Kubernetes deployment properties
-type XMiniEnvK8sService struct {
-	// Prevents the targeted service from being deployed to the cluster
-	Skip *bool `json:"skip,omitempty" yaml:"skip,omitempty" mapstructure:"skip,omitempty"`
-	// Controls the Helm timeout for deploying the targeted service
-	DeploymentTimeout *string `json:"deploymentTimeout,omitempty" yaml:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
-	// Chart value overrides for the Helm deployment
-	Values *Values `json:"values,omitempty" yaml:"values,omitempty" mapstructure:"values,omitempty"`
+// Pull secrets to enable pulling private images
+type ChartImagePullSecret struct {
+	// The name of the secret for pulling images
+	Name string `json:"name" yaml:"name" mapstructure:"name"`
 }
 
-type Values struct {
+// ServiceAccount configuration for the deployment service
+type ChartServiceAccount struct {
+	// Whether or not to create a Kubernetes service account
+	Create *bool `json:"create,omitempty" yaml:"create,omitempty" mapstructure:"create,omitempty"`
+	// The name for the service account
+	Name *string `json:"name,omitempty" yaml:"name,omitempty" mapstructure:"name,omitempty"`
+	// Whether or not to automount the service account
+	Automount *bool `json:"automount,omitempty" yaml:"automount,omitempty" mapstructure:"automount,omitempty"`
+	// Additional annotations for the service account
+	Annotations *map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty" mapstructure:"annotations,omitempty"`
+}
+
+// Port configuration use in services and deployment pod container
+type ChartServicePort struct {
+	// Name of the container port
+	ContainerPortName string `json:"containerPortName" yaml:"containerPortName" mapstructure:"containerPortName"`
+	// Container port to expose to service
+	ContainerPort uint16 `json:"containerPort" yaml:"containerPort" mapstructure:"containerPort"`
+	// Name of the service port
+	ServicePortName string `json:"servicePortName" yaml:"servicePortName" mapstructure:"servicePortName"`
+	// Service port to map to the container port
+	ServicePort uint16 `json:"servicePort" yaml:"servicePort" mapstructure:"servicePort"`
+	// Protocol to use for these ports
+	Protocol string `json:"protocol" yaml:"protocol" mapstructure:"protocol"`
+}
+
+// Service configuration
+type ChartService struct {
+	// Whether or not to create a Kubernetes service
+	Create *bool `json:"create,omitempty" yaml:"create,omitempty" mapstructure:"create,omitempty"`
+	// The type of service to create
+	ServiceType *string `json:"type,omitempty" yaml:"type,omitempty" mapstructure:"type,omitempty"`
+	// The ports to associate with pod container and service mapping
+	Ports []ChartServicePort `json:"ports" yaml:"ports" mapstructure:"ports"`
+}
+
+type ChartValues struct {
 	// The number of replicas for this deployment
 	Replicas *uint8 `json:"replicas,omitempty" yaml:"replicas,omitempty" mapstructure:"replicas,omitempty,omitempty"`
 	// The image for this deployment. Will try to use compose service image if not set
@@ -77,90 +112,184 @@ type Values struct {
 	Affinity *map[string]any `json:"affinity,omitempty" yaml:"affinity,omitempty" mapstructure:"affinity,omitempty"`
 }
 
-// Configuration for service image
-type ChartImage struct {
-	// Image Repository for the service image
-	Repository string `json:"repository" yaml:"repository" mapstructure:"repository"`
-	// PullPolicy for this image
-	PullPolicy *string `json:"pullPolicy,omitempty" yaml:"pullPolicy,omitempty" mapstructure:"pullPolicy,omitempty"`
-	// Image tag for the service image
-	Tag string `json:"tag" yaml:"tag" mapstructure:"tag"`
+// Required fields for deploying to Kubernetes
+type XMiniEnvK8s struct {
+	// Targets a specific cluster when deploying
+	Context string `json:"context" yaml:"context" mapstructure:"context"`
+	// Targets a specific namespace when deploying
+	Namespace string `json:"namespace" yaml:"namespace" mapstructure:"namespace"`
 }
 
-// Pull secrets to enable pulling private images
-type ChartImagePullSecret struct {
-	// The name of the secret for pulling images
-	Name string `json:"name" yaml:"name" mapstructure:"name"`
+// Service level configuration for controlling Kubernetes deployment properties
+type XMiniEnvK8sService struct {
+	// Common properties
+	*XMiniEnvCommonService
+	// Chart value overrides for the Helm deployment
+	*ChartValues
+	// Controls the Helm timeout for deploying the targeted service
+	DeploymentTimeout *string `json:"deploymentTimeout,omitempty" yaml:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
 }
 
-// ServiceAccount configuration for the deployment service
-type ChartServiceAccount struct {
-	// Whether or not to create a Kubernetes service account
-	Create *bool `json:"create,omitempty" yaml:"create,omitempty" mapstructure:"create,omitempty"`
-	// Whether or not to automount the service account
-	Automount *bool `json:"automount,omitempty" yaml:"automount,omitempty" mapstructure:"automount,omitempty"`
-	// Additional annotations for the service account
-	Annotations *map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty" mapstructure:"annotations,omitempty"`
-}
-
-// Port configuration use in services and deployment pod container
-type ChartServicePort struct {
-	// Name of the container port
-	ContainerPortName string `json:"containerPortName" yaml:"containerPortName" mapstructure:"containerPortName"`
-	// Container port to expose to service
-	ContainerPort uint16 `json:"containerPort" yaml:"containerPort" mapstructure:"containerPort"`
-	// Name of the service port
-	ServicePortName string `json:"servicePortName" yaml:"servicePortName" mapstructure:"servicePortName"`
-	// Service port to map to the container port
-	ServicePort uint16 `json:"servicePort" yaml:"servicePort" mapstructure:"servicePort"`
-	// Protocol to use for these ports
-	Protocol string `json:"protocol" yaml:"protocol" mapstructure:"protocol"`
-}
-
-// Service configuration
-type ChartService struct {
-	// Whether or not to create a Kubernetes service
-	Create *bool `json:"create,omitempty" yaml:"create,omitempty" mapstructure:"create,omitempty"`
-	// The type of service to create
-	ServiceType *string `json:"type,omitempty" yaml:"type,omitempty" mapstructure:"type,omitempty"`
-	// The ports to associate with pod container and service mapping
-	Ports []ChartServicePort `json:"ports" yaml:"ports" mapstructure:"ports"`
-}
-
-func (v *Values) Resolve(
+func NewXMiniEnvK8sService(
+	mainExt *XMiniEnv,
 	svc *types.ServiceConfig,
-) (map[string]any, error) {
-	if v == nil {
-		v = &Values{}
+) (*XMiniEnvK8sService, error) {
+	svcExt, ok := svc.Extensions[SERVICE_K8S_EXTENSION]
+	if !ok {
+		svcExt = map[string]any{}
 	}
 
-	if err := v.resolveServiceImage(svc); err != nil {
+	log.Info().Str("service", svc.Name).Msg("processing service")
+
+	svcExtConfig := &XMiniEnvK8sService{}
+	if err := mapstructure.Decode(svcExt, svcExtConfig); err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse x-minienv-k8s-service extension: %s",
+			err,
+		)
+	}
+
+	if err := svcExtConfig.resolve(mainExt, svcExt, svc); err != nil {
 		return nil, err
 	}
 
-	if err := v.resolveServicePorts(svc); err != nil {
-		return nil, err
+	return svcExtConfig, nil
+}
+
+func (s *XMiniEnvK8sService) resolve(
+	mainExt *XMiniEnv,
+	rawSvcExt any,
+	svc *types.ServiceConfig,
+) error {
+	if s == nil {
+		s = &XMiniEnvK8sService{}
 	}
 
-	v.resolveHealthCheck(svc)
-	v.resolveEnvironment(svc)
+	if err := s.resolveCommonProperties(rawSvcExt); err != nil {
+		return err
+	}
 
+	if err := s.resolveChartValues(rawSvcExt); err != nil {
+		return err
+	}
+
+	if err := s.resolveServiceImage(svc); err != nil {
+		return err
+	}
+
+	if err := s.resolveServicePorts(svc); err != nil {
+		return err
+	}
+
+	s.resolveHealthCheck(svc)
+	s.resolveEnvironment(svc)
+	s.resolveNgrokProperties(mainExt, svc)
+
+	return nil
+}
+
+func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
 	var values map[string]any
 
-	if err := mapstructure.Decode(v, &values); err != nil {
+	if err := mapstructure.Decode(s.ChartValues, &values); err != nil {
 		return nil, fmt.Errorf("failed to resolve chart values: %s", err)
 	}
 
-	if err := v.decodeNestedStructures(values); err != nil {
+	if err := s.decodeNestedStructures(values); err != nil {
 		return nil, err
+	}
+
+	hasServicePort := func(p uint16) bool {
+		for _, svcPrt := range s.Service.Ports {
+			if svcPrt.ServicePort == p {
+				return true
+			}
+		}
+		return false
+	}
+
+	if NGROK_AUTHTOKEN != "" && s.ExposeServicePort != nil {
+		if !hasServicePort(*s.ExposeServicePort) {
+			return nil, fmt.Errorf(
+				"exposeServicePort must match a mapped port either in extension or" +
+					"from host port mapping in docker compose config",
+			)
+		}
+
+		ngrok := map[string]any{
+			"enabled": true,
+			"port":    s.ExposeServicePort,
+		}
+
+		if s.Ngrok != nil && s.Ngrok.TrafficPolicy != nil {
+			ngrok["trafficPolicy"] = s.Ngrok.TrafficPolicy
+		}
+
+		values["ngrok"] = ngrok
 	}
 
 	log.Info().Fields(values).Msg("resolved chart values")
 
 	return values, nil
+
 }
 
-func (v *Values) resolveServiceImage(svc *types.ServiceConfig) error {
+func (s *XMiniEnvK8sService) resolveCommonProperties(
+	rawSvcExt any,
+) error {
+	common := &XMiniEnvCommonService{}
+	if err := mapstructure.Decode(rawSvcExt, common); err != nil {
+		return fmt.Errorf(
+			"failed to parse common service properties: %s",
+			err,
+		)
+	}
+	s.XMiniEnvCommonService = common
+	return nil
+}
+
+func (s *XMiniEnvK8sService) resolveChartValues(rawSvcExt any) error {
+	chartValues := &ChartValues{}
+	if err := mapstructure.Decode(rawSvcExt, chartValues); err != nil {
+		return fmt.Errorf(
+			"failed to parse k8s chart values: %s",
+			err,
+		)
+	}
+	s.ChartValues = chartValues
+	return nil
+}
+
+func (s *XMiniEnvK8sService) resolveNgrokProperties(
+	mainExt *XMiniEnv,
+	svc *types.ServiceConfig,
+) {
+	if s.Ngrok == nil && mainExt.Ngrok != nil {
+		s.Ngrok = mainExt.Ngrok
+	}
+
+	if NGROK_AUTHTOKEN != "" && s.ExposeServicePort != nil {
+		volumes := []map[string]any{}
+		if s.Volumes != nil {
+			volumes = slices.Concat(volumes, *s.Volumes)
+		}
+		volumes = append(volumes, map[string]any{
+			"name": NGROK_CONFIG_MAP_NAME,
+			"configMap": map[string]any{
+				"name": NGROK_CONFIG_MAP_NAME,
+				"items": []map[string]any{
+					{
+						"key":  NGROK_TRAFFIC_POLICY_CONFIG_KEY,
+						"path": NGROK_TRAFFIC_POLICY_CONFIG_KEY,
+					},
+				},
+			},
+		})
+		s.Volumes = &volumes
+	}
+}
+
+func (s *XMiniEnvK8sService) resolveServiceImage(svc *types.ServiceConfig) error {
 	split := strings.SplitN(svc.Image, ":", 2)
 	svcImageRepo := ""
 	svcImageTag := ""
@@ -170,31 +299,31 @@ func (v *Values) resolveServiceImage(svc *types.ServiceConfig) error {
 		svcImageTag = split[1]
 	}
 
-	if v.Image == nil {
-		v.Image = &ChartImage{
+	if s.Image == nil {
+		s.Image = &ChartImage{
 			Repository: svcImageRepo,
 			Tag:        svcImageTag,
 		}
 	}
 
-	if v.Image.Repository == "" {
-		v.Image.Repository = svcImageRepo
+	if s.Image.Repository == "" {
+		s.Image.Repository = svcImageRepo
 	}
 
-	if v.Image.Tag == "" {
-		v.Image.Tag = svcImageTag
+	if s.Image.Tag == "" {
+		s.Image.Tag = svcImageTag
 	}
 
 	var err error
 
-	if v.Image.Repository == "" {
+	if s.Image.Repository == "" {
 		err = errors.Join(
 			err,
 			fmt.Errorf("image.repository must be specified in service extension"),
 		)
 	}
 
-	if v.Image.Tag == "" {
+	if s.Image.Tag == "" {
 		err = errors.Join(
 			err,
 			fmt.Errorf("image.tag must be specified in service extension"),
@@ -204,11 +333,11 @@ func (v *Values) resolveServiceImage(svc *types.ServiceConfig) error {
 	return err
 }
 
-func (v *Values) resolveServicePorts(svc *types.ServiceConfig) error {
+func (s *XMiniEnvK8sService) resolveServicePorts(svc *types.ServiceConfig) error {
 	shouldCreate := true
 
-	if v.Service == nil {
-		v.Service = &ChartService{
+	if s.Service == nil {
+		s.Service = &ChartService{
 			Create: &shouldCreate,
 			Ports:  []ChartServicePort{},
 		}
@@ -216,19 +345,19 @@ func (v *Values) resolveServicePorts(svc *types.ServiceConfig) error {
 
 	if len(svc.Ports) == 0 {
 		shouldCreate = false
-		v.Service.Create = &shouldCreate
+		s.Service.Create = &shouldCreate
 
-		if v.ServiceAccount == nil {
-			v.ServiceAccount = &ChartServiceAccount{Create: &shouldCreate}
+		if s.ServiceAccount == nil {
+			s.ServiceAccount = &ChartServiceAccount{Create: &shouldCreate}
 		} else {
-			v.ServiceAccount.Create = &shouldCreate
+			s.ServiceAccount.Create = &shouldCreate
 		}
 
 		return nil
 	}
 
 	extensionHasPort := func(ctrPrt, svcPrt uint16) bool {
-		for _, extPrt := range v.Service.Ports {
+		for _, extPrt := range s.Service.Ports {
 			if extPrt.ContainerPort == ctrPrt && extPrt.ServicePort == svcPrt {
 				return true
 			}
@@ -258,7 +387,7 @@ func (v *Values) resolveServicePorts(svc *types.ServiceConfig) error {
 		servicePortName := fmt.Sprintf("p%d", published16)
 
 		if !extensionHasPort(containerPort, published16) {
-			v.Service.Ports = append(v.Service.Ports, ChartServicePort{
+			s.Service.Ports = append(s.Service.Ports, ChartServicePort{
 				ContainerPortName: containerPortName,
 				ContainerPort:     containerPort,
 				ServicePort:       published16,
@@ -271,7 +400,7 @@ func (v *Values) resolveServicePorts(svc *types.ServiceConfig) error {
 	return nil
 }
 
-func (v *Values) resolveEnvironment(svc *types.ServiceConfig) {
+func (s *XMiniEnvK8sService) resolveEnvironment(svc *types.ServiceConfig) {
 	if len(svc.Environment) > 0 {
 		mapping := map[string]string{}
 
@@ -279,15 +408,15 @@ func (v *Values) resolveEnvironment(svc *types.ServiceConfig) {
 			mapping[key] = *value
 		}
 
-		if v.Env != nil {
-			maps.Copy(mapping, *v.Env)
+		if s.Env != nil {
+			maps.Copy(mapping, *s.Env)
 		}
 
-		v.Env = &mapping
+		s.Env = &mapping
 	}
 }
 
-func (v *Values) resolveHealthCheck(svc *types.ServiceConfig) {
+func (s *XMiniEnvK8sService) resolveHealthCheck(svc *types.ServiceConfig) {
 	if svc.HealthCheck.Disable {
 		return
 	}
@@ -343,6 +472,15 @@ func (v *Values) resolveHealthCheck(svc *types.ServiceConfig) {
 	var livenessProbe map[string]any = nil
 	var readinessProbe map[string]any = nil
 
+	getContainerPortName := func(portStr string) string {
+		for _, p := range s.Service.Ports {
+			if strconv.Itoa(int(p.ContainerPort)) == portStr {
+				return p.ContainerPortName
+			}
+		}
+		return ""
+	}
+
 	createExecProbe := func() map[string]any {
 		return map[string]any{
 			"exec": map[string]any{
@@ -356,16 +494,24 @@ func (v *Values) resolveHealthCheck(svc *types.ServiceConfig) {
 	}
 
 	createHttpGetProbe := func(u *url.URL) map[string]any {
-		port := u.Port()
-		if port == "" {
-			port = "p80"
-		} else {
-			port = fmt.Sprintf("p%s", port)
+		defaultPort := "80"
+
+		if u.Scheme == "https" {
+			defaultPort = "443"
 		}
+
+		port := u.Port()
+
+		if port == "" {
+			port = defaultPort
+		}
+
+		name := getContainerPortName(port)
+
 		return map[string]any{
 			"httpGet": map[string]any{
 				"path": u.Path,
-				"port": port,
+				"port": name,
 			},
 		}
 	}
@@ -416,25 +562,25 @@ func (v *Values) resolveHealthCheck(svc *types.ServiceConfig) {
 		readinessProbe = createExecProbe()
 	}
 
-	if v.StartupProbe == nil && startupProbe != nil {
+	if s.StartupProbe == nil && startupProbe != nil {
 		addStartUpIntervals(startupProbe)
-		v.StartupProbe = &startupProbe
+		s.StartupProbe = &startupProbe
 	}
 
-	if v.LivenessProbe == nil && livenessProbe != nil {
+	if s.LivenessProbe == nil && livenessProbe != nil {
 		addLivenessReadinessIntervals(livenessProbe)
-		v.LivenessProbe = &livenessProbe
+		s.LivenessProbe = &livenessProbe
 	}
 
-	if v.ReadinessProbe == nil && readinessProbe != nil {
+	if s.ReadinessProbe == nil && readinessProbe != nil {
 		addLivenessReadinessIntervals(readinessProbe)
-		v.ReadinessProbe = &readinessProbe
+		s.ReadinessProbe = &readinessProbe
 	}
 }
 
-func (v *Values) decodeNestedStructures(values map[string]any) error {
+func (s *XMiniEnvK8sService) decodeNestedStructures(values map[string]any) error {
 	servicePorts := []map[string]any{}
-	for _, port := range v.Service.Ports {
+	for _, port := range s.Service.Ports {
 		var mapPort map[string]any
 		if err := mapstructure.Decode(port, &mapPort); err != nil {
 			return fmt.Errorf("failed to resolve service port: %s", err)
@@ -447,9 +593,9 @@ func (v *Values) decodeNestedStructures(values map[string]any) error {
 		values["service"] = mapSvc
 	}
 
-	if v.ImagePullSecrets != nil {
+	if s.ImagePullSecrets != nil {
 		pullSecrets := []map[string]any{}
-		for _, secret := range *v.ImagePullSecrets {
+		for _, secret := range *s.ImagePullSecrets {
 			var mapSecret map[string]any
 			if err := mapstructure.Decode(secret, &mapSecret); err != nil {
 				return fmt.Errorf("failed to resolve imagePullSecret: %s", err)
