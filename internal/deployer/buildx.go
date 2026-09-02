@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"text/template"
 
 	"github.com/rs/zerolog/log"
 )
@@ -39,12 +40,20 @@ func NewBuildx(dryRun bool) *Buildx {
 
 func (b *Buildx) BuildAndPush(services []BakeService) error {
 	filtered := b.getFilteredList(services)
-	hclString := b.hcl(filtered)
+
+	hclString, err := b.hcl(filtered)
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msgf("building images: \n%s", hclString)
+
 	args := []string{"buildx", "bake"}
 	if !b.dryRun {
 		args = append(args, "--push")
 	}
 	args = append(args, "-f", "-")
+
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = strings.NewReader(hclString)
 	cmd.Stdout = os.Stdout
@@ -72,58 +81,52 @@ func (b *Buildx) getFilteredList(services []BakeService) []BakeService {
 	})
 }
 
-func (b *Buildx) hcl(services []BakeService) string {
-	groupTargets := "["
-	serviceTargets := []string{}
+func (b *Buildx) hcl(services []BakeService) (string, error) {
+	tplStr := b.template()
 
-	for i, s := range services {
-		log.Info().Fields(s.LogFields()).Msg("baking service")
-
-		comma := ","
-		if i == len(services)-1 {
-			comma = ""
-		}
-
-		groupTargets = fmt.Sprintf("%s\"%s\"%s", groupTargets, s.Name, comma)
-
-		platforms := "["
-		for i, p := range s.Platforms {
-			platformComma := ","
-			if i == len(s.Platforms)-1 {
-				platformComma = ""
+	tplFuncs := template.FuncMap{
+		"joinServiceNamesQuoted": func(services []BakeService) string {
+			names := []string{}
+			for _, s := range services {
+				names = append(names, fmt.Sprintf("%q", s.Name))
 			}
-			platforms = fmt.Sprintf("%s\"%s\"%s", platforms, p, platformComma)
-		}
-		platforms += "]"
-
-		tag := strings.TrimSpace(fmt.Sprintf("%s:%s", s.Registry, s.Tag))
-
-		serviceTarget := fmt.Sprintf(`
-target "%s" {
-  context = "%s"
-  dockerfile = "%s"
-  tags = ["%s"]
-  platforms = %s`, s.Name, s.Context, s.Dockerfile, tag, platforms)
-
-		if len(s.Args) > 0 {
-			serviceTarget += "\n  args = {"
-			for k, v := range s.Args {
-				serviceTarget = fmt.Sprintf("%s\n    %s = %s", serviceTarget, k, v)
+			return strings.Join(names, ", ")
+		},
+		"joinQuoted": func(elems []string) string {
+			for i, s := range elems {
+				elems[i] = fmt.Sprintf("%q", s)
 			}
-			serviceTarget += "\n  }"
-		}
-
-		serviceTarget += "\n}"
-		serviceTargets = append(serviceTargets, serviceTarget)
+			return strings.Join(elems, ", ")
+		},
 	}
 
-	groupTargets += "]"
+	tmpl, err := template.New("tmpl").Funcs(tplFuncs).Parse(tplStr)
+	if err != nil {
+		return "", err
+	}
 
-	group := fmt.Sprintf(`
-group "default" {
-  targets = %s
+	var out strings.Builder
+	err = tmpl.Execute(&out, map[string]any{"Services": services})
+	if err != nil {
+		return "", err
+	}
+
+	return out.String(), nil
 }
-`, groupTargets)
 
-	return fmt.Sprintf("%s%s", group, strings.Join(serviceTargets, "\n\n"))
+func (b *Buildx) template() string {
+	return `
+group "default" {
+	targets = [{{ .Services | joinServiceNamesQuoted }}]
+}
+
+{{ range .Services -}}
+target "{{ .Name }}" {
+	context = "{{ .Context }}"
+	dockerfile = "{{ .Dockerfile }}"
+	tags = ["{{ .Registry }}:{{ .Tag }}"]
+	platforms = [{{ .Platforms | joinQuoted }}]
+}
+{{- end }}
+`
 }
