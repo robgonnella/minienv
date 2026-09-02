@@ -6,10 +6,16 @@ import "github.com/compose-spec/compose-go/v2/types"
 type ComposeService = types.ServiceConfig
 type ComposeProject = types.Project
 
+// Ngrok configuration applied to all services unless overridden in service
+type NgrokTopLevel struct {
+	// Ngrok "on_http_request" configuration
+	TrafficPolicy string `json:"trafficPolicy,omitempty" yaml:"trafficPolicy,omitempty" mapstructure:"trafficPolicy,omitempty"`
+}
+
 // XMiniEnv top-level extension configuration for deploying to various targets
 type XMiniEnv struct {
 	// Ngrok configuration for exposing services publicly
-	Ngrok *Ngrok `json:"ngrok,omitempty" yaml:"ngrok,omitempty" mapstructure:"ngrok,omitempty"`
+	Ngrok *NgrokTopLevel `json:"ngrok,omitempty" yaml:"ngrok,omitempty" mapstructure:"ngrok,omitempty"`
 	// K8s configuration for deploying to Kubernetes
 	K8s *XMiniEnvK8s `json:"k8s,omitempty" yaml:"k8s,omitempty" mapstructure:"k8s,omitempty"`
 }

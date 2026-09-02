@@ -21,6 +21,7 @@ import (
 type Helm struct {
 	ext          *config.XMiniEnv
 	actionConfig *helmaction.Configuration
+	buildx       *Buildx
 	dryRun       bool
 }
 
@@ -28,6 +29,7 @@ func NewHelm(ext *config.XMiniEnv, dryRun bool) *Helm {
 	return &Helm{
 		ext:          ext,
 		actionConfig: nil,
+		buildx:       NewBuildx(dryRun),
 		dryRun:       dryRun,
 	}
 }
@@ -73,6 +75,10 @@ func (h *Helm) Deploy(project *config.ComposeProject) error {
 		return nil
 	}
 
+	if err := h.buildAndPushServiceImages(project); err != nil {
+		return err
+	}
+
 	if err := h.createNamespaceIfNotExists(); err != nil {
 		return err
 	}
@@ -113,6 +119,48 @@ func (h *Helm) Destroy(project *config.ComposeProject) error {
 	return nil
 }
 
+func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
+	bake := []BakeService{}
+	for _, svc := range project.Services {
+		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc)
+		if err != nil {
+			return err
+		}
+		if svcExt.Skip != nil && *svcExt.Skip {
+			log.Warn().Str("service", svc.Name).Msg("detected skip: skipping")
+			continue
+		}
+		repo := ""
+		tag := ""
+		platforms := []string{"linux/amd64"}
+
+		if svcExt.Image != nil {
+			repo = svcExt.Image.Repository
+			tag = svcExt.Image.Tag
+			if svcExt.Image.Platforms != nil {
+				platforms = *svcExt.Image.Platforms
+			}
+		}
+		if svc.Build != nil {
+			bake = append(bake, BakeService{
+				Name:       svc.Name,
+				Registry:   repo,
+				Tag:        tag,
+				Context:    svc.Build.Context,
+				Dockerfile: svc.Build.Dockerfile,
+				Platforms:  platforms,
+				Args:       svc.Build.Args.ToMapping(),
+			})
+		}
+	}
+
+	if len(bake) > 0 {
+		return h.buildx.BuildAndPush(bake)
+	}
+
+	return nil
+}
+
 func (h *Helm) upgradeOrInstallService(
 	svcExt *config.XMiniEnvK8sService,
 	svc config.ComposeService,
@@ -126,6 +174,167 @@ func (h *Helm) upgradeOrInstallService(
 		log.Info().Str("release", svc.Name).Msg("installing release")
 		return h.installChart(svcExt, svc)
 	}
+}
+
+func (h *Helm) installChart(
+	svcExt *config.XMiniEnvK8sService,
+	svc config.ComposeService,
+) error {
+	values, err := svcExt.ToValuesMap()
+	if err != nil {
+		return err
+	}
+
+	timeout := svcExt.DeploymentTimeout
+	if timeout == nil {
+		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
+	}
+
+	parsedTimeout, err := time.ParseDuration(*timeout)
+	if err != nil {
+		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
+	}
+
+	client := helmaction.NewInstall(h.actionConfig)
+	client.ReleaseName = svc.Name
+	client.Namespace = h.ext.K8s.Namespace
+	client.CreateNamespace = false
+	client.Wait = true
+	client.Atomic = true
+	client.Wait = true
+	client.DryRun = h.dryRun
+	client.Timeout = parsedTimeout
+
+	chart, err := h.loadChart(svc.Name)
+	if err != nil {
+		return fmt.Errorf("failed to load in-memory chart: %s", err)
+	}
+
+	if _, err := client.Run(chart, values); err != nil {
+		return fmt.Errorf("failed to install service chart %s: %s", svc.Name, err)
+	}
+
+	log.
+		Info().
+		Str("context", h.ext.K8s.Context).
+		Str("namespace", h.ext.K8s.Namespace).
+		Str("service", svc.Name).
+		Msg("successfully installed service chart")
+
+	return nil
+}
+
+func (h *Helm) upgradeChart(
+	svcExt *config.XMiniEnvK8sService,
+	svc config.ComposeService,
+) error {
+	values, err := svcExt.ToValuesMap()
+	if err != nil {
+		return err
+	}
+
+	timeout := svcExt.DeploymentTimeout
+	if timeout == nil {
+		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
+	}
+
+	parsedTimeout, err := time.ParseDuration(*timeout)
+	if err != nil {
+		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
+	}
+
+	client := helmaction.NewUpgrade(h.actionConfig)
+	client.Namespace = h.ext.K8s.Namespace
+	client.Atomic = true
+	client.Wait = true
+	client.CleanupOnFail = true
+	client.DryRun = h.dryRun
+	client.Timeout = parsedTimeout
+
+	chart, err := h.loadChart(svc.Name)
+	if err != nil {
+		return fmt.Errorf("failed to load in-memory chart: %s", err)
+	}
+
+	if _, err := client.Run(svc.Name, chart, values); err != nil {
+		return fmt.Errorf("failed to upgrade service chart %s: %s", svc.Name, err)
+	}
+
+	log.
+		Info().
+		Str("context", h.ext.K8s.Context).
+		Str("namespace", h.ext.K8s.Namespace).
+		Str("service", svc.Name).
+		Msg("successfully upgraded service chart")
+
+	return nil
+}
+
+func (h *Helm) uninstallChart(svc config.ComposeService) error {
+	client := helmaction.NewUninstall(h.actionConfig)
+	client.Wait = true
+	client.IgnoreNotFound = true
+	client.DryRun = h.dryRun
+
+	response, err := client.Run(svc.Name)
+	if err != nil {
+		return err
+	}
+
+	if response == nil || response.Release == nil {
+		log.Info().Str("service", svc.Name).Msg("no release found for service")
+		return nil
+	}
+
+	log.
+		Info().
+		Str("context", h.ext.K8s.Context).
+		Str("service", response.Release.Name).
+		Str("namespace", response.Release.Namespace).
+		Msg("successfully uninstalled service")
+
+	return nil
+}
+
+func (h *Helm) createNamespaceIfNotExists() error {
+	clientset, err := h.actionConfig.KubernetesClientSet()
+	if err != nil {
+		return err
+	}
+
+	create := false
+
+	_, err = clientset.
+		CoreV1().
+		Namespaces().
+		Get(context.TODO(), h.ext.K8s.Namespace, k8smetav1.GetOptions{})
+
+	if err != nil && k8s_errors.IsNotFound(err) {
+		create = true
+	} else if err != nil {
+		return err
+	}
+
+	if !create {
+		return nil
+	}
+
+	_, err = clientset.
+		CoreV1().
+		Namespaces().
+		Create(
+			context.TODO(),
+			&k8sv1.Namespace{Name: h.ext.K8s.Namespace},
+			k8smetav1.CreateOptions{},
+		)
+
+	return err
+}
+
+func (h *Helm) serviceReleaseExists(name string) bool {
+	client := helmaction.NewGet(h.actionConfig)
+	release, _ := client.Run(name)
+	return release != nil
 }
 
 func (h *Helm) loadChart(svcName string) (*helmchart.Chart, error) {
@@ -493,165 +702,4 @@ metadata:
 automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
 {{- end -}}
 `, svcName)
-}
-
-func (h *Helm) installChart(
-	svcExt *config.XMiniEnvK8sService,
-	svc config.ComposeService,
-) error {
-	values, err := svcExt.ToValuesMap()
-	if err != nil {
-		return err
-	}
-
-	timeout := svcExt.DeploymentTimeout
-	if timeout == nil {
-		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
-	}
-
-	parsedTimeout, err := time.ParseDuration(*timeout)
-	if err != nil {
-		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
-	}
-
-	client := helmaction.NewInstall(h.actionConfig)
-	client.ReleaseName = svc.Name
-	client.Namespace = h.ext.K8s.Namespace
-	client.CreateNamespace = false
-	client.Wait = true
-	client.Atomic = true
-	client.Wait = true
-	client.DryRun = h.dryRun
-	client.Timeout = parsedTimeout
-
-	chart, err := h.loadChart(svc.Name)
-	if err != nil {
-		return fmt.Errorf("failed to load in-memory chart: %s", err)
-	}
-
-	if _, err := client.Run(chart, values); err != nil {
-		return fmt.Errorf("failed to install service chart %s: %s", svc.Name, err)
-	}
-
-	log.
-		Info().
-		Str("context", h.ext.K8s.Context).
-		Str("namespace", h.ext.K8s.Namespace).
-		Str("service", svc.Name).
-		Msg("successfully installed service chart")
-
-	return nil
-}
-
-func (h *Helm) upgradeChart(
-	svcExt *config.XMiniEnvK8sService,
-	svc config.ComposeService,
-) error {
-	values, err := svcExt.ToValuesMap()
-	if err != nil {
-		return err
-	}
-
-	timeout := svcExt.DeploymentTimeout
-	if timeout == nil {
-		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
-	}
-
-	parsedTimeout, err := time.ParseDuration(*timeout)
-	if err != nil {
-		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
-	}
-
-	client := helmaction.NewUpgrade(h.actionConfig)
-	client.Namespace = h.ext.K8s.Namespace
-	client.Atomic = true
-	client.Wait = true
-	client.CleanupOnFail = true
-	client.DryRun = h.dryRun
-	client.Timeout = parsedTimeout
-
-	chart, err := h.loadChart(svc.Name)
-	if err != nil {
-		return fmt.Errorf("failed to load in-memory chart: %s", err)
-	}
-
-	if _, err := client.Run(svc.Name, chart, values); err != nil {
-		return fmt.Errorf("failed to upgrade service chart %s: %s", svc.Name, err)
-	}
-
-	log.
-		Info().
-		Str("context", h.ext.K8s.Context).
-		Str("namespace", h.ext.K8s.Namespace).
-		Str("service", svc.Name).
-		Msg("successfully upgraded service chart")
-
-	return nil
-}
-
-func (h *Helm) uninstallChart(svc config.ComposeService) error {
-	client := helmaction.NewUninstall(h.actionConfig)
-	client.Wait = true
-	client.IgnoreNotFound = true
-	client.DryRun = h.dryRun
-
-	response, err := client.Run(svc.Name)
-	if err != nil {
-		return err
-	}
-
-	if response == nil || response.Release == nil {
-		log.Info().Str("service", svc.Name).Msg("no release found for service")
-		return nil
-	}
-
-	log.
-		Info().
-		Str("context", h.ext.K8s.Context).
-		Str("service", response.Release.Name).
-		Str("namespace", response.Release.Namespace).
-		Msg("successfully uninstalled service")
-
-	return nil
-}
-
-func (h *Helm) createNamespaceIfNotExists() error {
-	clientset, err := h.actionConfig.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
-
-	create := false
-
-	_, err = clientset.
-		CoreV1().
-		Namespaces().
-		Get(context.TODO(), h.ext.K8s.Namespace, k8smetav1.GetOptions{})
-
-	if err != nil && k8s_errors.IsNotFound(err) {
-		create = true
-	} else if err != nil {
-		return err
-	}
-
-	if !create {
-		return nil
-	}
-
-	_, err = clientset.
-		CoreV1().
-		Namespaces().
-		Create(
-			context.TODO(),
-			&k8sv1.Namespace{Name: h.ext.K8s.Namespace},
-			k8smetav1.CreateOptions{},
-		)
-
-	return err
-}
-
-func (h *Helm) serviceReleaseExists(name string) bool {
-	client := helmaction.NewGet(h.actionConfig)
-	release, _ := client.Run(name)
-	return release != nil
 }

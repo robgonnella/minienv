@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"net/url"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -26,6 +27,8 @@ type ChartImage struct {
 	PullPolicy *string `json:"pullPolicy,omitempty" yaml:"pullPolicy,omitempty" mapstructure:"pullPolicy,omitempty"`
 	// Image tag for the service image
 	Tag string `json:"tag" yaml:"tag" mapstructure:"tag"`
+	// The platforms for which to build and push default [linux/amd64])
+	Platforms *[]string `json:"platforms,omitempty" yaml:"platforms,omitempty" mapstructure:"platforms,omitempty"`
 }
 
 // Pull secrets to enable pulling private images
@@ -185,7 +188,7 @@ func (s *XMiniEnvK8sService) resolve(
 
 	s.resolveHealthCheck(svc)
 	s.resolveEnvironment(svc)
-	s.resolveNgrokVolumes(mainExt, svc)
+	s.resolveNgrok(mainExt, svc)
 
 	if s.DeploymentTimeout == nil {
 		if mainExt.K8s.DeploymentTimeout != nil {
@@ -267,15 +270,20 @@ func (s *XMiniEnvK8sService) resolveChartValues(rawSvcExt any) error {
 		)
 	}
 	s.ChartValues = chartValues
+
 	return nil
 }
 
-func (s *XMiniEnvK8sService) resolveNgrokVolumes(
+func (s *XMiniEnvK8sService) resolveNgrok(
 	mainExt *XMiniEnv,
 	svc ComposeService,
 ) {
 	if s.Ngrok == nil && mainExt.Ngrok != nil {
-		s.Ngrok = mainExt.Ngrok
+		s.Ngrok = &Ngrok{TrafficPolicy: &mainExt.Ngrok.TrafficPolicy}
+	}
+
+	if s.Ngrok != nil && s.Ngrok.TrafficPolicy == nil && mainExt.Ngrok != nil {
+		s.Ngrok.TrafficPolicy = &mainExt.Ngrok.TrafficPolicy
 	}
 
 	if NGROK_AUTHTOKEN != "" && s.Ngrok != nil {
@@ -338,6 +346,24 @@ func (s *XMiniEnvK8sService) resolveServiceImage(svc ComposeService) error {
 			err,
 			fmt.Errorf("image.tag must be specified in service extension"),
 		)
+	}
+
+	if strings.Contains(s.Image.Tag, "+git") {
+		sha, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+		if err != nil {
+			return fmt.Errorf(
+				"failed to get short sha from git for image tag: %s",
+				err,
+			)
+		}
+		s.Image.Tag = strings.ReplaceAll(s.Image.Tag, "+git", string(sha))
+	}
+
+	s.Image.Repository = strings.TrimSpace(s.Image.Repository)
+	s.Image.Tag = strings.TrimSpace(s.Image.Tag)
+
+	if s.Image.Platforms == nil {
+		s.Image.Platforms = &[]string{"linux/amd64"}
 	}
 
 	return err
@@ -427,7 +453,7 @@ func (s *XMiniEnvK8sService) resolveEnvironment(svc ComposeService) {
 }
 
 func (s *XMiniEnvK8sService) resolveHealthCheck(svc ComposeService) {
-	if svc.HealthCheck.Disable {
+	if svc.HealthCheck == nil || svc.HealthCheck.Disable {
 		return
 	}
 

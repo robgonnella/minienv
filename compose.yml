@@ -7,17 +7,25 @@ x-minienv:
     deploymentTimeout: 15s
 
 services:
-  echo:
+  hello:
     x-minienv-k8s-service:
-      ngrok:
-        port: 8080
-    image: ealen/echo-server:latest
+      # ngrok:
+      #   port: 8080
+      image:
+        repository: rgonnella/demo-hello
+        tag: +git
+        platforms:
+          - linux/amd64
+          - linux/arm64/v8
+    build: .
     ports:
-      - 8080:80
+      - 8080:8080
     healthcheck:
-      test: curl http://localhost/health
+      test: curl http://localhost:8080
 
   postgres:
+    # x-minienv-k8s-service:
+    #   skip: true
     image: postgres:15
     environment:
       POSTGRES_PASSWORD: secret
