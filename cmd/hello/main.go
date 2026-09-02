@@ -11,7 +11,9 @@ import (
 
 func handleHome(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "hello world")
+	if _, err := fmt.Fprint(w, "hello world"); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 type helloData struct {
@@ -30,7 +32,9 @@ func handleHello(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fmt.Fprintf(w, "hello %s", hello.Name)
+	if _, err := fmt.Fprintf(w, "hello %s", hello.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func main() {

@@ -390,7 +390,7 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 			protocol = strings.ToUpper(p.Protocol)
 		}
 
-		var containerPort uint16 = uint16(p.Target)
+		var containerPort = uint16(p.Target)
 
 		containerPortName := fmt.Sprintf("p%d", containerPort)
 		servicePortName := fmt.Sprintf("p%d", published16)

@@ -4,3 +4,4 @@ MINIENV_NAMESPACE = "minienv-review"
 
 [tools]
 go = "1.27"
+golangci-lint = "2.13"

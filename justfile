@@ -2,10 +2,6 @@
 default:
     @just --list
 
-# runs the entry point using "go run"
-run *args:
-    go run cmd/cli/main.go {{ args }}
-
 # builds the executable in build/minienv
 build:
     CGO_ENABLED=0 go build \
@@ -13,6 +9,14 @@ build:
       -trimpath \
       -o build/minienv \
       cmd/cli/main.go
+
+# lints entire project
+lint:
+    golangci-lint run
+
+# runs the entry point using "go run"
+run *args:
+    go run cmd/cli/main.go {{ args }}
 
 # generates schema files
 gen-schema:

@@ -83,8 +83,8 @@ func (c *Core) getActiveDeployer() (Deployer, error) {
 
 	if len(activeDeployers) > 1 {
 		return nil, fmt.Errorf(
-			"Detected multiple active configurations for deployment. "+
-				"Only one of [%s] can be configured",
+			"detected multiple active configurations for deployment. "+
+				"only one of [%s] can be configured",
 			strings.Join(activeDeployers, ", "),
 		)
 	}
@@ -92,7 +92,7 @@ func (c *Core) getActiveDeployer() (Deployer, error) {
 	if targetDeployer == nil {
 		return nil, fmt.Errorf(
 			"failed to find an active configuration for deployment. "+
-				"Configure one of [%s] in x-minienv extension field.",
+				"configure one of [%s] in x-minienv extension field",
 			slices.Collect(func(yield func(s string) bool) {
 				for _, d := range c.deployers {
 					if !yield(d.ConfigField()) {

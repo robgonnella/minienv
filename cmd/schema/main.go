@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"maps"
 	"os"
@@ -15,7 +16,11 @@ func writeFile(filepath string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err = file.Close(); err != nil {
+			fmt.Printf("failed to close file %s: %s", filepath, err)
+		}
+	}()
 	_, err = file.Write(data)
 	return err
 }
