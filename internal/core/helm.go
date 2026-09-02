@@ -35,7 +35,7 @@ func NewHelm(ext *config.XMiniEnv, dryRun bool) *Helm {
 }
 
 func (h *Helm) Active() bool {
-	return h.ext.K8s != nil
+	return h.ext.K8s.Context != "" && h.ext.K8s.Namespace != ""
 }
 
 func (h *Helm) ConfigField() string {
@@ -47,7 +47,7 @@ func (h *Helm) String() string {
 }
 
 func (h *Helm) Init(project *config.ComposeProject) error {
-	if h.ext.K8s == nil {
+	if !h.Active() {
 		return nil
 	}
 
@@ -71,7 +71,7 @@ func (h *Helm) Init(project *config.ComposeProject) error {
 }
 
 func (h *Helm) Deploy(project *config.ComposeProject) error {
-	if h.ext.K8s == nil {
+	if !h.Active() {
 		return nil
 	}
 
@@ -89,7 +89,7 @@ func (h *Helm) Deploy(project *config.ComposeProject) error {
 			return err
 		}
 
-		if svcExt.Skip != nil && *svcExt.Skip {
+		if svcExt.Skip {
 			log.
 				Warn().
 				Str("service", svc.Name).
@@ -106,7 +106,7 @@ func (h *Helm) Deploy(project *config.ComposeProject) error {
 }
 
 func (h *Helm) Destroy(project *config.ComposeProject) error {
-	if h.ext.K8s == nil {
+	if !h.Active() {
 		return nil
 	}
 
@@ -126,26 +126,22 @@ func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 		if err != nil {
 			return err
 		}
-		if svcExt.Skip != nil && *svcExt.Skip {
+		if svcExt.Skip {
 			log.Warn().Str("service", svc.Name).Msg("detected skip: skipping")
 			continue
 		}
-		repo := ""
-		tag := ""
+
 		platforms := []string{"linux/amd64"}
 
-		if svcExt.Image != nil {
-			repo = svcExt.Image.Repository
-			tag = svcExt.Image.Tag
-			if svcExt.Image.Platforms != nil {
-				platforms = *svcExt.Image.Platforms
-			}
+		if len(svcExt.Image.Platforms) != 0 {
+			platforms = svcExt.Image.Platforms
 		}
+
 		if svc.Build != nil {
 			bake = append(bake, BakeService{
 				Name:       svc.Name,
-				Registry:   repo,
-				Tag:        tag,
+				Registry:   svcExt.Image.Repository,
+				Tag:        svcExt.Image.Tag,
 				Context:    svc.Build.Context,
 				Dockerfile: svc.Build.Dockerfile,
 				Platforms:  platforms,
@@ -186,11 +182,11 @@ func (h *Helm) installChart(
 	}
 
 	timeout := svcExt.DeploymentTimeout
-	if timeout == nil {
-		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
+	if timeout == "" {
+		timeout = config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
 	}
 
-	parsedTimeout, err := time.ParseDuration(*timeout)
+	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
 		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
 	}
@@ -234,11 +230,11 @@ func (h *Helm) upgradeChart(
 	}
 
 	timeout := svcExt.DeploymentTimeout
-	if timeout == nil {
-		timeout = &config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
+	if timeout == "" {
+		timeout = config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
 	}
 
-	parsedTimeout, err := time.ParseDuration(*timeout)
+	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
 		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
 	}

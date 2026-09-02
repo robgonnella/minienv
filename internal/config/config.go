@@ -15,9 +15,9 @@ type NgrokTopLevel struct {
 // XMiniEnv top-level extension configuration for deploying to various targets
 type XMiniEnv struct {
 	// Ngrok configuration for exposing services publicly
-	Ngrok *NgrokTopLevel `json:"ngrok,omitempty" yaml:"ngrok,omitempty" mapstructure:"ngrok,omitempty"`
+	Ngrok NgrokTopLevel `json:"ngrok,omitzero" yaml:"ngrok,omitzero" mapstructure:"ngrok,omitzero"`
 	// K8s configuration for deploying to Kubernetes
-	K8s *XMiniEnvK8s `json:"k8s,omitempty" yaml:"k8s,omitempty" mapstructure:"k8s,omitempty"`
+	K8s XMiniEnvK8s `json:"k8s,omitzero" yaml:"k8s,omitzero" mapstructure:"k8s,omitzero"`
 }
 
 // Ngrok configuration for exposing services publicly
@@ -28,15 +28,15 @@ type Ngrok struct {
 	// mapping, not container.
 	Port uint16 `json:"port" yaml:"port" mapstructure:"port"`
 	// Ngrok url configuration for the service endpoint
-	Url *string `json:"url,omitempty" yaml:"url,omitempty" mapstructure:"url,omitempty"`
+	Url string `json:"url,omitempty" yaml:"url,omitempty" mapstructure:"url,omitempty"`
 	// Ngrok "on_http_request" configuration
-	TrafficPolicy *string `json:"trafficPolicy,omitempty" yaml:"trafficPolicy,omitempty" mapstructure:"trafficPolicy,omitempty"`
+	TrafficPolicy string `json:"trafficPolicy,omitempty" yaml:"trafficPolicy,omitempty" mapstructure:"trafficPolicy,omitempty"`
 }
 
 // Common options shared across all service deployment type
 type XMiniEnvCommonService struct {
 	// Ngrok configuration for exposing services publicly
-	Ngrok *Ngrok `json:"ngrok,omitempty" yaml:"ngrok,omitempty" mapstructure:"ngrok,omitempty"`
+	Ngrok Ngrok `json:"ngrok,omitzero" yaml:"ngrok,omitzero" mapstructure:"ngrok,omitzero"`
 	// Prevents the targeted service from being deployed to the cluster
-	Skip *bool `json:"skip,omitempty" yaml:"skip,omitempty" mapstructure:"skip,omitempty"`
+	Skip bool `json:"skip,omitempty" yaml:"skip,omitempty" mapstructure:"skip,omitempty"`
 }

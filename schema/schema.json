@@ -153,10 +153,21 @@
       ],
       "description": "Ngrok configuration for exposing services publicly"
     },
+    "NgrokTopLevel": {
+      "properties": {
+        "trafficPolicy": {
+          "type": "string",
+          "description": "Ngrok \"on_http_request\" configuration"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Ngrok configuration applied to all services unless overridden in service"
+    },
     "XMiniEnv": {
       "properties": {
         "ngrok": {
-          "$ref": "#/$defs/Ngrok",
+          "$ref": "#/$defs/NgrokTopLevel",
           "description": "Ngrok configuration for exposing services publicly"
         },
         "k8s": {
