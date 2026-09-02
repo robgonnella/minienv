@@ -1,4 +1,4 @@
-package core
+package deployer
 
 import "github.com/robgonnella/minienv/internal/config"
 

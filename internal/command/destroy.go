@@ -1,7 +1,6 @@
 package command
 
 import (
-	"github.com/robgonnella/minienv/internal/core"
 	"github.com/spf13/cobra"
 )
 
@@ -21,17 +20,9 @@ func init() {
 }
 
 func executeDown(cmd *cobra.Command) error {
-	project, ext, err := loadProject(cmd)
+	ctx, err := loadProject(cmd)
 	if err != nil {
 		return err
 	}
-
-	dryRun, err := cmd.Flags().GetBool("dry-run")
-	if err != nil {
-		return err
-	}
-
-	c := core.New(ext, project, dryRun)
-
-	return c.Destroy()
+	return ctx.Core.Destroy()
 }

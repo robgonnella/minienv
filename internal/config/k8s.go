@@ -139,7 +139,7 @@ func NewXMiniEnvK8sService(
 	mainExt *XMiniEnv,
 	svc ComposeService,
 ) (*XMiniEnvK8sService, error) {
-	svcExt, ok := svc.Extensions[SERVICE_K8S_EXTENSION]
+	svcExt, ok := svc.Extensions[K8S_SERVICE_EXTENSION]
 	if !ok {
 		svcExt = map[string]any{}
 	}

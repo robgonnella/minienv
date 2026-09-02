@@ -38,7 +38,7 @@ func main() {
 
 	serviceDefProperties := jsonschema.NewProperties()
 	serviceDefProperties.Set(
-		config.SERVICE_K8S_EXTENSION,
+		config.K8S_SERVICE_EXTENSION,
 		&jsonschema.Schema{Ref: xMiniEnvK8sServiceSchema.Ref},
 	)
 
