@@ -1,0 +1,3 @@
+services:
+  hello:
+    image: reg/hello:v1

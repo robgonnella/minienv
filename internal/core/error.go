@@ -1,15 +1,11 @@
 package core
 
-import "fmt"
+import "github.com/robgonnella/minienv/internal/errs"
 
-type Error struct {
-	msg string
-}
-
-func Errorf(format string, args ...any) *Error {
-	return &Error{msg: fmt.Sprintf(format, args...)}
-}
-
-func (c *Error) Error() string {
-	return c.msg
-}
+// Failure modes raised by this package. Values are namespaced because errs.Kind
+// is one shared type — see internal/errs.
+const (
+	KindDeployerInit errs.Kind = "core.deployer_init"
+	KindDeploy       errs.Kind = "core.deploy"
+	KindDestroy      errs.Kind = "core.destroy"
+)

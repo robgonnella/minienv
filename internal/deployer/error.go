@@ -1,15 +1,13 @@
 package deployer
 
-import "fmt"
+import "github.com/robgonnella/minienv/internal/errs"
 
-type Error struct {
-	msg string
-}
-
-func Errorf(format string, args ...any) *Error {
-	return &Error{msg: fmt.Sprintf(format, args...)}
-}
-
-func (c *Error) Error() string {
-	return c.msg
-}
+// Failure modes raised by this package. Values are namespaced because errs.Kind
+// is one shared type — see internal/errs.
+const (
+	KindDestroyService    errs.Kind = "deployer.destroy_service"
+	KindDeploymentTimeout errs.Kind = "deployer.deployment_timeout"
+	KindChartLoad         errs.Kind = "deployer.chart_load"
+	KindInstall           errs.Kind = "deployer.install"
+	KindUpgrade           errs.Kind = "deployer.upgrade"
+)

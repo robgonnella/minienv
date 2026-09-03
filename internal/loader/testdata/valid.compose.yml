@@ -1,0 +1,11 @@
+x-minienv:
+  k8s:
+    context: test-context
+    namespace: test-namespace
+    deploymentTimeout: 60s
+
+services:
+  hello:
+    image: reg/hello:v1
+    ports:
+      - "3000:8080"

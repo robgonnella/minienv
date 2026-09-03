@@ -1,10 +1,11 @@
 package config
 
-import "os"
+// This package deliberately performs no environment lookups. Runtime values
+// such as the ngrok auth token and the helm driver are read at the
+// composition root (internal/command) and passed down explicitly, so that
+// importing this package — including from a test binary — never pulls a
+// credential into the process.
 
-var NGROK_AUTHTOKEN = os.Getenv("NGROK_AUTHTOKEN")
-
-var HELM_DRIVER = os.Getenv("HELM_DRIVER")
 var HELM_DEFAULT_DEPLOYMENT_TIMEOUT = "30s"
 
 const TOP_LEVEL_EXTENSION = "x-minienv"

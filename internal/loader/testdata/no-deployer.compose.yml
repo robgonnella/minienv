@@ -1,0 +1,7 @@
+x-minienv:
+  ngrok:
+    trafficPolicy: "on_http_request: []"
+
+services:
+  hello:
+    image: reg/hello:v1

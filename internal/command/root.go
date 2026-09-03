@@ -1,19 +1,15 @@
 package command
 
 import (
+	goos "os"
+
 	"github.com/robgonnella/minienv/internal/core"
+	"github.com/robgonnella/minienv/internal/git"
+	"github.com/robgonnella/minienv/internal/image"
 	"github.com/robgonnella/minienv/internal/loader"
-	"github.com/robgonnella/minienv/internal/os"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
-
-type GlobalCliFlags struct {
-	Files            []string
-	ProjectDirectory string
-	ProjectName      string
-	DryRun           bool
-}
 
 type RunContext struct {
 	Core *core.Core
@@ -44,7 +40,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("dry-run", false, "Executes in dry-run mode")
 }
 
-func getGlobalCliFlags(cmd *cobra.Command) (*GlobalCliFlags, error) {
+func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 	projectDirectory, err := cmd.Flags().GetString("project-directory")
 	if err != nil {
 		return nil, err
@@ -65,33 +61,33 @@ func getGlobalCliFlags(cmd *cobra.Command) (*GlobalCliFlags, error) {
 		return nil, err
 	}
 
-	return &GlobalCliFlags{
+	imageClient := image.NewDocker(dryRun)
+	gitClient := git.NewGitClient()
+
+	// This is the composition root: the one place that reads runtime
+	// environment values. Reading them here, lazily, keeps credentials out of
+	// every package below — and out of their test binaries.
+	return &loader.LoaderOpts{
 		Files:            files,
 		ProjectDirectory: projectDirectory,
 		ProjectName:      projectName,
 		DryRun:           dryRun,
+		ImageClient:      imageClient,
+		GitClient:        gitClient,
+		NgrokAuthToken:   goos.Getenv("NGROK_AUTHTOKEN"),
+		HelmDriver:       goos.Getenv("HELM_DRIVER"),
 	}, nil
 }
 
 func loadProject(
 	cmd *cobra.Command,
 ) (*RunContext, error) {
-	flags, err := getGlobalCliFlags(cmd)
+	loaderOpts, err := getLoaderOptions(cmd)
 	if err != nil {
 		return nil, err
 	}
 
-	commander := os.NewOsCommander()
-
-	loaderOpts := loader.LoaderOpts{
-		Files:            flags.Files,
-		ProjectDirectory: flags.ProjectDirectory,
-		ProjectName:      flags.ProjectName,
-		DryRun:           flags.DryRun,
-		Commander:        commander,
-	}
-
-	projectLoader := loader.New(&loaderOpts)
+	projectLoader := loader.New(loaderOpts)
 
 	core, err := projectLoader.LoadCore()
 	if err != nil {

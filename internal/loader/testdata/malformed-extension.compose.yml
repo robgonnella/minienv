@@ -1,0 +1,11 @@
+x-minienv:
+  k8s:
+    context:
+      - not
+      - a
+      - string
+    namespace: test-namespace
+
+services:
+  hello:
+    image: reg/hello:v1

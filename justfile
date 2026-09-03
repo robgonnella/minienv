@@ -16,7 +16,6 @@ lint:
 
 # runs all test suites
 test *args:
-    # --fail-on-empty
     ginkgo \
       -r \
       -p \
@@ -24,6 +23,7 @@ test *args:
       --randomize-all \
       --randomize-suites \
       --fail-on-pending \
+      --fail-on-empty \
       --keep-going \
       --cover \
       --coverprofile=cover.profile \

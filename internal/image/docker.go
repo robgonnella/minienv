@@ -1,76 +1,71 @@
 package image
 
 import (
-	"fmt"
-	goos "os"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
-	"text/template"
 
-	"github.com/robgonnella/minienv/internal/os"
+	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/rs/zerolog/log"
 )
 
-type DockerService struct {
-	Name       string
-	Registry   string
-	Tag        string
-	Context    string
-	Dockerfile string
-	Platforms  []string
-	Args       map[string]string
+type Docker struct {
+	dryRun     bool
+	hclBuilder *HclBuilder
 }
 
-func (bs *DockerService) LogFields() map[string]any {
-	return map[string]any{
-		"name":       bs.Name,
-		"registry":   bs.Registry,
-		"tag":        bs.Tag,
-		"context":    bs.Context,
-		"dockerfile": bs.Dockerfile,
-		"platforms":  bs.Platforms,
+func NewDocker(dryRun bool) *Docker {
+	return &Docker{
+		dryRun,
+		NewHclBuilder(),
 	}
 }
 
-type Docker struct {
-	commander os.Commander
-	dryRun    bool
-}
-
-func NewDocker(commander os.Commander, dryRun bool) *Docker {
-	return &Docker{commander, dryRun}
-}
-
-func (d *Docker) BuildAndPush(services []DockerService) error {
+func (d *Docker) BuildAndPush(services []ServiceProperties) error {
 	filtered := d.getFilteredList(services)
 
-	hclString, err := d.hcl(filtered)
+	if len(filtered) == 0 {
+		log.Warn().Msg("no services to build")
+		return nil
+	}
+
+	hcl, err := d.hclBuilder.Build(filtered)
 	if err != nil {
 		return err
 	}
 
-	log.Debug().Msgf("building images: \n%s", hclString)
+	log.Debug().Msgf("building images: \n%s", hcl)
 
-	args := []string{"buildx", "bake"}
-	if !d.dryRun {
-		args = append(args, "--push")
-	}
-	args = append(args, "-f", "-")
-
-	cmd := d.commander.Command("docker", args...)
-	cmd.Stdin(strings.NewReader(hclString))
-	cmd.Stdout(goos.Stdout)
-	cmd.Stderr(goos.Stderr)
+	cmd := exec.Command("docker", d.bakeArgs()...)
+	cmd.Stdin = strings.NewReader(hcl)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return Errorf("failed to build or push images: %s", err)
+		return errs.Errorf(KindBuild, "failed to build or push images: %w", err)
 	}
 
 	return nil
 }
 
-func (d *Docker) getFilteredList(services []DockerService) []DockerService {
-	return slices.Collect(func(yield func(service DockerService) bool) {
+// bakeArgs builds the argv for buildx. The hcl arrives on stdin, hence the
+// "-f -". On a dry run --push is left off so bake plans the build without
+// publishing anything.
+func (d *Docker) bakeArgs() []string {
+	args := []string{"buildx", "bake"}
+
+	if !d.dryRun {
+		args = append(args, "--push")
+	}
+
+	return append(args, "-f", "-")
+}
+
+func (d *Docker) getFilteredList(
+	services []ServiceProperties,
+) []ServiceProperties {
+	return slices.Collect(func(yield func(service ServiceProperties) bool) {
 		for _, s := range services {
 			if s.Registry != "" &&
 				s.Tag != "" &&
@@ -87,54 +82,4 @@ func (d *Docker) getFilteredList(services []DockerService) []DockerService {
 			}
 		}
 	})
-}
-
-func (d *Docker) hcl(services []DockerService) (string, error) {
-	tplStr := d.template()
-
-	tplFuncs := template.FuncMap{
-		"joinServiceNamesQuoted": func(services []DockerService) string {
-			names := []string{}
-			for _, s := range services {
-				names = append(names, fmt.Sprintf("%q", s.Name))
-			}
-			return strings.Join(names, ", ")
-		},
-		"joinQuoted": func(elems []string) string {
-			for i, s := range elems {
-				elems[i] = fmt.Sprintf("%q", s)
-			}
-			return strings.Join(elems, ", ")
-		},
-	}
-
-	tmpl, err := template.New("tmpl").Funcs(tplFuncs).Parse(tplStr)
-	if err != nil {
-		return "", Errorf("unable to parse buildx hcl template string: %s", err)
-	}
-
-	var out strings.Builder
-	err = tmpl.Execute(&out, map[string]any{"Services": services})
-	if err != nil {
-		return "", Errorf("failed to execute buildx hcl template: %s", err)
-	}
-
-	return out.String(), nil
-}
-
-func (d *Docker) template() string {
-	return `
-group "default" {
-	targets = [{{ .Services | joinServiceNamesQuoted }}]
-}
-
-{{ range .Services -}}
-target "{{ .Name }}" {
-	context = "{{ .Context }}"
-	dockerfile = "{{ .Dockerfile }}"
-	tags = ["{{ .Registry }}:{{ .Tag }}"]
-	platforms = [{{ .Platforms | joinQuoted }}]
-}
-{{- end }}
-`
 }

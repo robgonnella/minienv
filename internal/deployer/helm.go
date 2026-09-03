@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"github.com/robgonnella/minienv/internal/config"
+	"github.com/robgonnella/minienv/internal/errs"
+	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
-	"github.com/robgonnella/minienv/internal/os"
 	"github.com/rs/zerolog/log"
 	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
@@ -19,28 +20,34 @@ import (
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type HelmOptions struct {
+	Ext            *config.XMiniEnv
+	ImageClient    image.Client
+	GitClient      git.Client
+	NgrokAuthToken string
+	HelmDriver     string
+	DryRun         bool
+}
+
 type Helm struct {
 	ext            *config.XMiniEnv
 	actionConfig   *helmaction.Configuration
-	docker         *image.Docker
-	commander      os.Commander
+	imageClient    image.Client
+	gitClient      git.Client
 	ngrokAuthToken string
+	helmDriver     string
 	dryRun         bool
 }
 
-func NewHelm(
-	ext *config.XMiniEnv,
-	commander os.Commander,
-	ngrokAuthToken string,
-	dryRun bool,
-) *Helm {
+func NewHelm(opts HelmOptions) *Helm {
 	return &Helm{
-		ext:            ext,
+		ext:            opts.Ext,
 		actionConfig:   nil,
-		docker:         image.NewDocker(commander, dryRun),
-		commander:      commander,
-		ngrokAuthToken: ngrokAuthToken,
-		dryRun:         dryRun,
+		imageClient:    opts.ImageClient,
+		gitClient:      opts.GitClient,
+		ngrokAuthToken: opts.NgrokAuthToken,
+		helmDriver:     opts.HelmDriver,
+		dryRun:         opts.DryRun,
 	}
 }
 
@@ -70,7 +77,7 @@ func (h *Helm) Init(project *config.ComposeProject) error {
 	if err := actionConfig.Init(
 		settings.RESTClientGetter(),
 		settings.Namespace(),
-		config.HELM_DRIVER,
+		h.helmDriver,
 		log.Printf,
 	); err != nil {
 		return err
@@ -94,7 +101,7 @@ func (h *Helm) Deploy(project *config.ComposeProject) error {
 	}
 
 	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc, h.commander)
+		svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
 		if err != nil {
 			return err
 		}
@@ -122,17 +129,33 @@ func (h *Helm) Destroy(project *config.ComposeProject) error {
 
 	for name, svc := range project.Services {
 		if err := h.uninstallChart(svc); err != nil {
-			return Errorf("failed to destroy service %s: %s", name, err)
+			return errs.Errorf(
+				KindDestroyService,
+				"failed to destroy service %s: %w",
+				name,
+				err,
+			)
 		}
 	}
 
 	return nil
 }
 
+func (h *Helm) extensionOptions(
+	svc config.ComposeService,
+) config.XMiniEnvK8sServiceOptions {
+	return config.XMiniEnvK8sServiceOptions{
+		MainExt:      h.ext,
+		Service:      svc,
+		GitClient:    h.gitClient,
+		NgrokEnabled: h.ngrokAuthToken != "",
+	}
+}
+
 func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
-	dockerServices := []image.DockerService{}
+	dockerServices := []image.ServiceProperties{}
 	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc, h.commander)
+		svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
 		if err != nil {
 			return err
 		}
@@ -148,7 +171,7 @@ func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 		}
 
 		if svc.Build != nil {
-			dockerServices = append(dockerServices, image.DockerService{
+			dockerServices = append(dockerServices, image.ServiceProperties{
 				Name:       svc.Name,
 				Registry:   svcExt.Image.Repository,
 				Tag:        svcExt.Image.Tag,
@@ -161,7 +184,7 @@ func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 	}
 
 	if len(dockerServices) > 0 {
-		return h.docker.BuildAndPush(dockerServices)
+		return h.imageClient.BuildAndPush(dockerServices)
 	}
 
 	return nil
@@ -198,7 +221,11 @@ func (h *Helm) installChart(
 
 	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
-		return Errorf("invalid deploymentTimeout configuration: %s", err)
+		return errs.Errorf(
+			KindDeploymentTimeout,
+			"invalid deploymentTimeout configuration: %w",
+			err,
+		)
 	}
 
 	client := helmaction.NewInstall(h.actionConfig)
@@ -213,11 +240,16 @@ func (h *Helm) installChart(
 
 	chart, err := h.loadChart(svc.Name, h.ngrokAuthToken)
 	if err != nil {
-		return Errorf("failed to load in-memory chart: %s", err)
+		return errs.Errorf(KindChartLoad, "failed to load in-memory chart: %w", err)
 	}
 
 	if _, err := client.Run(chart, values); err != nil {
-		return Errorf("failed to install service chart %s: %s", svc.Name, err)
+		return errs.Errorf(
+			KindInstall,
+			"failed to install service chart %s: %w",
+			svc.Name,
+			err,
+		)
 	}
 
 	log.
@@ -246,7 +278,11 @@ func (h *Helm) upgradeChart(
 
 	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
-		return Errorf("invalid deploymentTimeout configuration: %s", err)
+		return errs.Errorf(
+			KindDeploymentTimeout,
+			"invalid deploymentTimeout configuration: %w",
+			err,
+		)
 	}
 
 	client := helmaction.NewUpgrade(h.actionConfig)
@@ -259,11 +295,16 @@ func (h *Helm) upgradeChart(
 
 	chart, err := h.loadChart(svc.Name, h.ngrokAuthToken)
 	if err != nil {
-		return Errorf("failed to load in-memory chart: %s", err)
+		return errs.Errorf(KindChartLoad, "failed to load in-memory chart: %w", err)
 	}
 
 	if _, err := client.Run(svc.Name, chart, values); err != nil {
-		return Errorf("failed to upgrade service chart %s: %s", svc.Name, err)
+		return errs.Errorf(
+			KindUpgrade,
+			"failed to upgrade service chart %s: %w",
+			svc.Name,
+			err,
+		)
 	}
 
 	log.
@@ -397,7 +438,7 @@ description: A chart for deploying %[1]s service
 
 func (h *Helm) getHelmChartValuesTxt() string {
 	return `
-replicaCount: 1
+replicas: 1
 
 image:
   repository: ""
@@ -566,7 +607,7 @@ metadata:
   labels:
     {{- include "%[1]s.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.replicas }}
   selector:
     matchLabels:
       {{- include "%[1]s.selectorLabels" . | nindent 6 }}

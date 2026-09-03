@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer"
+	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -30,12 +31,12 @@ func New(
 func (c *Core) Deploy() error {
 	log.Info().Str("deployer", c.deployer.String()).Msg("initializing")
 	if err := c.deployer.Init(c.project); err != nil {
-		return Errorf("failed to initialize deployer: %s", err)
+		return errs.Errorf(KindDeployerInit, "failed to initialize deployer: %w", err)
 	}
 
 	log.Info().Str("deployer", c.deployer.String()).Msg("executing deploy")
 	if err := c.deployer.Deploy(c.project); err != nil {
-		return Errorf("deploy failed: %s", err)
+		return errs.Errorf(KindDeploy, "deploy failed: %w", err)
 	}
 
 	return nil
@@ -44,12 +45,12 @@ func (c *Core) Deploy() error {
 func (c *Core) Destroy() error {
 	log.Info().Str("deployer", c.deployer.String()).Msg("initializing")
 	if err := c.deployer.Init(c.project); err != nil {
-		return Errorf("failed to initialize deployer: %s", err)
+		return errs.Errorf(KindDeployerInit, "failed to initialize deployer: %w", err)
 	}
 
 	log.Info().Str("deployer", c.deployer.String()).Msg("executing destroy")
 	if err := c.deployer.Destroy(c.project); err != nil {
-		return Errorf("destroy failed: %s", err)
+		return errs.Errorf(KindDestroy, "destroy failed: %w", err)
 	}
 
 	return nil

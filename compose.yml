@@ -9,8 +9,8 @@ x-minienv:
 services:
   hello:
     x-minienv-k8s-service:
-      # ngrok:
-      #   port: 8080
+      ngrok:
+        port: 8080
       image:
         repository: rgonnella/demo-hello
         tag: +git
@@ -24,8 +24,6 @@ services:
       test: curl http://localhost:8080
 
   postgres:
-    # x-minienv-k8s-service:
-    #   skip: true
     image: postgres:15
     environment:
       POSTGRES_PASSWORD: secret

@@ -1,4 +1,4 @@
-package command_test
+package image_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestCommand(t *testing.T) {
+func TestImage(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Command Suite")
+	RunSpecs(t, "Image Suite")
 }
