@@ -102,7 +102,9 @@ func (l *Loader) loadMainExtensionConfig(
 func (l *Loader) loadActiveDeployer(
 	ext *config.XMiniEnv,
 ) (deployer.Deployer, error) {
-	deployers := []deployer.Deployer{deployer.NewHelm(ext, l.opts.DryRun)}
+	deployers := []deployer.Deployer{
+		deployer.NewHelm(ext, l.opts.DryRun),
+	}
 
 	var targetDeployer deployer.Deployer
 

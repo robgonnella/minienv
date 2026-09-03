@@ -1,4 +1,4 @@
-package deployer
+package image
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type BakeService struct {
+type DockerService struct {
 	Name       string
 	Registry   string
 	Tag        string
@@ -21,7 +21,7 @@ type BakeService struct {
 	Args       map[string]string
 }
 
-func (bs *BakeService) LogFields() map[string]any {
+func (bs *DockerService) LogFields() map[string]any {
 	return map[string]any{
 		"name":       bs.Name,
 		"registry":   bs.Registry,
@@ -32,16 +32,18 @@ func (bs *BakeService) LogFields() map[string]any {
 	}
 }
 
-type Buildx struct{ dryRun bool }
-
-func NewBuildx(dryRun bool) *Buildx {
-	return &Buildx{dryRun}
+type Docker struct {
+	dryRun bool
 }
 
-func (b *Buildx) BuildAndPush(services []BakeService) error {
-	filtered := b.getFilteredList(services)
+func NewDocker(dryRun bool) *Docker {
+	return &Docker{dryRun}
+}
 
-	hclString, err := b.hcl(filtered)
+func (d *Docker) BuildAndPush(services []DockerService) error {
+	filtered := d.getFilteredList(services)
+
+	hclString, err := d.hcl(filtered)
 	if err != nil {
 		return err
 	}
@@ -49,7 +51,7 @@ func (b *Buildx) BuildAndPush(services []BakeService) error {
 	log.Debug().Msgf("building images: \n%s", hclString)
 
 	args := []string{"buildx", "bake"}
-	if !b.dryRun {
+	if !d.dryRun {
 		args = append(args, "--push")
 	}
 	args = append(args, "-f", "-")
@@ -58,11 +60,12 @@ func (b *Buildx) BuildAndPush(services []BakeService) error {
 	cmd.Stdin = strings.NewReader(hclString)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
 	return cmd.Run()
 }
 
-func (b *Buildx) getFilteredList(services []BakeService) []BakeService {
-	return slices.Collect(func(yield func(service BakeService) bool) {
+func (d *Docker) getFilteredList(services []DockerService) []DockerService {
+	return slices.Collect(func(yield func(service DockerService) bool) {
 		for _, s := range services {
 			if s.Registry != "" &&
 				s.Tag != "" &&
@@ -81,11 +84,11 @@ func (b *Buildx) getFilteredList(services []BakeService) []BakeService {
 	})
 }
 
-func (b *Buildx) hcl(services []BakeService) (string, error) {
-	tplStr := b.template()
+func (d *Docker) hcl(services []DockerService) (string, error) {
+	tplStr := d.template()
 
 	tplFuncs := template.FuncMap{
-		"joinServiceNamesQuoted": func(services []BakeService) string {
+		"joinServiceNamesQuoted": func(services []DockerService) string {
 			names := []string{}
 			for _, s := range services {
 				names = append(names, fmt.Sprintf("%q", s.Name))
@@ -114,7 +117,7 @@ func (b *Buildx) hcl(services []BakeService) (string, error) {
 	return out.String(), nil
 }
 
-func (b *Buildx) template() string {
+func (d *Docker) template() string {
 	return `
 group "default" {
 	targets = [{{ .Services | joinServiceNamesQuoted }}]

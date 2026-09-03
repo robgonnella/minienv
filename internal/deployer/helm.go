@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/robgonnella/minienv/internal/config"
+	"github.com/robgonnella/minienv/internal/image"
 	"github.com/rs/zerolog/log"
 	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
@@ -21,7 +22,7 @@ import (
 type Helm struct {
 	ext          *config.XMiniEnv
 	actionConfig *helmaction.Configuration
-	buildx       *Buildx
+	docker       *image.Docker
 	dryRun       bool
 }
 
@@ -29,7 +30,7 @@ func NewHelm(ext *config.XMiniEnv, dryRun bool) *Helm {
 	return &Helm{
 		ext:          ext,
 		actionConfig: nil,
-		buildx:       NewBuildx(dryRun),
+		docker:       image.NewDocker(dryRun),
 		dryRun:       dryRun,
 	}
 }
@@ -120,7 +121,7 @@ func (h *Helm) Destroy(project *config.ComposeProject) error {
 }
 
 func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
-	bake := []BakeService{}
+	dockerServices := []image.DockerService{}
 	for _, svc := range project.Services {
 		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc)
 		if err != nil {
@@ -138,7 +139,7 @@ func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 		}
 
 		if svc.Build != nil {
-			bake = append(bake, BakeService{
+			dockerServices = append(dockerServices, image.DockerService{
 				Name:       svc.Name,
 				Registry:   svcExt.Image.Repository,
 				Tag:        svcExt.Image.Tag,
@@ -150,8 +151,8 @@ func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 		}
 	}
 
-	if len(bake) > 0 {
-		return h.buildx.BuildAndPush(bake)
+	if len(dockerServices) > 0 {
+		return h.docker.BuildAndPush(dockerServices)
 	}
 
 	return nil
