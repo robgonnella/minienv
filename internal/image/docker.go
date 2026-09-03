@@ -2,12 +2,12 @@ package image
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
+	goos "os"
 	"slices"
 	"strings"
 	"text/template"
 
+	"github.com/robgonnella/minienv/internal/os"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,11 +33,12 @@ func (bs *DockerService) LogFields() map[string]any {
 }
 
 type Docker struct {
-	dryRun bool
+	commander os.Commander
+	dryRun    bool
 }
 
-func NewDocker(dryRun bool) *Docker {
-	return &Docker{dryRun}
+func NewDocker(commander os.Commander, dryRun bool) *Docker {
+	return &Docker{commander, dryRun}
 }
 
 func (d *Docker) BuildAndPush(services []DockerService) error {
@@ -56,12 +57,16 @@ func (d *Docker) BuildAndPush(services []DockerService) error {
 	}
 	args = append(args, "-f", "-")
 
-	cmd := exec.Command("docker", args...)
-	cmd.Stdin = strings.NewReader(hclString)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := d.commander.Command("docker", args...)
+	cmd.Stdin(strings.NewReader(hclString))
+	cmd.Stdout(goos.Stdout)
+	cmd.Stderr(goos.Stderr)
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return Errorf("failed to build or push images: %s", err)
+	}
+
+	return nil
 }
 
 func (d *Docker) getFilteredList(services []DockerService) []DockerService {
@@ -105,13 +110,13 @@ func (d *Docker) hcl(services []DockerService) (string, error) {
 
 	tmpl, err := template.New("tmpl").Funcs(tplFuncs).Parse(tplStr)
 	if err != nil {
-		return "", err
+		return "", Errorf("unable to parse buildx hcl template string: %s", err)
 	}
 
 	var out strings.Builder
 	err = tmpl.Execute(&out, map[string]any{"Services": services})
 	if err != nil {
-		return "", err
+		return "", Errorf("failed to execute buildx hcl template: %s", err)
 	}
 
 	return out.String(), nil

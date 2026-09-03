@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/image"
+	"github.com/robgonnella/minienv/internal/os"
 	"github.com/rs/zerolog/log"
 	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
@@ -20,18 +20,27 @@ import (
 )
 
 type Helm struct {
-	ext          *config.XMiniEnv
-	actionConfig *helmaction.Configuration
-	docker       *image.Docker
-	dryRun       bool
+	ext            *config.XMiniEnv
+	actionConfig   *helmaction.Configuration
+	docker         *image.Docker
+	commander      os.Commander
+	ngrokAuthToken string
+	dryRun         bool
 }
 
-func NewHelm(ext *config.XMiniEnv, dryRun bool) *Helm {
+func NewHelm(
+	ext *config.XMiniEnv,
+	commander os.Commander,
+	ngrokAuthToken string,
+	dryRun bool,
+) *Helm {
 	return &Helm{
-		ext:          ext,
-		actionConfig: nil,
-		docker:       image.NewDocker(dryRun),
-		dryRun:       dryRun,
+		ext:            ext,
+		actionConfig:   nil,
+		docker:         image.NewDocker(commander, dryRun),
+		commander:      commander,
+		ngrokAuthToken: ngrokAuthToken,
+		dryRun:         dryRun,
 	}
 }
 
@@ -61,7 +70,7 @@ func (h *Helm) Init(project *config.ComposeProject) error {
 	if err := actionConfig.Init(
 		settings.RESTClientGetter(),
 		settings.Namespace(),
-		os.Getenv("HELM_DRIVER"),
+		config.HELM_DRIVER,
 		log.Printf,
 	); err != nil {
 		return err
@@ -85,7 +94,7 @@ func (h *Helm) Deploy(project *config.ComposeProject) error {
 	}
 
 	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc)
+		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc, h.commander)
 		if err != nil {
 			return err
 		}
@@ -113,7 +122,7 @@ func (h *Helm) Destroy(project *config.ComposeProject) error {
 
 	for name, svc := range project.Services {
 		if err := h.uninstallChart(svc); err != nil {
-			return fmt.Errorf("failed to destroy service %s: %s", name, err)
+			return Errorf("failed to destroy service %s: %s", name, err)
 		}
 	}
 
@@ -123,7 +132,7 @@ func (h *Helm) Destroy(project *config.ComposeProject) error {
 func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 	dockerServices := []image.DockerService{}
 	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc)
+		svcExt, err := config.NewXMiniEnvK8sService(h.ext, svc, h.commander)
 		if err != nil {
 			return err
 		}
@@ -189,7 +198,7 @@ func (h *Helm) installChart(
 
 	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
-		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
+		return Errorf("invalid deploymentTimeout configuration: %s", err)
 	}
 
 	client := helmaction.NewInstall(h.actionConfig)
@@ -202,13 +211,13 @@ func (h *Helm) installChart(
 	client.DryRun = h.dryRun
 	client.Timeout = parsedTimeout
 
-	chart, err := h.loadChart(svc.Name)
+	chart, err := h.loadChart(svc.Name, h.ngrokAuthToken)
 	if err != nil {
-		return fmt.Errorf("failed to load in-memory chart: %s", err)
+		return Errorf("failed to load in-memory chart: %s", err)
 	}
 
 	if _, err := client.Run(chart, values); err != nil {
-		return fmt.Errorf("failed to install service chart %s: %s", svc.Name, err)
+		return Errorf("failed to install service chart %s: %s", svc.Name, err)
 	}
 
 	log.
@@ -237,7 +246,7 @@ func (h *Helm) upgradeChart(
 
 	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
-		return fmt.Errorf("invalid deploymentTimeout configuration: %s", err)
+		return Errorf("invalid deploymentTimeout configuration: %s", err)
 	}
 
 	client := helmaction.NewUpgrade(h.actionConfig)
@@ -248,13 +257,13 @@ func (h *Helm) upgradeChart(
 	client.DryRun = h.dryRun
 	client.Timeout = parsedTimeout
 
-	chart, err := h.loadChart(svc.Name)
+	chart, err := h.loadChart(svc.Name, h.ngrokAuthToken)
 	if err != nil {
-		return fmt.Errorf("failed to load in-memory chart: %s", err)
+		return Errorf("failed to load in-memory chart: %s", err)
 	}
 
 	if _, err := client.Run(svc.Name, chart, values); err != nil {
-		return fmt.Errorf("failed to upgrade service chart %s: %s", svc.Name, err)
+		return Errorf("failed to upgrade service chart %s: %s", svc.Name, err)
 	}
 
 	log.
@@ -334,7 +343,10 @@ func (h *Helm) serviceReleaseExists(name string) bool {
 	return release != nil
 }
 
-func (h *Helm) loadChart(svcName string) (*helmchart.Chart, error) {
+func (h *Helm) loadChart(
+	svcName string,
+	ngrokAuthToken string,
+) (*helmchart.Chart, error) {
 	files := []*helmloader.BufferedFile{
 		{
 			Name: "Chart.yaml",
@@ -366,7 +378,7 @@ func (h *Helm) loadChart(svcName string) (*helmchart.Chart, error) {
 		},
 		{
 			Name: "templates/secret.yaml",
-			Data: []byte(h.getHelmSecretTxt()),
+			Data: []byte(h.getHelmSecretTxt(ngrokAuthToken)),
 		},
 	}
 
@@ -400,6 +412,11 @@ env: {}
 
 ngrok:
   enabled: false
+  image: ""
+  configMapName: ""
+  configKey: ""
+  configVolMountPath: ""
+  secretName: ""
   port: ""
   url: ""
   trafficPolicy: ""
@@ -507,39 +524,36 @@ func (h *Helm) getHelmConfigMapTxt(svcName string) string {
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: %[1]s
+  name: {{ .Values.ngrok.configMapName }}
 data:
-  %[2]s: |
+  {{ .Values.ngrok.configKey }}: |
     version: 3
     endpoints:
-      - name: {{ include "%[3]s.fullname" . }}
+      - name: {{ include "%[1]s.fullname" . }}
         url: {{ .Values.ngrok.url }}
-        description: "endpoint for %[3]s"
+        description: "endpoint for %[1]s"
         upstream:
-          url: {{ include "%[3]s.fullname" . }}:{{ .Values.ngrok.port }}
+          url: {{ include "%[1]s.fullname" . }}:{{ .Values.ngrok.port }}
         traffic_policy:
           {{ .Values.ngrok.trafficPolicy }}
 {{- end -}}
 `,
-		config.NGROK_CONFIG_MAP_NAME,
-		config.NGROK_CONFIG_KEY,
 		svcName,
 	)
 }
 
-func (h *Helm) getHelmSecretTxt() string {
+func (h *Helm) getHelmSecretTxt(authToken string) string {
 	return fmt.Sprintf(`
 {{- if .Values.ngrok.enabled -}}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: %s
+  name: {{ .Values.ngrok.secretName }}
 data:
   NGROK_AUTHTOKEN: %s
 {{- end -}}
 `,
-		config.NGROK_SECRET_NAME,
-		base64.StdEncoding.EncodeToString([]byte(config.NGROK_AUTHTOKEN)),
+		base64.StdEncoding.EncodeToString([]byte(authToken)),
 	)
 }
 
@@ -620,7 +634,7 @@ spec:
           {{- end }}
         {{- if .Values.ngrok.enabled }}
         - name: ngrok
-          image: %[2]s
+          image: {{ .Values.ngrok.image }}
           imagePullPolicy: IfNotPresent
           command:
             - ngrok
@@ -629,10 +643,10 @@ spec:
             - --log=stdout
           envFrom:
             - secretRef:
-                name: %[3]s
+                name: {{ .Values.ngrok.secretName }}
           volumeMounts:
-            - name: %[4]s
-              mountPath: %[5]s
+            - name: {{ .Values.ngrok.configMapName }}
+              mountPath: {{ .Values.ngrok.configVolMountPath }}
         {{- end }}
       {{- with .Values.volumes }}
       volumes:
@@ -652,10 +666,6 @@ spec:
       {{- end }}
 `,
 		svcName,
-		config.NGROK_IMAGE,
-		config.NGROK_SECRET_NAME,
-		config.NGROK_CONFIG_MAP_NAME,
-		config.NGROK_CONFIG_VOL_MOUNT_PATH,
 	)
 }
 

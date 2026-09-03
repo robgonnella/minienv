@@ -3,6 +3,7 @@ package command
 import (
 	"github.com/robgonnella/minienv/internal/core"
 	"github.com/robgonnella/minienv/internal/loader"
+	"github.com/robgonnella/minienv/internal/os"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -80,7 +81,16 @@ func loadProject(
 		return nil, err
 	}
 
-	loaderOpts := loader.LoaderOpts(*flags)
+	commander := os.NewOsCommander()
+
+	loaderOpts := loader.LoaderOpts{
+		Files:            flags.Files,
+		ProjectDirectory: flags.ProjectDirectory,
+		ProjectName:      flags.ProjectName,
+		DryRun:           flags.DryRun,
+		Commander:        commander,
+	}
+
 	projectLoader := loader.New(&loaderOpts)
 
 	core, err := projectLoader.LoadCore()

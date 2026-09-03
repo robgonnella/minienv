@@ -6,7 +6,6 @@ import (
 	"maps"
 	"math"
 	"net/url"
-	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/robgonnella/minienv/internal/os"
 	"github.com/rs/zerolog/log"
 )
 
@@ -138,7 +138,12 @@ type XMiniEnvK8sService struct {
 func NewXMiniEnvK8sService(
 	mainExt *XMiniEnv,
 	svc ComposeService,
+	commander os.Commander,
 ) (*XMiniEnvK8sService, error) {
+	if mainExt.K8s.Context == "" || mainExt.K8s.Namespace == "" {
+		return nil, Errorf("k8s is not configured for this project")
+	}
+
 	svcExt, ok := svc.Extensions[K8S_SERVICE_EXTENSION]
 	if !ok {
 		svcExt = map[string]any{}
@@ -148,13 +153,13 @@ func NewXMiniEnvK8sService(
 
 	svcExtConfig := &XMiniEnvK8sService{}
 	if err := mapstructure.Decode(svcExt, svcExtConfig); err != nil {
-		return nil, fmt.Errorf(
+		return nil, Errorf(
 			"failed to parse x-minienv-k8s-service extension: %s",
 			err,
 		)
 	}
 
-	if err := svcExtConfig.resolve(mainExt, svcExt, svc); err != nil {
+	if err := svcExtConfig.resolve(mainExt, svcExt, svc, commander); err != nil {
 		return nil, err
 	}
 
@@ -165,6 +170,7 @@ func (s *XMiniEnvK8sService) resolve(
 	mainExt *XMiniEnv,
 	rawSvcExt any,
 	svc ComposeService,
+	commander os.Commander,
 ) error {
 	if s == nil {
 		s = &XMiniEnvK8sService{}
@@ -178,7 +184,7 @@ func (s *XMiniEnvK8sService) resolve(
 		return err
 	}
 
-	if err := s.resolveServiceImage(svc); err != nil {
+	if err := s.resolveServiceImage(svc, commander); err != nil {
 		return err
 	}
 
@@ -205,7 +211,7 @@ func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
 	var values map[string]any
 
 	if err := mapstructure.Decode(s.ChartValues, &values); err != nil {
-		return nil, fmt.Errorf("failed to resolve chart values: %s", err)
+		return nil, Errorf("failed to resolve chart values: %s", err)
 	}
 
 	if err := s.decodeNestedStructures(values); err != nil {
@@ -223,7 +229,7 @@ func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
 
 	if NGROK_AUTHTOKEN != "" && s.Ngrok.Port != 0 {
 		if !hasServicePort(s.Ngrok.Port) {
-			return nil, fmt.Errorf(
+			return nil, Errorf(
 				"exposeServicePort must match a mapped port either in extension or" +
 					"from host port mapping in docker compose config",
 			)
@@ -252,7 +258,7 @@ func (s *XMiniEnvK8sService) resolveCommonProperties(
 ) error {
 	common := XMiniEnvCommonService{}
 	if err := mapstructure.Decode(rawSvcExt, &common); err != nil {
-		return fmt.Errorf(
+		return Errorf(
 			"failed to parse common service properties: %s",
 			err,
 		)
@@ -264,7 +270,7 @@ func (s *XMiniEnvK8sService) resolveCommonProperties(
 func (s *XMiniEnvK8sService) resolveChartValues(rawSvcExt any) error {
 	chartValues := ChartValues{}
 	if err := mapstructure.Decode(rawSvcExt, &chartValues); err != nil {
-		return fmt.Errorf(
+		return Errorf(
 			"failed to parse k8s chart values: %s",
 			err,
 		)
@@ -303,7 +309,10 @@ func (s *XMiniEnvK8sService) resolveNgrok(
 	}
 }
 
-func (s *XMiniEnvK8sService) resolveServiceImage(svc ComposeService) error {
+func (s *XMiniEnvK8sService) resolveServiceImage(
+	svc ComposeService,
+	commander os.Commander,
+) error {
 	split := strings.SplitN(svc.Image, ":", 2)
 	svcImageRepo := ""
 	svcImageTag := ""
@@ -326,21 +335,23 @@ func (s *XMiniEnvK8sService) resolveServiceImage(svc ComposeService) error {
 	if s.Image.Repository == "" {
 		err = errors.Join(
 			err,
-			fmt.Errorf("image.repository must be specified in service extension"),
+			Errorf("image.repository must be specified in service extension"),
 		)
 	}
 
 	if s.Image.Tag == "" {
 		err = errors.Join(
 			err,
-			fmt.Errorf("image.tag must be specified in service extension"),
+			Errorf("image.tag must be specified in service extension"),
 		)
 	}
 
 	if strings.Contains(s.Image.Tag, "+git") {
-		sha, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+		sha, err := commander.
+			Command("git", "rev-parse", "--short", "HEAD").Output()
+
 		if err != nil {
-			return fmt.Errorf(
+			return Errorf(
 				"failed to get short sha from git for image tag: %s",
 				err,
 			)
@@ -376,7 +387,7 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 
 	for _, p := range svc.Ports {
 		if p.Target > math.MaxInt16 {
-			return fmt.Errorf("invalid port configuration: %+v", p.Target)
+			return Errorf("invalid port configuration: %+v", p.Target)
 		}
 
 		published, err := strconv.ParseUint(p.Published, 10, 16)
@@ -592,7 +603,7 @@ func (s *XMiniEnvK8sService) decodeNestedStructures(values map[string]any) error
 	for _, port := range s.Service.Ports {
 		var mapPort map[string]any
 		if err := mapstructure.Decode(port, &mapPort); err != nil {
-			return fmt.Errorf("failed to resolve service port: %s", err)
+			return Errorf("failed to resolve service port: %s", err)
 		}
 		servicePorts = append(servicePorts, mapPort)
 	}
@@ -607,7 +618,7 @@ func (s *XMiniEnvK8sService) decodeNestedStructures(values map[string]any) error
 		for _, secret := range s.ImagePullSecrets {
 			var mapSecret map[string]any
 			if err := mapstructure.Decode(secret, &mapSecret); err != nil {
-				return fmt.Errorf("failed to resolve imagePullSecret: %s", err)
+				return Errorf("failed to resolve imagePullSecret: %s", err)
 			}
 			pullSecrets = append(pullSecrets, mapSecret)
 		}

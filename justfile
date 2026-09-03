@@ -15,11 +15,12 @@ lint:
     golangci-lint run
 
 # runs all test suites
-test:
+test *args:
     # --fail-on-empty
     ginkgo \
       -r \
       -p \
+      --v \
       --randomize-all \
       --randomize-suites \
       --fail-on-pending \
@@ -29,7 +30,7 @@ test:
       --race \
       --trace \
       --json-report=report.json \
-      --output-dir=reports
+      --output-dir=reports {{ args }}
 
 # generates and opens html coverage report
 coverage-report:
@@ -37,6 +38,10 @@ coverage-report:
       -html=reports/cover.profile \
       -o reports/coverage.html \
       && open reports/coverage.html
+
+# generates mocks - re-run this anytime a mocked interface is updated
+mock:
+    mockery
 
 # runs the entry point using "go run"
 run *args:

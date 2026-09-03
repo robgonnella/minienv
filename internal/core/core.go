@@ -30,12 +30,12 @@ func New(
 func (c *Core) Deploy() error {
 	log.Info().Str("deployer", c.deployer.String()).Msg("initializing")
 	if err := c.deployer.Init(c.project); err != nil {
-		return err
+		return Errorf("failed to initialize deployer: %s", err)
 	}
 
 	log.Info().Str("deployer", c.deployer.String()).Msg("executing deploy")
 	if err := c.deployer.Deploy(c.project); err != nil {
-		return err
+		return Errorf("deploy failed: %s", err)
 	}
 
 	return nil
@@ -44,12 +44,12 @@ func (c *Core) Deploy() error {
 func (c *Core) Destroy() error {
 	log.Info().Str("deployer", c.deployer.String()).Msg("initializing")
 	if err := c.deployer.Init(c.project); err != nil {
-		return err
+		return Errorf("failed to initialize deployer: %s", err)
 	}
 
 	log.Info().Str("deployer", c.deployer.String()).Msg("executing destroy")
 	if err := c.deployer.Destroy(c.project); err != nil {
-		return err
+		return Errorf("destroy failed: %s", err)
 	}
 
 	return nil

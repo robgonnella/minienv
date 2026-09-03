@@ -2,7 +2,6 @@ package loader
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/core"
 	"github.com/robgonnella/minienv/internal/deployer"
+	"github.com/robgonnella/minienv/internal/os"
 	"github.com/rs/zerolog/log"
 )
 
@@ -19,6 +19,7 @@ type LoaderOpts struct {
 	ProjectDirectory string
 	ProjectName      string
 	DryRun           bool
+	Commander        os.Commander
 }
 
 type Loader struct {
@@ -62,12 +63,12 @@ func (l *Loader) loadComposeProject() (*config.ComposeProject, error) {
 		composecli.WithName(l.opts.ProjectName),
 	)
 	if err != nil {
-		return nil, err
+		return nil, Errorf("failed to create compose project options: %s", err)
 	}
 
 	project, err := projectOpts.LoadProject(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, Errorf("failed to load compose project: %s", err)
 	}
 
 	return project, nil
@@ -78,14 +79,14 @@ func (l *Loader) loadMainExtensionConfig(
 ) (*config.XMiniEnv, error) {
 	ex, ok := project.Extensions[config.TOP_LEVEL_EXTENSION]
 	if !ok {
-		return nil, fmt.Errorf(
+		return nil, Errorf(
 			"no minienv extension config found in docker compose configs",
 		)
 	}
 
 	var extConfig config.XMiniEnv
 	if err := mapstructure.Decode(ex, &extConfig); err != nil {
-		return nil, fmt.Errorf(
+		return nil, Errorf(
 			"failed to parse x-minienv top-level extension: %s",
 			err,
 		)
@@ -103,7 +104,12 @@ func (l *Loader) loadActiveDeployer(
 	ext *config.XMiniEnv,
 ) (deployer.Deployer, error) {
 	deployers := []deployer.Deployer{
-		deployer.NewHelm(ext, l.opts.DryRun),
+		deployer.NewHelm(
+			ext,
+			l.opts.Commander,
+			config.NGROK_AUTHTOKEN,
+			l.opts.DryRun,
+		),
 	}
 
 	var targetDeployer deployer.Deployer
@@ -117,7 +123,7 @@ func (l *Loader) loadActiveDeployer(
 	}
 
 	if len(activeDeployers) > 1 {
-		return nil, fmt.Errorf(
+		return nil, Errorf(
 			"detected multiple active configurations for deployment. "+
 				"only one of [%s] can be configured",
 			strings.Join(activeDeployers, ", "),
@@ -125,7 +131,7 @@ func (l *Loader) loadActiveDeployer(
 	}
 
 	if targetDeployer == nil {
-		return nil, fmt.Errorf(
+		return nil, Errorf(
 			"failed to find an active configuration for deployment. "+
 				"configure one of [%s] in x-minienv extension field",
 			slices.Collect(func(yield func(s string) bool) {

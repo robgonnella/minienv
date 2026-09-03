@@ -3,6 +3,8 @@ package config
 import "os"
 
 var NGROK_AUTHTOKEN = os.Getenv("NGROK_AUTHTOKEN")
+
+var HELM_DRIVER = os.Getenv("HELM_DRIVER")
 var HELM_DEFAULT_DEPLOYMENT_TIMEOUT = "30s"
 
 const TOP_LEVEL_EXTENSION = "x-minienv"

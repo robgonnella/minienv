@@ -5,6 +5,7 @@ MINIENV_NAMESPACE = "minienv-review"
 [tools]
 go = "1.27"
 golangci-lint = "2.13"
+mockery = "3.7"
 ginkgo = "2.32.1"
 minikube = "1.38"
 kubectl = "1.35"
