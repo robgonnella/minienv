@@ -5,9 +5,10 @@ import "github.com/robgonnella/minienv/internal/errs"
 // Failure modes raised by this package. Values are namespaced because errs.Kind
 // is one shared type — see internal/errs.
 const (
-	KindDestroyService    errs.Kind = "deployer.destroy_service"
-	KindDeploymentTimeout errs.Kind = "deployer.deployment_timeout"
-	KindChartLoad         errs.Kind = "deployer.chart_load"
-	KindInstall           errs.Kind = "deployer.install"
-	KindUpgrade           errs.Kind = "deployer.upgrade"
+	KindChartUninstall         errs.Kind = "deployer.chart_uninstall"
+	KindChartDeploymentTimeout errs.Kind = "deployer.chart_deployment_timeout"
+	KindChartLoad              errs.Kind = "deployer.chart_load"
+	KindChartInstall           errs.Kind = "deployer.chart_install"
+	KindChartUpgrade           errs.Kind = "deployer.chart_upgrade"
+	KindComposeDependencyGraph errs.Kind = "deployer.compose_dependency_graph"
 )

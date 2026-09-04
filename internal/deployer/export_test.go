@@ -24,3 +24,29 @@ func (h *Helm) BuildAndPushServiceImages(
 ) error {
 	return h.buildAndPushServiceImages(project)
 }
+
+// DeployInDependencyOrder exposes the depends_on-ordered walk with the
+// per-service step injected. Deploy only reaches the real step after Init has
+// built a cluster connection, so this is the only way to assert on ordering,
+// concurrency and abort-on-first-error.
+func (h *Helm) DeployInDependencyOrder(
+	project *config.ComposeProject,
+	deploy func(svc config.ComposeService) error,
+) error {
+	return h.deployInDependencyOrder(project, deploy)
+}
+
+// DestroyInReverseDependencyOrder is the teardown counterpart.
+func (h *Helm) DestroyInReverseDependencyOrder(
+	project *config.ComposeProject,
+	uninstall func(svc config.ComposeService) error,
+) error {
+	return h.destroyInReverseDependencyOrder(project, uninstall)
+}
+
+// DeployService exposes the per-service step the walk dispatches to. Only its
+// pre-helm branches — skip, and a failure resolving the extension — are
+// reachable without a cluster.
+func (h *Helm) DeployService(svc config.ComposeService) error {
+	return h.deployService(svc)
+}

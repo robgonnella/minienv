@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	composegraph "github.com/compose-spec/compose-go/v2/graph"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
@@ -19,6 +20,13 @@ import (
 	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// bounds concurrent helm releases; each one waits on rollout
+const maxDeployConcurrency = 5
+
+// deployFn acts on one service. Injected so the dependency-ordered walk is
+// drivable without a cluster.
+type deployFn func(svc config.ComposeService) error
 
 type HelmOptions struct {
 	Ext            *config.XMiniEnv
@@ -100,26 +108,7 @@ func (h *Helm) Deploy(project *config.ComposeProject) error {
 		return err
 	}
 
-	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
-		if err != nil {
-			return err
-		}
-
-		if svcExt.Skip {
-			log.
-				Warn().
-				Str("service", svc.Name).
-				Msg("detected skip: omitting service from deployment")
-			continue
-		}
-
-		if err := h.upgradeOrInstallService(svcExt, svc); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return h.deployInDependencyOrder(project, h.deployService)
 }
 
 func (h *Helm) Destroy(project *config.ComposeProject) error {
@@ -127,18 +116,7 @@ func (h *Helm) Destroy(project *config.ComposeProject) error {
 		return nil
 	}
 
-	for name, svc := range project.Services {
-		if err := h.uninstallChart(svc); err != nil {
-			return errs.Errorf(
-				KindDestroyService,
-				"failed to destroy service %s: %w",
-				name,
-				err,
-			)
-		}
-	}
-
-	return nil
+	return h.destroyInReverseDependencyOrder(project, h.uninstallChart)
 }
 
 func (h *Helm) extensionOptions(
@@ -150,6 +128,23 @@ func (h *Helm) extensionOptions(
 		GitClient:    h.gitClient,
 		NgrokEnabled: h.ngrokAuthToken != "",
 	}
+}
+
+func (h *Helm) deployService(svc config.ComposeService) error {
+	svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
+	if err != nil {
+		return err
+	}
+
+	if svcExt.Skip {
+		log.
+			Warn().
+			Str("service", svc.Name).
+			Msg("detected skip: omitting service from deployment")
+		return nil
+	}
+
+	return h.upgradeOrInstallService(svcExt, svc)
 }
 
 func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
@@ -190,6 +185,64 @@ func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 	return nil
 }
 
+// deployInDependencyOrder walks the project's depends_on graph, deploying a
+// service only once everything it depends on has been deployed. Services with
+// no unmet dependency are deployed concurrently.
+func (h *Helm) deployInDependencyOrder(
+	project *config.ComposeProject,
+	deploy deployFn,
+) error {
+	if err := h.checkDependencyGraph(project); err != nil {
+		return err
+	}
+
+	return composegraph.InDependencyOrder(
+		context.Background(),
+		project,
+		func(_ context.Context, _ string, svc config.ComposeService) error {
+			return deploy(svc)
+		},
+		composegraph.WithMaxConcurrency(maxDeployConcurrency),
+	)
+}
+
+// destroyInReverseDependencyOrder mirrors deployInDependencyOrder: a service is
+// uninstalled only once everything depending on it is gone.
+func (h *Helm) destroyInReverseDependencyOrder(
+	project *config.ComposeProject,
+	uninstall deployFn,
+) error {
+	if err := h.checkDependencyGraph(project); err != nil {
+		return err
+	}
+
+	return composegraph.InDependencyOrder(
+		context.Background(),
+		project,
+		func(_ context.Context, _ string, svc config.ComposeService) error {
+			return uninstall(svc)
+		},
+		composegraph.InReverseOrder,
+		composegraph.WithMaxConcurrency(maxDeployConcurrency),
+	)
+}
+
+// Validated up front so an unusable depends_on graph — a cycle, or a required
+// dependency naming a service the project does not define — fails before a
+// single release is touched. It also keeps the traversal's own error return
+// carrying nothing but failures from the injected step.
+func (h *Helm) checkDependencyGraph(project *config.ComposeProject) error {
+	if err := composegraph.CheckCycle(project); err != nil {
+		return errs.Errorf(
+			KindComposeDependencyGraph,
+			"invalid service dependency graph: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
 func (h *Helm) upgradeOrInstallService(
 	svcExt *config.XMiniEnvK8sService,
 	svc config.ComposeService,
@@ -222,7 +275,7 @@ func (h *Helm) installChart(
 	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
 		return errs.Errorf(
-			KindDeploymentTimeout,
+			KindChartDeploymentTimeout,
 			"invalid deploymentTimeout configuration: %w",
 			err,
 		)
@@ -245,7 +298,7 @@ func (h *Helm) installChart(
 
 	if _, err := client.Run(chart, values); err != nil {
 		return errs.Errorf(
-			KindInstall,
+			KindChartInstall,
 			"failed to install service chart %s: %w",
 			svc.Name,
 			err,
@@ -279,7 +332,7 @@ func (h *Helm) upgradeChart(
 	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
 		return errs.Errorf(
-			KindDeploymentTimeout,
+			KindChartDeploymentTimeout,
 			"invalid deploymentTimeout configuration: %w",
 			err,
 		)
@@ -295,12 +348,16 @@ func (h *Helm) upgradeChart(
 
 	chart, err := h.loadChart(svc.Name, h.ngrokAuthToken)
 	if err != nil {
-		return errs.Errorf(KindChartLoad, "failed to load in-memory chart: %w", err)
+		return errs.Errorf(
+			KindChartLoad,
+			"failed to load in-memory chart: %w",
+			err,
+		)
 	}
 
 	if _, err := client.Run(svc.Name, chart, values); err != nil {
 		return errs.Errorf(
-			KindUpgrade,
+			KindChartUpgrade,
 			"failed to upgrade service chart %s: %w",
 			svc.Name,
 			err,
@@ -325,7 +382,12 @@ func (h *Helm) uninstallChart(svc config.ComposeService) error {
 
 	response, err := client.Run(svc.Name)
 	if err != nil {
-		return err
+		return errs.Errorf(
+			KindChartUninstall,
+			"failed to uninstall service chart %s: %w",
+			svc.Name,
+			err,
+		)
 	}
 
 	if response == nil || response.Release == nil {

@@ -16,7 +16,8 @@ lint:
 
 # runs all test suites
 test *args:
-    ginkgo \
+    cd {{ invocation_directory() }} \
+    && ginkgo \
       -r \
       -p \
       --v \
