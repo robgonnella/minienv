@@ -243,8 +243,23 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 
 			Expect(err).ShouldNot(HaveOccurred())
-			Expect(result.Service.Create).To(BeFalse())
-			Expect(result.ServiceAccount.Create).To(BeFalse())
+			Expect(result.Service.Create).To(HaveValue(BeFalse()))
+			Expect(result.ServiceAccount.Create).To(HaveValue(BeFalse()))
+		})
+
+		// The whole reason Create is a *bool: unset has to stay distinguishable
+		// from an explicit false, so the chart's own values.yaml default is what
+		// decides when minienv has no opinion.
+		It("leaves service creation unset when there are ports", func() {
+			svc.Ports = []types.ServicePortConfig{
+				{Target: 8080, Published: "3000"},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Service.Create).To(BeNil())
+			Expect(result.ServiceAccount.Create).To(BeNil())
 		})
 	})
 
@@ -503,7 +518,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(result.Volumes).To(BeEmpty())
 
-			values, err := result.ToValuesMap()
+			values, err := result.ToChartValuesMap()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).ToNot(HaveKey("ngrok"))
 		})
@@ -565,7 +580,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				result, err := newSvcExt()
 				Expect(err).ShouldNot(HaveOccurred())
 
-				values, err := result.ToValuesMap()
+				values, err := result.ToChartValuesMap()
 				Expect(err).ShouldNot(HaveOccurred())
 
 				Expect(values["ngrok"]).To(Equal(map[string]any{
@@ -591,13 +606,83 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				result, err := newSvcExt()
 				Expect(err).ShouldNot(HaveOccurred())
 
-				_, err = result.ToValuesMap()
+				_, err = result.ToChartValuesMap()
 				Expect(err).To(MatchError(config.KindNgrokPortMismatch))
 			})
 		})
 	})
 
-	Describe("ToValuesMap", func() {
+	Describe("deployment type", func() {
+		It("defaults to a service deployment", func() {
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.DeploymentType).
+				To(Equal(config.K8sServiceDeploymentType))
+		})
+
+		It("reads an explicit job deployment from the extension", func() {
+			svc.Extensions = types.Extensions{
+				config.K8S_SERVICE_EXTENSION: map[string]any{
+					"deploymentType": "job",
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.DeploymentType).To(Equal(config.K8sJobDeploymentType))
+		})
+
+		// K8sDeploymentType is a string alias, so neither the compiler nor
+		// mapstructure rejects a typo. Without this branch the deployer has to
+		// guess at what an unrecognized value meant.
+		It("returns a config error for an unrecognized deployment type", func() {
+			svc.Extensions = types.Extensions{
+				config.K8S_SERVICE_EXTENSION: map[string]any{
+					"deploymentType": "sevice",
+				},
+			}
+
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(config.KindInvalidDeploymentType))
+		})
+	})
+
+	Describe("container command", func() {
+		It("derives the command from the compose service", func() {
+			svc.Command = types.ShellCommand{"/bin/sh", "-c", "echo ready"}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Command).To(Equal([]string{"/bin/sh", "-c", "echo ready"}))
+		})
+
+		It("prefers a command set in the extension", func() {
+			svc.Command = types.ShellCommand{"compose"}
+			svc.Extensions = types.Extensions{
+				config.K8S_SERVICE_EXTENSION: map[string]any{
+					"command": []any{"extension"},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Command).To(Equal([]string{"extension"}))
+		})
+
+		It("leaves the command unset when neither declares one", func() {
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Command).To(BeNil())
+		})
+	})
+
+	Describe("ToChartValuesMap", func() {
 		It("decodes service ports into the nested chart shape", func() {
 			svc.Ports = []types.ServicePortConfig{
 				{Target: 8080, Published: "3000"},
@@ -606,7 +691,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToValuesMap()
+			values, err := result.ToChartValuesMap()
 			Expect(err).ShouldNot(HaveOccurred())
 
 			svcValues, ok := values["service"].(map[string]any)
@@ -634,7 +719,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToValuesMap()
+			values, err := result.ToChartValuesMap()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values["imagePullSecrets"]).To(Equal([]map[string]any{
 				{"name": "regcred"},
@@ -651,9 +736,81 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToValuesMap()
+			values, err := result.ToChartValuesMap()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).To(HaveKeyWithValue("replicas", uint8(3)))
+		})
+
+		It("carries the command through under the key the chart reads", func() {
+			svc.Command = types.ShellCommand{"/bin/sh", "-c", "echo ready"}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ToChartValuesMap()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(values).To(HaveKeyWithValue(
+				"command",
+				[]string{"/bin/sh", "-c", "echo ready"},
+			))
+		})
+
+		// Ensures *bools are converted to bool in the map otherwise the pointer
+		// could be interpreted as "truthy" by templating engines.
+		It("flattens optional bools to plain values", func() {
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ToChartValuesMap()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			svcValues, ok := values["service"].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(svcValues).To(HaveKeyWithValue("create", false))
+
+			saValues, ok := values["serviceAccount"].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(saValues).To(HaveKeyWithValue("create", false))
+		})
+
+		// Unset should remain "nil", which is indicates to use the default, and
+		// distinguishes from an explicit "false".
+		It("omits an optional bool the extension never set", func() {
+			svc.Ports = []types.ServicePortConfig{
+				{Target: 8080, Published: "3000"},
+			}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ToChartValuesMap()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			svcValues, ok := values["service"].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(svcValues).ToNot(HaveKey("create"))
+
+			saValues, ok := values["serviceAccount"].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(saValues).ToNot(HaveKey("automount"))
+		})
+
+		// deploymentType lives on XMiniEnvK8sService rather than ChartValues: it
+		// selects which templates get assembled, so it must not leak into the
+		// values handed to a chart that has no such key.
+		It("omits the deployment type from the chart values", func() {
+			svc.Extensions = types.Extensions{
+				config.K8S_SERVICE_EXTENSION: map[string]any{
+					"deploymentType": "job",
+				},
+			}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ToChartValuesMap()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(values).ToNot(HaveKey("deploymentType"))
 		})
 	})
 

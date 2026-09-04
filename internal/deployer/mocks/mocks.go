@@ -125,16 +125,16 @@ func (_c *MockDeployer_ConfigField_Call) RunAndReturn(run func() string) *MockDe
 }
 
 // Deploy provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Deploy(project *config.ComposeProject) error {
-	ret := _mock.Called(project)
+func (_mock *MockDeployer) Deploy() error {
+	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for Deploy")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*config.ComposeProject) error); ok {
-		r0 = returnFunc(project)
+	if returnFunc, ok := ret.Get(0).(func() error); ok {
+		r0 = returnFunc()
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -147,20 +147,13 @@ type MockDeployer_Deploy_Call struct {
 }
 
 // Deploy is a helper method to define mock.On call
-//   - project *config.ComposeProject
-func (_e *MockDeployer_Expecter) Deploy(project any) *MockDeployer_Deploy_Call {
-	return &MockDeployer_Deploy_Call{Call: _e.mock.On("Deploy", project)}
+func (_e *MockDeployer_Expecter) Deploy() *MockDeployer_Deploy_Call {
+	return &MockDeployer_Deploy_Call{Call: _e.mock.On("Deploy")}
 }
 
-func (_c *MockDeployer_Deploy_Call) Run(run func(project *config.ComposeProject)) *MockDeployer_Deploy_Call {
+func (_c *MockDeployer_Deploy_Call) Run(run func()) *MockDeployer_Deploy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *config.ComposeProject
-		if args[0] != nil {
-			arg0 = args[0].(*config.ComposeProject)
-		}
-		run(
-			arg0,
-		)
+		run()
 	})
 	return _c
 }
@@ -170,22 +163,22 @@ func (_c *MockDeployer_Deploy_Call) Return(err error) *MockDeployer_Deploy_Call 
 	return _c
 }
 
-func (_c *MockDeployer_Deploy_Call) RunAndReturn(run func(project *config.ComposeProject) error) *MockDeployer_Deploy_Call {
+func (_c *MockDeployer_Deploy_Call) RunAndReturn(run func() error) *MockDeployer_Deploy_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Destroy provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Destroy(project *config.ComposeProject) error {
-	ret := _mock.Called(project)
+func (_mock *MockDeployer) Destroy() error {
+	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for Destroy")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*config.ComposeProject) error); ok {
-		r0 = returnFunc(project)
+	if returnFunc, ok := ret.Get(0).(func() error); ok {
+		r0 = returnFunc()
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -198,20 +191,13 @@ type MockDeployer_Destroy_Call struct {
 }
 
 // Destroy is a helper method to define mock.On call
-//   - project *config.ComposeProject
-func (_e *MockDeployer_Expecter) Destroy(project any) *MockDeployer_Destroy_Call {
-	return &MockDeployer_Destroy_Call{Call: _e.mock.On("Destroy", project)}
+func (_e *MockDeployer_Expecter) Destroy() *MockDeployer_Destroy_Call {
+	return &MockDeployer_Destroy_Call{Call: _e.mock.On("Destroy")}
 }
 
-func (_c *MockDeployer_Destroy_Call) Run(run func(project *config.ComposeProject)) *MockDeployer_Destroy_Call {
+func (_c *MockDeployer_Destroy_Call) Run(run func()) *MockDeployer_Destroy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *config.ComposeProject
-		if args[0] != nil {
-			arg0 = args[0].(*config.ComposeProject)
-		}
-		run(
-			arg0,
-		)
+		run()
 	})
 	return _c
 }
@@ -221,7 +207,7 @@ func (_c *MockDeployer_Destroy_Call) Return(err error) *MockDeployer_Destroy_Cal
 	return _c
 }
 
-func (_c *MockDeployer_Destroy_Call) RunAndReturn(run func(project *config.ComposeProject) error) *MockDeployer_Destroy_Call {
+func (_c *MockDeployer_Destroy_Call) RunAndReturn(run func() error) *MockDeployer_Destroy_Call {
 	_c.Call.Return(run)
 	return _c
 }

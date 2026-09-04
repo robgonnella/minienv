@@ -6,7 +6,7 @@ package config
 // importing this package — including from a test binary — never pulls a
 // credential into the process.
 
-var HELM_DEFAULT_DEPLOYMENT_TIMEOUT = "30s"
+var HELM_DEFAULT_DEPLOYMENT_TIMEOUT = "60s"
 
 const TOP_LEVEL_EXTENSION = "x-minienv"
 const K8S_SERVICE_EXTENSION = "x-minienv-k8s-service"

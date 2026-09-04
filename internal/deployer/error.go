@@ -11,4 +11,5 @@ const (
 	KindChartInstall           errs.Kind = "deployer.chart_install"
 	KindChartUpgrade           errs.Kind = "deployer.chart_upgrade"
 	KindComposeDependencyGraph errs.Kind = "deployer.compose_dependency_graph"
+	KindHelmMissingService     errs.Kind = "deployer.helm_missing_services"
 )

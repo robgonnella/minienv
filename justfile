@@ -8,7 +8,11 @@ build:
       -ldflags="-s -w" \
       -trimpath \
       -o build/minienv \
-      cmd/cli/main.go
+      cmd/minienv/main.go
+
+# builds and installs executable locally
+install:
+    go install ./cmd/minienv
 
 # lints entire project
 lint:
@@ -46,7 +50,7 @@ mock:
 
 # runs the entry point using "go run"
 run *args:
-    go run cmd/cli/main.go {{ args }}
+    go run cmd/minienv/main.go {{ args }}
 
 # generates schema files
 gen-schema:

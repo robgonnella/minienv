@@ -42,7 +42,7 @@ var _ = Describe("Core", func() {
 			initCall := mockDeployer.EXPECT().Init(project).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				Deploy(project).
+				Deploy().
 				Return(nil).
 				Once().
 				NotBefore(initCall)
@@ -61,14 +61,14 @@ var _ = Describe("Core", func() {
 			Expect(err).To(MatchError(core.KindDeployerInit))
 			Expect(err).To(MatchError(errBoom))
 
-			mockDeployer.AssertNotCalled(GinkgoT(), "Deploy", project)
+			mockDeployer.AssertNotCalled(GinkgoT(), "Deploy")
 		})
 
 		It("returns a core error when the deploy itself fails", func() {
 			mockDeployer.EXPECT().Init(project).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				Deploy(project).
+				Deploy().
 				Return(errBoom).
 				Once()
 
@@ -83,7 +83,7 @@ var _ = Describe("Core", func() {
 			initCall := mockDeployer.EXPECT().Init(project).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				Destroy(project).
+				Destroy().
 				Return(nil).
 				Once().
 				NotBefore(initCall)
@@ -102,14 +102,14 @@ var _ = Describe("Core", func() {
 			Expect(err).To(MatchError(core.KindDeployerInit))
 			Expect(err).To(MatchError(errBoom))
 
-			mockDeployer.AssertNotCalled(GinkgoT(), "Destroy", project)
+			mockDeployer.AssertNotCalled(GinkgoT(), "Destroy")
 		})
 
 		It("returns a core error when the destroy itself fails", func() {
 			mockDeployer.EXPECT().Init(project).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				Destroy(project).
+				Destroy().
 				Return(errBoom).
 				Once()
 

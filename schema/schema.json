@@ -191,7 +191,7 @@
         },
         "deploymentTimeout": {
           "type": "string",
-          "description": "Controls the Helm timeout. This is applied to all services but can be\noverriden using the service-level extension"
+          "description": "Controls the Helm timeout. This is applied to all services but can be\noverridden using the service-level extension"
         }
       },
       "additionalProperties": false,
@@ -226,6 +226,13 @@
           },
           "type": "array",
           "description": "Any image pull secrets required to pull images on the cluster"
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Command to run for the main deployment container"
         },
         "service": {
           "$ref": "#/$defs/ChartService",
@@ -308,6 +315,15 @@
         "affinity": {
           "type": "object",
           "description": "Affinity configuration for the deployment pods"
+        },
+        "deploymentType": {
+          "type": "string",
+          "enum": [
+            "service",
+            "job"
+          ],
+          "description": "Controls the type of deployment (service | job). Default is \"service\"",
+          "default": "service"
         },
         "deploymentTimeout": {
           "type": "string",

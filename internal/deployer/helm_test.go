@@ -1,6 +1,7 @@
 package deployer_test
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"slices"
@@ -97,48 +98,61 @@ func dependent(name string, deps ...string) config.ComposeService {
 // concurrently and the suite runs with -race, so the log needs a lock: an
 // unguarded append here would be a data race, not an occasional flake.
 type recorder struct {
-	mu   sync.Mutex
-	seen []string
-	fail map[string]error
+	mu     sync.Mutex
+	cancel context.CancelFunc
+	ok     []string
+	fail   map[string]error
 }
 
-func newRecorder() *recorder {
-	return &recorder{fail: map[string]error{}}
+func newRecorder(cancel context.CancelFunc) *recorder {
+	return &recorder{
+		mu:     sync.Mutex{},
+		cancel: cancel,
+		ok:     []string{},
+		fail:   map[string]error{},
+	}
 }
 
-func (r *recorder) visit(svc config.ComposeService) error {
+func (r *recorder) visit(ctx context.Context, svc config.ComposeService) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.seen = append(r.seen, svc.Name)
+	if err, ok := r.fail[svc.Name]; ok {
+		r.cancel()
+		return err
+	}
 
-	return r.fail[svc.Name]
+	r.ok = append(r.ok, svc.Name)
+
+	return nil
 }
 
-func (r *recorder) visited() []string {
+func (r *recorder) succeeded() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return slices.Clone(r.seen)
+	return slices.Clone(r.ok)
 }
 
 var _ = Describe("Helm", func() {
 	var (
-		ext          *config.XMiniEnv
-		mockImage    *imagemocks.MockClient
-		mockGit      *gitmocks.MockClient
-		ngrokEnabled bool
-		subject      *deployer.Helm
+		ext        *config.XMiniEnv
+		mockImage  *imagemocks.MockClient
+		mockGit    *gitmocks.MockClient
+		subject    *deployer.Helm
+		ngrokToken string
 	)
 
-	// Assembled lazily: specs mutate ext, svc and ngrokEnabled in their own
+	// Assembled lazily: specs mutate ext, svc and ngrokToken in their own
 	// bodies before resolving.
-	extOpts := func(svc config.ComposeService) config.XMiniEnvK8sServiceOptions {
+	extOpts := func(
+		svc config.ComposeService,
+	) config.XMiniEnvK8sServiceOptions {
 		return config.XMiniEnvK8sServiceOptions{
 			MainExt:      ext,
 			Service:      svc,
 			GitClient:    mockGit,
-			NgrokEnabled: ngrokEnabled,
+			NgrokEnabled: ngrokToken != "",
 		}
 	}
 
@@ -151,12 +165,18 @@ var _ = Describe("Helm", func() {
 		}
 		mockImage = imagemocks.NewMockClient(GinkgoT())
 		mockGit = gitmocks.NewMockClient(GinkgoT())
-		ngrokEnabled = false
+		// Reset explicitly: the suite runs --randomize-all, so a token left set
+		// by the ngrok specs would silently enable ngrok for whatever ran next.
+		ngrokToken = ""
+	})
+
+	JustBeforeEach(func() {
 		subject = deployer.NewHelm(deployer.HelmOptions{
-			Ext:         ext,
-			ImageClient: mockImage,
-			GitClient:   mockGit,
-			DryRun:      false,
+			Ext:            ext,
+			ImageClient:    mockImage,
+			GitClient:      mockGit,
+			NgrokAuthToken: ngrokToken,
+			DryRun:         false,
 		})
 	})
 
@@ -203,11 +223,11 @@ var _ = Describe("Helm", func() {
 		})
 
 		It("does nothing on Deploy", func() {
-			Expect(subject.Deploy(project)).To(Succeed())
+			Expect(subject.Deploy()).To(Succeed())
 		})
 
 		It("does nothing on Destroy", func() {
-			Expect(subject.Destroy(project)).To(Succeed())
+			Expect(subject.Destroy()).To(Succeed())
 		})
 	})
 
@@ -236,6 +256,7 @@ var _ = Describe("Helm", func() {
 
 		It("translates a buildable service into image properties", func() {
 			project.Services = types.Services{"hello": buildable("hello")}
+			Expect(subject.InitProject(project)).To(Succeed())
 
 			mockImage.
 				EXPECT().
@@ -253,7 +274,7 @@ var _ = Describe("Helm", func() {
 				Return(nil).
 				Once()
 
-			Expect(subject.BuildAndPushServiceImages(project)).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
 		})
 
 		It("carries the platforms resolved from the extension", func() {
@@ -266,6 +287,7 @@ var _ = Describe("Helm", func() {
 				},
 			}
 			project.Services = types.Services{"hello": svc}
+			Expect(subject.InitProject(project)).To(Succeed())
 
 			var got []image.ServiceProperties
 			mockImage.
@@ -275,7 +297,7 @@ var _ = Describe("Helm", func() {
 				Return(nil).
 				Once()
 
-			Expect(subject.BuildAndPushServiceImages(project)).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
 			Expect(got).To(HaveLen(1))
 			Expect(got[0].Platforms).
 				To(Equal([]string{"linux/arm64", "linux/amd64"}))
@@ -290,6 +312,7 @@ var _ = Describe("Helm", func() {
 				"hello":   buildable("hello"),
 				"skipped": skipped,
 			}
+			Expect(subject.InitProject(project)).To(Succeed())
 
 			var got []image.ServiceProperties
 			mockImage.
@@ -299,7 +322,7 @@ var _ = Describe("Helm", func() {
 				Return(nil).
 				Once()
 
-			Expect(subject.BuildAndPushServiceImages(project)).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
 			Expect(got).To(HaveLen(1))
 			Expect(got[0].Name).To(Equal("hello"))
 		})
@@ -310,16 +333,19 @@ var _ = Describe("Helm", func() {
 			project.Services = types.Services{
 				"hello": {Name: "hello", Image: "reg/hello:v1"},
 			}
+			Expect(subject.InitProject(project)).To(Succeed())
 
-			Expect(subject.BuildAndPushServiceImages(project)).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
 		})
 
 		It("never calls the image client for an empty project", func() {
-			Expect(subject.BuildAndPushServiceImages(project)).To(Succeed())
+			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
 		})
 
 		It("propagates an image client failure", func() {
 			project.Services = types.Services{"hello": buildable("hello")}
+			Expect(subject.InitProject(project)).To(Succeed())
 
 			mockImage.
 				EXPECT().
@@ -327,16 +353,28 @@ var _ = Describe("Helm", func() {
 				Return(errBake).
 				Once()
 
-			err := subject.BuildAndPushServiceImages(project)
+			err := subject.BuildAndPushServiceImages()
 
 			Expect(err).To(MatchError(errBake))
+		})
+
+	})
+
+	// The half of Init that runs before a cluster is touched. Everything
+	// downstream reads the map it builds, so a service that cannot be resolved
+	// has to fail here rather than midway through a deployment.
+	Describe("initProject", func() {
+		var project *config.ComposeProject
+
+		BeforeEach(func() {
+			project = &config.ComposeProject{Name: "test-project"}
 		})
 
 		It("returns a config error when a service cannot be resolved", func() {
 			// No image and no extension: resolution fails before any build.
 			project.Services = types.Services{"broken": {Name: "broken"}}
 
-			err := subject.BuildAndPushServiceImages(project)
+			err := subject.InitProject(project)
 
 			// resolveServiceImage accumulates its failures with errors.Join, so
 			// the result is a join wrapper. errors.Is walks the join, which lets
@@ -344,11 +382,36 @@ var _ = Describe("Helm", func() {
 			Expect(err).To(MatchError(config.KindImageRepositoryMissing))
 			Expect(err).To(MatchError(config.KindImageTagMissing))
 		})
+
+		It("rejects a service with an unknown deployment type", func() {
+			svc := config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
+			svc.Extensions = types.Extensions{
+				config.K8S_SERVICE_EXTENSION: map[string]any{
+					"deploymentType": "sevice",
+				},
+			}
+			project.Services = types.Services{"hello": svc}
+
+			Expect(subject.InitProject(project)).
+				To(MatchError(config.KindInvalidDeploymentType))
+		})
+
+		It("resolves every service before any release is touched", func() {
+			project.Services = types.Services{
+				"hello": {Name: "hello", Image: "reg/hello:v1"},
+				"job":   {Name: "job", Image: "reg/job:v1"},
+			}
+
+			Expect(subject.InitProject(project)).To(Succeed())
+		})
 	})
 
-	Describe("LoadChart", func() {
+	Describe("LoadChart (service)", func() {
 		It("assembles every chart file in memory", func() {
-			chart, err := subject.LoadChart("hello", "")
+			chart, err := subject.LoadChart(
+				"hello",
+				config.K8sServiceDeploymentType,
+			)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Name()).To(Equal("hello"))
@@ -371,7 +434,10 @@ var _ = Describe("Helm", func() {
 		})
 
 		It("produces a chart helm can validate", func() {
-			chart, err := subject.LoadChart("hello", "")
+			chart, err := subject.LoadChart(
+				"hello",
+				config.K8sServiceDeploymentType,
+			)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
@@ -398,10 +464,13 @@ var _ = Describe("Helm", func() {
 				svcExt, err := config.NewXMiniEnvK8sService(extOpts(svc))
 				Expect(err).ShouldNot(HaveOccurred())
 
-				values, err = svcExt.ToValuesMap()
+				values, err = svcExt.ToChartValuesMap()
 				Expect(err).ShouldNot(HaveOccurred())
 
-				chart, err := subject.LoadChart("hello", fakeNgrokToken)
+				chart, err := subject.LoadChart(
+					"hello",
+					config.K8sServiceDeploymentType,
+				)
 				Expect(err).ShouldNot(HaveOccurred())
 
 				rendered = render(chart, values)
@@ -424,6 +493,25 @@ var _ = Describe("Helm", func() {
 
 				Expect(service).To(ContainSubstring("port: 3000"))
 				Expect(service).To(ContainSubstring("targetPort: p8080"))
+			})
+
+			// The end of the path resolveServicePorts starts: with no ports there
+			// is nothing to route to, so neither resource should exist. This is
+			// what the *bool on Create buys, and it only holds if the value
+			// reaches the template as a plain false rather than a pointer.
+			Context("with no ports declared", func() {
+				BeforeEach(func() {
+					svc.Ports = nil
+				})
+
+				It("renders no service or service account", func() {
+					Expect(strings.TrimSpace(
+						templateNamed(rendered, "service.yaml"),
+					)).To(BeEmpty())
+					Expect(strings.TrimSpace(
+						templateNamed(rendered, "serviceaccount.yaml"),
+					)).To(BeEmpty())
+				})
 			})
 
 			Context("with replicas set in the extension", func() {
@@ -454,7 +542,7 @@ var _ = Describe("Helm", func() {
 
 			Context("with ngrok enabled", func() {
 				BeforeEach(func() {
-					ngrokEnabled = true
+					ngrokToken = fakeNgrokToken
 
 					svc.Extensions = types.Extensions{
 						config.K8S_SERVICE_EXTENSION: map[string]any{
@@ -499,24 +587,213 @@ var _ = Describe("Helm", func() {
 						ContainSubstring("name: " + config.NGROK_SECRET_NAME),
 					)
 				})
+
+				It("base64 encodes the ngrok auth token into the secret", func() {
+					chart, err := subject.LoadChart(
+						"hello",
+						config.K8sServiceDeploymentType,
+					)
+					Expect(err).ShouldNot(HaveOccurred())
+
+					var secret string
+					for _, f := range chart.Raw {
+						if f.Name == "templates/secret.yaml" {
+							secret = string(f.Data)
+						}
+					}
+
+					Expect(secret).To(ContainSubstring(
+						base64.StdEncoding.EncodeToString([]byte(fakeNgrokToken)),
+					))
+					Expect(secret).ToNot(ContainSubstring(fakeNgrokToken))
+				})
 			})
 		})
+	})
 
-		It("base64 encodes the ngrok auth token into the secret", func() {
-			chart, err := subject.LoadChart("hello", fakeNgrokToken)
+	Describe("LoadChart (job)", func() {
+		It("assembles only the files a job needs", func() {
+			chart, err := subject.LoadChart(
+				"hello",
+				config.K8sJobDeploymentType,
+			)
+
 			Expect(err).ShouldNot(HaveOccurred())
 
-			var secret string
+			names := []string{}
 			for _, f := range chart.Raw {
-				if f.Name == "templates/secret.yaml" {
-					secret = string(f.Data)
-				}
+				names = append(names, f.Name)
 			}
 
-			Expect(secret).To(ContainSubstring(
-				base64.StdEncoding.EncodeToString([]byte(fakeNgrokToken)),
+			// No service, and no ngrok configmap or secret: a job serves no
+			// traffic, so there is nothing to expose and no token to mount.
+			Expect(names).To(ConsistOf(
+				"Chart.yaml",
+				"values.yaml",
+				"templates/_helpers.tpl",
+				"templates/serviceaccount.yaml",
+				"templates/job.yaml",
 			))
-			Expect(secret).ToNot(ContainSubstring(fakeNgrokToken))
+		})
+
+		It("produces a chart that validates", func() {
+			chart, err := subject.LoadChart(
+				"hello",
+				config.K8sJobDeploymentType,
+			)
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(chart.Validate()).To(Succeed())
+		})
+
+		// A Job's spec.template and spec.selector are immutable, so an upgrade
+		// cannot patch one in place. Naming the chart after a throwaway id is
+		// what makes every deploy produce a new Job object instead — the same
+		// reason upgradeChart sets Force and Recreate.
+		It("names the chart a throwaway id rather than the service", func() {
+			first, err := subject.LoadChart("hello", config.K8sJobDeploymentType)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			second, err := subject.LoadChart("hello", config.K8sJobDeploymentType)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			Expect(first.Name()).ToNot(Equal("hello"))
+			Expect(first.Name()).To(MatchRegexp(`^[a-z0-9]{8}$`))
+			Expect(second.Name()).ToNot(Equal(first.Name()))
+		})
+
+		Context("rendered against resolved job values", func() {
+			var (
+				svc      config.ComposeService
+				values   map[string]any
+				chart    *helmchart.Chart
+				rendered map[string]string
+			)
+
+			BeforeEach(func() {
+				svc = config.ComposeService{
+					Name:    "migrate",
+					Image:   "reg/migrate:v1",
+					Command: types.ShellCommand{"/bin/sh", "-c", "echo ready"},
+					Extensions: types.Extensions{
+						config.K8S_SERVICE_EXTENSION: map[string]any{
+							"deploymentType": "job",
+						},
+					},
+				}
+			})
+
+			JustBeforeEach(func() {
+				svcExt, err := config.NewXMiniEnvK8sService(extOpts(svc))
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(svcExt.DeploymentType).
+					To(Equal(config.K8sJobDeploymentType))
+
+				values, err = svcExt.ToChartValuesMap()
+				Expect(err).ShouldNot(HaveOccurred())
+
+				chart, err = subject.LoadChart("migrate", svcExt.DeploymentType)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				rendered = render(chart, values)
+			})
+
+			It("renders a batch job that never restarts", func() {
+				job := templateNamed(rendered, "job.yaml")
+
+				Expect(job).To(ContainSubstring("apiVersion: batch/v1"))
+				Expect(job).To(ContainSubstring("kind: Job"))
+				Expect(job).To(ContainSubstring("backoffLimit: 1"))
+				Expect(job).To(ContainSubstring("restartPolicy: Never"))
+			})
+
+			It("renders the resolved image", func() {
+				Expect(templateNamed(rendered, "job.yaml")).
+					To(ContainSubstring("image: \"reg/migrate:v1\""))
+			})
+
+			It("renders the command resolved from the compose service", func() {
+				job := templateNamed(rendered, "job.yaml")
+
+				Expect(job).To(ContainSubstring("command:"))
+				Expect(job).To(ContainSubstring("- /bin/sh"))
+				Expect(job).To(ContainSubstring("- echo ready"))
+			})
+
+			It("names the container after the generated chart name", func() {
+				Expect(templateNamed(rendered, "job.yaml")).
+					To(ContainSubstring("name: " + chart.Name()))
+			})
+
+			It("creates no service account for a job with no ports", func() {
+				Expect(strings.TrimSpace(
+					templateNamed(rendered, "serviceaccount.yaml"),
+				)).To(BeEmpty())
+			})
+
+			It("renders no ports for a job that declares none", func() {
+				Expect(templateNamed(rendered, "job.yaml")).
+					ToNot(ContainSubstring("containerPort"))
+			})
+
+			Context("with an environment and a port", func() {
+				BeforeEach(func() {
+					svc.Environment = types.MappingWithEquals{
+						"DATABASE_URL": new("postgres://db"),
+					}
+					svc.Ports = []types.ServicePortConfig{
+						{Target: 8080, Published: "3000"},
+					}
+				})
+
+				It("renders the container port", func() {
+					job := templateNamed(rendered, "job.yaml")
+
+					Expect(job).To(ContainSubstring("name: p8080"))
+					Expect(job).To(ContainSubstring("containerPort: 8080"))
+				})
+
+				It("renders the resolved environment", func() {
+					job := templateNamed(rendered, "job.yaml")
+
+					Expect(job).To(ContainSubstring("name: DATABASE_URL"))
+					Expect(job).To(ContainSubstring("value: postgres://db"))
+				})
+			})
+
+			Context("with ngrok enabled and configured", func() {
+				BeforeEach(func() {
+					ngrokToken = fakeNgrokToken
+
+					svc.Ports = []types.ServicePortConfig{
+						{Target: 8080, Published: "3000"},
+					}
+					svc.Extensions = types.Extensions{
+						config.K8S_SERVICE_EXTENSION: map[string]any{
+							"deploymentType": "job",
+							"ngrok": map[string]any{
+								"port": 3000,
+								"url":  "https://example.ngrok.app",
+							},
+						},
+					}
+				})
+
+				// A job has no service to route to, so neither the sidecar nor
+				// the token it needs may reach the rendered pod, even with ngrok
+				// fully configured for the service.
+				It("renders no ngrok sidecar and carries no secret", func() {
+					Expect(templateNamed(rendered, "job.yaml")).
+						ToNot(ContainSubstring(config.NGROK_IMAGE))
+
+					for _, f := range chart.Raw {
+						Expect(string(f.Data)).
+							ToNot(ContainSubstring(fakeNgrokToken))
+						Expect(f.Name).ToNot(Equal("templates/secret.yaml"))
+						Expect(f.Name).ToNot(Equal("templates/configmap.yaml"))
+					}
+				})
+			})
 		})
 	})
 
@@ -527,8 +804,9 @@ var _ = Describe("Helm", func() {
 		)
 
 		BeforeEach(func() {
+			_, cancel := context.WithCancel(context.Background())
 			project = &config.ComposeProject{Name: "test-project"}
-			rec = newRecorder()
+			rec = newRecorder(cancel)
 		})
 
 		It("deploys a chain dependencies first", func() {
@@ -537,12 +815,13 @@ var _ = Describe("Helm", func() {
 				"cache": dependent("cache", "db"),
 				"db":    dependent("db"),
 			}
+			subject.SetProject(project)
 
-			Expect(subject.DeployInDependencyOrder(project, rec.visit)).
+			Expect(subject.DeployInDependencyOrder(rec.visit)).
 				To(Succeed())
 
 			// The only fully determined order in the suite, so assert it exactly.
-			Expect(rec.visited()).To(Equal([]string{"db", "cache", "api"}))
+			Expect(rec.succeeded()).To(Equal([]string{"db", "cache", "api"}))
 		})
 
 		It("deploys a diamond by position, not by sequence", func() {
@@ -552,13 +831,14 @@ var _ = Describe("Helm", func() {
 				"worker": dependent("worker", "db"),
 				"ui":     dependent("ui", "api", "worker"),
 			}
+			subject.SetProject(project)
 
-			Expect(subject.DeployInDependencyOrder(project, rec.visit)).
+			Expect(subject.DeployInDependencyOrder(rec.visit)).
 				To(Succeed())
 
 			// api and worker are free to run concurrently, so only their position
 			// relative to db and ui is guaranteed.
-			order := rec.visited()
+			order := rec.succeeded()
 			Expect(order).To(HaveLen(4))
 			Expect(order[0]).To(Equal("db"))
 			Expect(order[1:3]).To(ConsistOf("api", "worker"))
@@ -571,21 +851,23 @@ var _ = Describe("Helm", func() {
 				"two":   dependent("two"),
 				"three": dependent("three"),
 			}
+			subject.SetProject(project)
 
-			Expect(subject.DeployInDependencyOrder(project, rec.visit)).
+			Expect(subject.DeployInDependencyOrder(rec.visit)).
 				To(Succeed())
 
-			Expect(rec.visited()).To(ConsistOf("one", "two", "three"))
+			Expect(rec.succeeded()).To(ConsistOf("one", "two", "three"))
 		})
 
 		// Both fakes have to be in flight at once for either to return, so a
-		// serialised walk cannot satisfy this spec. The ctx guard is what makes
+		// serialized walk cannot satisfy this spec. The ctx guard is what makes
 		// that show up as a timeout failure rather than a hung suite.
-		It("deploys unrelated services concurrently", func(ctx SpecContext) {
+		It("deploys unrelated services concurrently", func(specCtx SpecContext) {
 			project.Services = types.Services{
 				"one": dependent("one"),
 				"two": dependent("two"),
 			}
+			subject.SetProject(project)
 
 			var (
 				mu       sync.Mutex
@@ -593,7 +875,7 @@ var _ = Describe("Helm", func() {
 				bothIn   = make(chan struct{})
 			)
 
-			deploy := func(svc config.ComposeService) error {
+			deploy := func(ctx context.Context, svc config.ComposeService) error {
 				mu.Lock()
 				inFlight++
 				if inFlight == 2 {
@@ -604,12 +886,12 @@ var _ = Describe("Helm", func() {
 				select {
 				case <-bothIn:
 					return nil
-				case <-ctx.Done():
+				case <-specCtx.Done():
 					return ctx.Err()
 				}
 			}
 
-			Expect(subject.DeployInDependencyOrder(project, deploy)).To(Succeed())
+			Expect(subject.DeployInDependencyOrder(deploy)).To(Succeed())
 		}, SpecTimeout(10*time.Second))
 
 		It("propagates a failure from the last service in a chain", func() {
@@ -618,12 +900,14 @@ var _ = Describe("Helm", func() {
 				"cache": dependent("cache", "db"),
 				"db":    dependent("db"),
 			}
+			subject.SetProject(project)
+
 			rec.fail["api"] = errStep
 
-			err := subject.DeployInDependencyOrder(project, rec.visit)
+			err := subject.DeployInDependencyOrder(rec.visit)
 
 			Expect(err).To(MatchError(errStep))
-			Expect(rec.visited()).To(Equal([]string{"db", "cache", "api"}))
+			Expect(rec.succeeded()).To(Equal([]string{"db", "cache"}))
 		})
 
 		It("propagates a failure from a dependency", func() {
@@ -631,16 +915,18 @@ var _ = Describe("Helm", func() {
 				"api": dependent("api", "db"),
 				"db":  dependent("db"),
 			}
+			subject.SetProject(project)
+
 			rec.fail["db"] = errStep
 
-			err := subject.DeployInDependencyOrder(project, rec.visit)
+			err := subject.DeployInDependencyOrder(rec.visit)
 
 			// Only the propagation is asserted. Whether api is dispatched before
 			// the group's context cancellation lands is a race inside compose-go's
 			// traversal, so asserting api was skipped would be asserting a
 			// guarantee the walk does not make.
 			Expect(err).To(MatchError(errStep))
-			Expect(rec.visited()).To(ContainElement("db"))
+			Expect(rec.succeeded()).NotTo(ContainElement("db"))
 		})
 
 		It("rejects a dependency cycle before deploying anything", func() {
@@ -648,29 +934,33 @@ var _ = Describe("Helm", func() {
 				"api": dependent("api", "db"),
 				"db":  dependent("db", "api"),
 			}
+			subject.SetProject(project)
 
-			err := subject.DeployInDependencyOrder(project, rec.visit)
+			err := subject.DeployInDependencyOrder(rec.visit)
 
 			Expect(err).To(MatchError(deployer.KindComposeDependencyGraph))
-			Expect(rec.visited()).To(BeEmpty())
+			Expect(rec.succeeded()).To(BeEmpty())
 		})
 
 		It("rejects a dependency naming an undefined service", func() {
 			project.Services = types.Services{
 				"api": dependent("api", "missing"),
 			}
+			subject.SetProject(project)
 
-			err := subject.DeployInDependencyOrder(project, rec.visit)
+			err := subject.DeployInDependencyOrder(rec.visit)
 
 			Expect(err).To(MatchError(deployer.KindComposeDependencyGraph))
-			Expect(rec.visited()).To(BeEmpty())
+			Expect(rec.succeeded()).To(BeEmpty())
 		})
 
 		It("deploys nothing for an empty project", func() {
-			Expect(subject.DeployInDependencyOrder(project, rec.visit)).
+			subject.SetProject(project)
+
+			Expect(subject.DeployInDependencyOrder(rec.visit)).
 				To(Succeed())
 
-			Expect(rec.visited()).To(BeEmpty())
+			Expect(rec.succeeded()).To(BeEmpty())
 		})
 	})
 
@@ -681,7 +971,8 @@ var _ = Describe("Helm", func() {
 		)
 
 		BeforeEach(func() {
-			rec = newRecorder()
+			_, cancel := context.WithCancel(context.Background())
+			rec = newRecorder(cancel)
 			project = &config.ComposeProject{
 				Name: "test-project",
 				Services: types.Services{
@@ -693,17 +984,19 @@ var _ = Describe("Helm", func() {
 		})
 
 		It("destroys a chain dependents first", func() {
-			Expect(subject.DestroyInReverseDependencyOrder(project, rec.visit)).
+			subject.SetProject(project)
+			Expect(subject.DestroyInReverseDependencyOrder(rec.visit)).
 				To(Succeed())
 
 			// The exact inverse of the deploy walk: nothing is uninstalled while
 			// something still depends on it.
-			Expect(rec.visited()).To(Equal([]string{"api", "cache", "db"}))
+			Expect(rec.succeeded()).To(Equal([]string{"api", "cache", "db"}))
 		})
 
 		It("propagates a failure from service that failed to be destroyed", func() {
+			subject.SetProject(project)
 			rec.fail["api"] = errStep
-			err := subject.DestroyInReverseDependencyOrder(project, rec.visit)
+			err := subject.DestroyInReverseDependencyOrder(rec.visit)
 			Expect(err).To(MatchError(errStep))
 		})
 
@@ -712,11 +1005,12 @@ var _ = Describe("Helm", func() {
 				"api": dependent("api", "db"),
 				"db":  dependent("db", "api"),
 			}
+			subject.SetProject(project)
 
-			err := subject.DestroyInReverseDependencyOrder(project, rec.visit)
+			err := subject.DestroyInReverseDependencyOrder(rec.visit)
 
 			Expect(err).To(MatchError(deployer.KindComposeDependencyGraph))
-			Expect(rec.visited()).To(BeEmpty())
+			Expect(rec.succeeded()).To(BeEmpty())
 		})
 	})
 
@@ -724,21 +1018,37 @@ var _ = Describe("Helm", func() {
 	// helm client is constructed are reachable without a cluster.
 	Describe("deployService", func() {
 		It("omits a service flagged skip", func() {
+			ctx := context.Background()
 			svc := config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
 			svc.Extensions = types.Extensions{
 				config.K8S_SERVICE_EXTENSION: map[string]any{"skip": true},
 			}
 
+			Expect(subject.InitProject(&config.ComposeProject{
+				Name:     "test-project",
+				Services: types.Services{"hello": svc},
+			})).To(Succeed())
+
 			// mockImage and mockGit carry no EXPECT(), so reaching any client
 			// fails this spec on cleanup — as would reaching helm, since Init was
 			// never called and the action config is still nil.
-			Expect(subject.DeployService(svc)).To(Succeed())
+			Expect(subject.DeployService(ctx, svc)).To(Succeed())
 		})
 
-		It("propagates a failure resolving the service extension", func() {
-			err := subject.DeployService(config.ComposeService{Name: "broken"})
+		// The step reads the map initProject builds rather than resolving the
+		// extension itself, so a service the map does not know about is the one
+		// failure it still owns — and it means Init was skipped, or the project
+		// changed underneath it.
+		It("errors for a service that was never resolved by Init", func() {
+			ctx := context.Background()
 
-			Expect(err).To(MatchError(config.KindImageRepositoryMissing))
+			Expect(subject.InitProject(&config.ComposeProject{
+				Name: "test-project",
+			})).To(Succeed())
+
+			err := subject.DeployService(ctx, config.ComposeService{Name: "hello"})
+
+			Expect(err).To(MatchError(deployer.KindHelmMissingService))
 		})
 	})
 })

@@ -35,7 +35,7 @@ func (c *Core) Deploy() error {
 	}
 
 	log.Info().Str("deployer", c.deployer.String()).Msg("executing deploy")
-	if err := c.deployer.Deploy(c.project); err != nil {
+	if err := c.deployer.Deploy(); err != nil {
 		return errs.Errorf(KindDeploy, "deploy failed: %w", err)
 	}
 
@@ -49,7 +49,7 @@ func (c *Core) Destroy() error {
 	}
 
 	log.Info().Str("deployer", c.deployer.String()).Msg("executing destroy")
-	if err := c.deployer.Destroy(c.project); err != nil {
+	if err := c.deployer.Destroy(); err != nil {
 		return errs.Errorf(KindDestroy, "destroy failed: %w", err)
 	}
 

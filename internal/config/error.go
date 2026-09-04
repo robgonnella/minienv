@@ -14,4 +14,5 @@ const (
 	KindInvalidPort            errs.Kind = "config.invalid_port"
 	KindInvalidPublishedPort   errs.Kind = "config.invalid_published_port"
 	KindNgrokPortMismatch      errs.Kind = "config.ngrok_port_mismatch"
+	KindInvalidDeploymentType  errs.Kind = "config.invalid_deployment_type"
 )

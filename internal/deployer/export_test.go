@@ -1,6 +1,8 @@
 package deployer
 
 import (
+	"context"
+
 	"github.com/robgonnella/minienv/internal/config"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 )
@@ -10,19 +12,33 @@ import (
 // this is the only way to assert on what actually gets installed.
 func (h *Helm) LoadChart(
 	svcName string,
-	ngrokAuthToken string,
+	deploymentType config.K8sDeploymentType,
 ) (*helmchart.Chart, error) {
-	return h.loadChart(svcName, ngrokAuthToken)
+	return h.loadChart(svcName, deploymentType)
+}
+
+// InitProject exposes the half of Init that needs no cluster. Init itself
+// builds a helm action config against a live one, so this is the only way to
+// populate h.services — which buildAndPushServiceImages and deployService both
+// read — in a test binary.
+func (h *Helm) InitProject(project *config.ComposeProject) error {
+	return h.initProject(project)
+}
+
+// SetProject caches the project without resolving any extension. The dependency
+// walk only reads h.project, and its fixtures are bare services carrying nothing
+// but a name and depends_on — deliberately unresolvable — so those specs need
+// this rather than InitProject.
+func (h *Helm) SetProject(project *config.ComposeProject) {
+	h.project = project
 }
 
 // BuildAndPushServiceImages exposes the image-build pass to the external test
 // package. Deploy only reaches it after Init has built a real action client
 // and a cluster connection, so this is the only way to assert on the
 // ComposeProject -> []image.ServiceProperties translation.
-func (h *Helm) BuildAndPushServiceImages(
-	project *config.ComposeProject,
-) error {
-	return h.buildAndPushServiceImages(project)
+func (h *Helm) BuildAndPushServiceImages() error {
+	return h.buildAndPushServiceImages()
 }
 
 // DeployInDependencyOrder exposes the depends_on-ordered walk with the
@@ -30,23 +46,24 @@ func (h *Helm) BuildAndPushServiceImages(
 // built a cluster connection, so this is the only way to assert on ordering,
 // concurrency and abort-on-first-error.
 func (h *Helm) DeployInDependencyOrder(
-	project *config.ComposeProject,
-	deploy func(svc config.ComposeService) error,
+	deploy func(ctx context.Context, svc config.ComposeService) error,
 ) error {
-	return h.deployInDependencyOrder(project, deploy)
+	return h.deployInDependencyOrder(deploy)
 }
 
 // DestroyInReverseDependencyOrder is the teardown counterpart.
 func (h *Helm) DestroyInReverseDependencyOrder(
-	project *config.ComposeProject,
-	uninstall func(svc config.ComposeService) error,
+	uninstall func(ctx context.Context, svc config.ComposeService) error,
 ) error {
-	return h.destroyInReverseDependencyOrder(project, uninstall)
+	return h.destroyInReverseDependencyOrder(uninstall)
 }
 
 // DeployService exposes the per-service step the walk dispatches to. Only its
 // pre-helm branches — skip, and a failure resolving the extension — are
 // reachable without a cluster.
-func (h *Helm) DeployService(svc config.ComposeService) error {
-	return h.deployService(svc)
+func (h *Helm) DeployService(
+	ctx context.Context,
+	svc config.ComposeService,
+) error {
+	return h.deployService(ctx, svc)
 }

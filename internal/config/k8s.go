@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
@@ -23,117 +24,128 @@ var urlRegex = regexp.MustCompile(`(?m)http:\/\/localhost(:?\:\d+)?(:?\/.*)?`)
 // Configuration for service image
 type ChartImage struct {
 	// Image Repository for the service image
-	Repository string `json:"repository" yaml:"repository" mapstructure:"repository"`
+	Repository string `json:"repository" mapstructure:"repository"`
 	// PullPolicy for this image
-	PullPolicy string `json:"pullPolicy,omitempty" yaml:"pullPolicy,omitempty" mapstructure:"pullPolicy,omitempty"`
+	PullPolicy string `json:"pullPolicy,omitempty" mapstructure:"pullPolicy,omitempty"`
 	// Image tag for the service image
-	Tag string `json:"tag" yaml:"tag" mapstructure:"tag"`
+	Tag string `json:"tag" mapstructure:"tag"`
 	// The platforms for which to build and push default [linux/amd64])
-	Platforms []string `json:"platforms,omitempty" yaml:"platforms,omitempty" mapstructure:"platforms,omitempty"`
+	Platforms []string `json:"platforms,omitempty" mapstructure:"platforms,omitempty"`
 }
 
 // Pull secrets to enable pulling private images
 type ChartImagePullSecret struct {
 	// The name of the secret for pulling images
-	Name string `json:"name" yaml:"name" mapstructure:"name"`
+	Name string `json:"name" mapstructure:"name"`
 }
 
 // ServiceAccount configuration for the deployment service
 type ChartServiceAccount struct {
 	// Whether or not to create a Kubernetes service account
-	Create bool `json:"create,omitempty" yaml:"create,omitempty" mapstructure:"create,omitempty"`
+	Create *bool `json:"create,omitempty" mapstructure:"create,omitempty"`
 	// The name for the service account
-	Name string `json:"name,omitempty" yaml:"name,omitempty" mapstructure:"name,omitempty"`
+	Name string `json:"name,omitempty" mapstructure:"name,omitempty"`
 	// Whether or not to automount the service account
-	Automount bool `json:"automount,omitempty" yaml:"automount,omitempty" mapstructure:"automount,omitempty"`
+	Automount *bool `json:"automount,omitempty" mapstructure:"automount,omitempty"`
 	// Additional annotations for the service account
-	Annotations map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty" mapstructure:"annotations,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty" mapstructure:"annotations,omitempty"`
 }
 
 // Port configuration use in services and deployment pod container
 type ChartServicePort struct {
 	// Name of the container port
-	ContainerPortName string `json:"containerPortName" yaml:"containerPortName" mapstructure:"containerPortName"`
+	ContainerPortName string `json:"containerPortName" mapstructure:"containerPortName"`
 	// Container port to expose to service
-	ContainerPort uint16 `json:"containerPort" yaml:"containerPort" mapstructure:"containerPort"`
+	ContainerPort uint16 `json:"containerPort" mapstructure:"containerPort"`
 	// Name of the service port
-	ServicePortName string `json:"servicePortName" yaml:"servicePortName" mapstructure:"servicePortName"`
+	ServicePortName string `json:"servicePortName" mapstructure:"servicePortName"`
 	// Service port to map to the container port
-	ServicePort uint16 `json:"servicePort" yaml:"servicePort" mapstructure:"servicePort"`
+	ServicePort uint16 `json:"servicePort" mapstructure:"servicePort"`
 	// Protocol to use for these ports
-	Protocol string `json:"protocol" yaml:"protocol" mapstructure:"protocol"`
+	Protocol string `json:"protocol" mapstructure:"protocol"`
 }
 
 // Service configuration
 type ChartService struct {
 	// Whether or not to create a Kubernetes service
-	Create bool `json:"create,omitempty" yaml:"create,omitempty" mapstructure:"create,omitempty"`
+	Create *bool `json:"create,omitempty" mapstructure:"create,omitempty"`
 	// The type of service to create
-	ServiceType string `json:"type,omitempty" yaml:"type,omitempty" mapstructure:"type,omitempty"`
+	ServiceType string `json:"type,omitempty" mapstructure:"type,omitempty"`
 	// The ports to associate with pod container and service mapping
-	Ports []ChartServicePort `json:"ports" yaml:"ports" mapstructure:"ports"`
+	Ports []ChartServicePort `json:"ports" mapstructure:"ports"`
 }
 
 type ChartValues struct {
 	// The number of replicas for this deployment
-	Replicas uint8 `json:"replicas,omitempty" yaml:"replicas,omitempty" mapstructure:"replicas,omitempty"`
+	Replicas uint8 `json:"replicas,omitempty" mapstructure:"replicas,omitempty"`
 	// The image for this deployment. Will try to use compose service image if not set
-	Image ChartImage `json:"image,omitzero" yaml:"image,omitzero" mapstructure:"image,omitzero"`
+	Image ChartImage `json:"image,omitzero" mapstructure:"image"`
 	// Any image pull secrets required to pull images on the cluster
-	ImagePullSecrets []ChartImagePullSecret `json:"imagePullSecrets,omitempty" yaml:"imagePullSecrets,omitempty" mapstructure:"imagePullSecrets,omitempty"`
+	ImagePullSecrets []ChartImagePullSecret `json:"imagePullSecrets,omitempty" mapstructure:"imagePullSecrets,omitempty"`
+	// Command to run for the main deployment container
+	Command []string `json:"command,omitempty" mapstructure:"command,omitempty"`
 	// Service configuration including container and service port specifications
-	Service ChartService `json:"service,omitzero" yaml:"service,omitzero" mapstructure:"service,omitzero"`
+	Service ChartService `json:"service,omitzero" mapstructure:"service"`
 	// Service account configuration
-	ServiceAccount ChartServiceAccount `json:"serviceAccount,omitzero" yaml:"serviceAccount,omitzero" mapstructure:"serviceAccount,omitzero"`
+	ServiceAccount ChartServiceAccount `json:"serviceAccount,omitzero" mapstructure:"serviceAccount,omitzero"`
 	// Container environment configuration
-	Env map[string]string `json:"env,omitempty" yaml:"env,omitempty" mapstructure:"env,omitempty"`
+	Env map[string]string `json:"env,omitempty" mapstructure:"env,omitempty"`
 	// Annotations to add to the deployment pods
-	PodAnnotations map[string]string `json:"podAnnotations,omitempty" yaml:"podAnnotations,omitempty" mapstructure:"podAnnotations,omitempty"`
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty" mapstructure:"podAnnotations,omitempty"`
 	// Labels to add to the deployment pods
-	PodLabels map[string]string `json:"podLabels,omitempty" yaml:"podLabels,omitempty" mapstructure:"podLabels,omitempty"`
+	PodLabels map[string]string `json:"podLabels,omitempty" mapstructure:"podLabels,omitempty"`
 	// Security context for the deployment pods
-	PodSecurityContext map[string]any `json:"podSecurityContext,omitempty" yaml:"podSecurityContext,omitempty" mapstructure:"podSecurityContext,omitempty"`
+	PodSecurityContext map[string]any `json:"podSecurityContext,omitempty" mapstructure:"podSecurityContext,omitempty"`
 	// Security context for the container in each pod
-	SecurityContext map[string]any `json:"securityContext,omitempty" yaml:"securityContext,omitempty" mapstructure:"securityContext,omitempty"`
+	SecurityContext map[string]any `json:"securityContext,omitempty" mapstructure:"securityContext,omitempty"`
 	// Resources configuration for deployment pods
-	Resources map[string]any `json:"resources,omitempty" yaml:"resources,omitempty" mapstructure:"resources,omitempty"`
+	Resources map[string]any `json:"resources,omitempty" mapstructure:"resources,omitempty"`
 	// Container startup probe configuration
-	StartupProbe map[string]any `json:"startupProbe,omitempty" yaml:"startupProbe,omitempty" mapstructure:"startupProbe,omitempty"`
+	StartupProbe map[string]any `json:"startupProbe,omitempty" mapstructure:"startupProbe,omitempty"`
 	// Container liveness probe configuration
-	LivenessProbe map[string]any `json:"livenessProbe,omitempty" yaml:"livenessProbe,omitempty" mapstructure:"livenessProbe,omitempty"`
+	LivenessProbe map[string]any `json:"livenessProbe,omitempty" mapstructure:"livenessProbe,omitempty"`
 	// Container readiness probe configuration
-	ReadinessProbe map[string]any `json:"readinessProbe,omitempty" yaml:"readinessProbe,omitempty" mapstructure:"readinessProbe,omitempty"`
+	ReadinessProbe map[string]any `json:"readinessProbe,omitempty" mapstructure:"readinessProbe,omitempty"`
 	// Volumes configuration for the deployment pods
-	Volumes []map[string]any `json:"volumes,omitempty" yaml:"volumes,omitempty" mapstructure:"volumes,omitempty"`
+	Volumes []map[string]any `json:"volumes,omitempty" mapstructure:"volumes,omitempty"`
 	// VolumeMounts configuration for the container
-	VolumeMounts []map[string]any `json:"volumeMounts,omitempty" yaml:"volumeMounts,omitempty" mapstructure:"volumeMounts,omitempty"`
+	VolumeMounts []map[string]any `json:"volumeMounts,omitempty" mapstructure:"volumeMounts,omitempty"`
 	// NodeSelector configuration for the deployment pods
-	NodeSelector map[string]any `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty" mapstructure:"nodeSelector,omitempty"`
+	NodeSelector map[string]any `json:"nodeSelector,omitempty" mapstructure:"nodeSelector,omitempty"`
 	// Tolerations configuration for the deployment pods
-	Tolerations []map[string]any `json:"tolerations,omitempty" yaml:"tolerations,omitempty" mapstructure:"tolerations,omitempty"`
+	Tolerations []map[string]any `json:"tolerations,omitempty" mapstructure:"tolerations,omitempty"`
 	// Affinity configuration for the deployment pods
-	Affinity map[string]any `json:"affinity,omitempty" yaml:"affinity,omitempty" mapstructure:"affinity,omitempty"`
+	Affinity map[string]any `json:"affinity,omitempty" mapstructure:"affinity,omitempty"`
 }
 
 // Required fields for deploying to Kubernetes
 type XMiniEnvK8s struct {
 	// Targets a specific cluster when deploying
-	Context string `json:"context" yaml:"context" mapstructure:"context"`
+	Context string `json:"context" mapstructure:"context"`
 	// Targets a specific namespace when deploying
-	Namespace string `json:"namespace" yaml:"namespace" mapstructure:"namespace"`
+	Namespace string `json:"namespace" mapstructure:"namespace"`
 	// Controls the Helm timeout. This is applied to all services but can be
-	// overriden using the service-level extension
-	DeploymentTimeout string `json:"deploymentTimeout,omitempty" yaml:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
+	// overridden using the service-level extension
+	DeploymentTimeout string `json:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
 }
+
+type K8sDeploymentType = string
+
+const (
+	K8sServiceDeploymentType K8sDeploymentType = "service"
+	K8sJobDeploymentType     K8sDeploymentType = "job"
+)
 
 // Service level configuration for controlling Kubernetes deployment properties
 type XMiniEnvK8sService struct {
 	// Common properties
-	XMiniEnvCommonService
+	XMiniEnvCommonService `mapstructure:",squash"`
 	// Chart value overrides for the Helm deployment
-	ChartValues
+	ChartValues `mapstructure:",squash"`
+	// Controls the type of deployment (service | job). Default is "service"
+	DeploymentType K8sDeploymentType `jsonschema:"enum=service,enum=job,default=service" json:"deploymentType,omitempty" mapstructure:"deploymentType,omitempty"`
 	// Controls the Helm timeout for deploying the targeted service
-	DeploymentTimeout string `json:"deploymentTimeout,omitempty" yaml:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
+	DeploymentTimeout string `json:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
 }
 
 // XMiniEnvK8sServiceOptions carries the runtime inputs needed to properly
@@ -161,12 +173,12 @@ func NewXMiniEnvK8sService(
 
 	svc := opts.Service
 
+	log.Info().Str("service", svc.Name).Msg("loading service extension")
+
 	svcExt, ok := svc.Extensions[K8S_SERVICE_EXTENSION]
 	if !ok {
 		svcExt = map[string]any{}
 	}
-
-	log.Info().Str("service", svc.Name).Msg("processing service")
 
 	svcExtConfig := &XMiniEnvK8sService{}
 	if err := mapstructure.Decode(svcExt, svcExtConfig); err != nil {
@@ -208,22 +220,196 @@ func (s *XMiniEnvK8sService) resolve(
 		return err
 	}
 
+	if err := s.resolveDeploymentType(); err != nil {
+		return err
+	}
+
+	s.resolveContainerCommand(opts.Service)
 	s.resolveHealthCheck(opts.Service)
 	s.resolveEnvironment(opts.Service)
 	s.resolveNgrok(opts.MainExt, opts.NgrokEnabled)
-
-	if s.DeploymentTimeout == "" {
-		if opts.MainExt.K8s.DeploymentTimeout != "" {
-			s.DeploymentTimeout = opts.MainExt.K8s.DeploymentTimeout
-		} else {
-			s.DeploymentTimeout = HELM_DEFAULT_DEPLOYMENT_TIMEOUT
-		}
-	}
+	s.resolveDeploymentTimeout(opts.MainExt)
 
 	return nil
 }
 
-func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
+// flattenOptionalBool replaces an optional bool with the plain value the chart
+// templates expects.
+func flattenOptionalBool(values map[string]any, key string, value *bool) {
+	if value == nil {
+		delete(values, key)
+		return
+	}
+
+	values[key] = *value
+}
+
+type healthCheckProps struct {
+	intervalSeconds      int
+	startIntervalSeconds int
+	startPeriodSeconds   int
+	timeoutSeconds       int
+	retries              int
+}
+
+func healthCheckProperties(hchk *types.HealthCheckConfig) healthCheckProps {
+	intervalSeconds := 0
+	if hchk.Interval != nil {
+		intervalSeconds = int(
+			time.Duration(*hchk.Interval) / time.Second,
+		)
+	}
+
+	startIntervalSeconds := 0
+	if hchk.StartInterval != nil {
+		startIntervalSeconds = int(
+			time.Duration(*hchk.StartInterval) / time.Second,
+		)
+	}
+
+	startPeriodSeconds := 0
+	if hchk.StartPeriod != nil {
+		startPeriodSeconds = int(
+			time.Duration(*hchk.StartPeriod) / time.Second,
+		)
+	}
+
+	timeoutSeconds := 0
+	if hchk.Timeout != nil {
+		timeoutSeconds = int(
+			time.Duration(*hchk.Timeout) / time.Second,
+		)
+	}
+
+	retries := 0
+	if hchk.Retries != nil {
+		retries = int(*hchk.Retries)
+	}
+
+	return healthCheckProps{
+		intervalSeconds,
+		startIntervalSeconds,
+		startPeriodSeconds,
+		timeoutSeconds,
+		retries,
+	}
+}
+
+func getContainerPortName(ports []ChartServicePort, portStr string) string {
+	for _, p := range ports {
+		if strconv.Itoa(int(p.ContainerPort)) == portStr {
+			return p.ContainerPortName
+		}
+	}
+	return ""
+}
+
+func createExecProbe(cmd string) map[string]any {
+	return map[string]any{
+		"exec": map[string]any{
+			"command": []string{
+				"/bin/sh",
+				"-c",
+				cmd,
+			},
+		},
+	}
+}
+
+func createHttpGetProbe(ports []ChartServicePort, u *url.URL) map[string]any {
+	defaultPort := "80"
+
+	if u.Scheme == "https" {
+		defaultPort = "443"
+	}
+
+	port := u.Port()
+
+	if port == "" {
+		port = defaultPort
+	}
+
+	name := getContainerPortName(ports, port)
+
+	return map[string]any{
+		"httpGet": map[string]any{
+			"path": u.Path,
+			"port": name,
+		},
+	}
+}
+
+type k8sProbes struct {
+	startup   map[string]any
+	liveness  map[string]any
+	readiness map[string]any
+}
+
+func addLivenessReadinessIntervals(p map[string]any, props healthCheckProps) {
+	if props.intervalSeconds > 0 {
+		p["periodSeconds"] = props.intervalSeconds
+	}
+	if props.timeoutSeconds > 0 {
+		p["timeoutSeconds"] = props.timeoutSeconds
+	}
+	if props.retries > 0 {
+		p["failureThreshold"] = props.retries
+	}
+}
+
+func addStartUpIntervals(p map[string]any, props healthCheckProps) {
+	if props.startIntervalSeconds > 0 {
+		p["periodSeconds"] = props.startIntervalSeconds
+	}
+	if props.timeoutSeconds > 0 {
+		p["timeoutSeconds"] = props.timeoutSeconds
+	}
+	if props.startIntervalSeconds > 0 && props.startPeriodSeconds > 0 {
+		p["failureThreshold"] = math.Ceil(
+			float64(props.startPeriodSeconds) / float64(props.startIntervalSeconds),
+		)
+	}
+}
+
+func getProbes(
+	cmd string,
+	ports []ChartServicePort,
+	props healthCheckProps,
+) k8sProbes {
+	probes := k8sProbes{
+		startup:   nil,
+		liveness:  nil,
+		readiness: nil,
+	}
+
+	if cmd == "" {
+		return probes
+	}
+
+	if strings.HasPrefix(cmd, "curl") || strings.HasPrefix(cmd, "wget") {
+		matches := urlRegex.FindStringSubmatch(cmd)
+		if len(matches) > 0 {
+			parsedURL, err := url.Parse(matches[0])
+			if err != nil {
+				probes.startup = createExecProbe(cmd)
+				probes.liveness = createExecProbe(cmd)
+				probes.readiness = createExecProbe(cmd)
+			} else {
+				probes.startup = createHttpGetProbe(ports, parsedURL)
+				probes.liveness = createHttpGetProbe(ports, parsedURL)
+				probes.readiness = createHttpGetProbe(ports, parsedURL)
+			}
+		}
+	} else {
+		probes.startup = createExecProbe(cmd)
+		probes.liveness = createExecProbe(cmd)
+		probes.readiness = createExecProbe(cmd)
+	}
+
+	return probes
+}
+
+func (s *XMiniEnvK8sService) ToChartValuesMap() (map[string]any, error) {
 	var values map[string]any
 
 	if err := mapstructure.Decode(s.ChartValues, &values); err != nil {
@@ -234,17 +420,57 @@ func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
 		)
 	}
 
-	if err := s.decodeNestedStructures(values); err != nil {
-		return nil, err
+	service, ok := values["service"].(map[string]any)
+	if !ok {
+		service = map[string]any{}
+	}
+
+	servicePorts := []map[string]any{}
+	for _, p := range s.Service.Ports {
+		servicePorts = append(servicePorts, map[string]any{
+			"servicePort":       p.ServicePort,
+			"servicePortName":   p.ServicePortName,
+			"containerPort":     p.ContainerPort,
+			"containerPortName": p.ContainerPortName,
+			"protocol":          p.Protocol,
+		})
+	}
+
+	if len(servicePorts) > 0 {
+		service["ports"] = servicePorts
+	}
+
+	flattenOptionalBool(service, "create", s.Service.Create)
+	values["service"] = service
+
+	serviceAccount, ok := values["serviceAccount"].(map[string]any)
+	if !ok {
+		serviceAccount = map[string]any{}
+	}
+
+	flattenOptionalBool(serviceAccount, "create", s.ServiceAccount.Create)
+	flattenOptionalBool(serviceAccount, "automount", s.ServiceAccount.Automount)
+	values["serviceAccount"] = serviceAccount
+
+	pullSecrets := []map[string]any{}
+	for _, s := range s.ImagePullSecrets {
+		pullSecrets = append(pullSecrets, map[string]any{
+			"name": s.Name,
+		})
+	}
+
+	if len(pullSecrets) > 0 {
+		values["imagePullSecrets"] = pullSecrets
+
 	}
 
 	hasServicePort := func(p uint16) bool {
-		for _, svcPrt := range s.Service.Ports {
-			if svcPrt.ServicePort == p {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(
+			s.Service.Ports,
+			func(svcPort ChartServicePort) bool {
+				return svcPort.ServicePort == p
+			},
+		)
 	}
 
 	// resolveNgrok clears Ngrok when no auth token is available, so a non-zero
@@ -279,10 +505,7 @@ func (s *XMiniEnvK8sService) ToValuesMap() (map[string]any, error) {
 		values["ngrok"] = ngrok
 	}
 
-	log.Info().Fields(values).Msg("resolved chart values")
-
 	return values, nil
-
 }
 
 func (s *XMiniEnvK8sService) resolveCommonProperties(
@@ -417,24 +640,19 @@ func (s *XMiniEnvK8sService) resolveServiceImage(
 }
 
 func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
-	if len(svc.Ports) == 0 {
-		s.Service.Create = false
-		s.ServiceAccount.Create = false
-		return nil
-	}
-
 	extensionHasPort := func(ctrPrt, svcPrt uint16) bool {
-		for _, extPrt := range s.Service.Ports {
-			if extPrt.ContainerPort == ctrPrt && extPrt.ServicePort == svcPrt {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(s.Service.Ports, func(p ChartServicePort) bool {
+			return p.ContainerPort == ctrPrt && p.ServicePort == svcPrt
+		})
 	}
 
 	for _, p := range svc.Ports {
 		if p.Target > math.MaxUint16 {
-			return errs.Errorf(KindInvalidPort, "invalid port configuration: %+v", p.Target)
+			return errs.Errorf(
+				KindInvalidPort,
+				"invalid port configuration: %+v",
+				p.Target,
+			)
 		}
 
 		published, err := strconv.ParseUint(p.Published, 10, 16)
@@ -470,6 +688,11 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 		}
 	}
 
+	if len(s.Service.Ports) == 0 {
+		s.Service.Create = new(false)
+		s.ServiceAccount.Create = new(false)
+	}
+
 	return nil
 }
 
@@ -494,6 +717,39 @@ func (s *XMiniEnvK8sService) resolveEnvironment(svc ComposeService) {
 	}
 }
 
+// K8sDeploymentType is a string alias, so the compiler cannot reject a typo and
+// neither can mapstructure. Validating here is what stops "service" from being
+// waved through to the deployer, which would otherwise have to guess at it.
+func (s *XMiniEnvK8sService) resolveDeploymentType() error {
+	if s.DeploymentType == "" {
+		s.DeploymentType = K8sServiceDeploymentType
+		return nil
+	}
+
+	switch s.DeploymentType {
+	case K8sServiceDeploymentType, K8sJobDeploymentType:
+		return nil
+	default:
+		return errs.Errorf(
+			KindInvalidDeploymentType,
+			"invalid deploymentType %q: must be one of %q, %q",
+			s.DeploymentType,
+			K8sServiceDeploymentType,
+			K8sJobDeploymentType,
+		)
+	}
+}
+
+func (s *XMiniEnvK8sService) resolveContainerCommand(svc ComposeService) {
+	if s.Command != nil {
+		return
+	}
+
+	if len(svc.Command) > 0 {
+		s.Command = slices.Clone(svc.Command)
+	}
+}
+
 func (s *XMiniEnvK8sService) resolveHealthCheck(svc ComposeService) {
 	if svc.HealthCheck == nil || svc.HealthCheck.Disable {
 		return
@@ -506,38 +762,7 @@ func (s *XMiniEnvK8sService) resolveHealthCheck(svc ComposeService) {
 	instruction := svc.HealthCheck.Test[0]
 	test := svc.HealthCheck.Test[1:]
 
-	intervalSeconds := 0
-	if svc.HealthCheck.Interval != nil {
-		intervalSeconds = int(
-			time.Duration(*svc.HealthCheck.Interval) / time.Second,
-		)
-	}
-
-	startIntervalSeconds := 0
-	if svc.HealthCheck.StartInterval != nil {
-		startIntervalSeconds = int(
-			time.Duration(*svc.HealthCheck.StartInterval) / time.Second,
-		)
-	}
-
-	startPeriodSeconds := 0
-	if svc.HealthCheck.StartPeriod != nil {
-		startPeriodSeconds = int(
-			time.Duration(*svc.HealthCheck.StartPeriod) / time.Second,
-		)
-	}
-
-	timeoutSeconds := 0
-	if svc.HealthCheck.Timeout != nil {
-		timeoutSeconds = int(
-			time.Duration(*svc.HealthCheck.Timeout) / time.Second,
-		)
-	}
-
-	retries := 0
-	if svc.HealthCheck.Retries != nil {
-		retries = int(*svc.HealthCheck.Retries)
-	}
+	hchkProps := healthCheckProperties(svc.HealthCheck)
 
 	cmd := ""
 
@@ -553,146 +778,32 @@ func (s *XMiniEnvK8sService) resolveHealthCheck(svc ComposeService) {
 		cmd = test[0]
 	}
 
-	var startupProbe map[string]any = nil
-	var livenessProbe map[string]any = nil
-	var readinessProbe map[string]any = nil
+	probes := getProbes(cmd, s.Service.Ports, hchkProps)
 
-	getContainerPortName := func(portStr string) string {
-		for _, p := range s.Service.Ports {
-			if strconv.Itoa(int(p.ContainerPort)) == portStr {
-				return p.ContainerPortName
-			}
-		}
-		return ""
+	if s.StartupProbe == nil && probes.startup != nil {
+		addStartUpIntervals(probes.startup, hchkProps)
+		s.StartupProbe = probes.startup
 	}
 
-	createExecProbe := func() map[string]any {
-		return map[string]any{
-			"exec": map[string]any{
-				"command": []string{
-					"/bin/sh",
-					"-c",
-					cmd,
-				},
-			},
-		}
+	if s.LivenessProbe == nil && probes.liveness != nil {
+		addLivenessReadinessIntervals(probes.liveness, hchkProps)
+		s.LivenessProbe = probes.liveness
 	}
 
-	createHttpGetProbe := func(u *url.URL) map[string]any {
-		defaultPort := "80"
-
-		if u.Scheme == "https" {
-			defaultPort = "443"
-		}
-
-		port := u.Port()
-
-		if port == "" {
-			port = defaultPort
-		}
-
-		name := getContainerPortName(port)
-
-		return map[string]any{
-			"httpGet": map[string]any{
-				"path": u.Path,
-				"port": name,
-			},
-		}
-	}
-
-	addLivenessReadinessIntervals := func(p map[string]any) {
-		if intervalSeconds > 0 {
-			p["periodSeconds"] = intervalSeconds
-		}
-		if timeoutSeconds > 0 {
-			p["timeoutSeconds"] = timeoutSeconds
-		}
-		if retries > 0 {
-			p["failureThreshold"] = retries
-		}
-	}
-
-	addStartUpIntervals := func(p map[string]any) {
-		if startIntervalSeconds > 0 {
-			p["periodSeconds"] = startIntervalSeconds
-		}
-		if timeoutSeconds > 0 {
-			p["timeoutSeconds"] = timeoutSeconds
-		}
-		if startIntervalSeconds > 0 && startPeriodSeconds > 0 {
-			p["failureThreshold"] = math.Ceil(
-				float64(startPeriodSeconds) / float64(startIntervalSeconds),
-			)
-		}
-	}
-
-	if strings.HasPrefix(cmd, "curl") || strings.HasPrefix(cmd, "wget") {
-		matches := urlRegex.FindStringSubmatch(cmd)
-		if len(matches) > 0 {
-			parsedURL, err := url.Parse(matches[0])
-			if err != nil {
-				startupProbe = createExecProbe()
-				livenessProbe = createExecProbe()
-				readinessProbe = createExecProbe()
-			} else {
-				startupProbe = createHttpGetProbe(parsedURL)
-				livenessProbe = createHttpGetProbe(parsedURL)
-				readinessProbe = createHttpGetProbe(parsedURL)
-			}
-		}
-	} else {
-		startupProbe = createExecProbe()
-		livenessProbe = createExecProbe()
-		readinessProbe = createExecProbe()
-	}
-
-	if s.StartupProbe == nil && startupProbe != nil {
-		addStartUpIntervals(startupProbe)
-		s.StartupProbe = startupProbe
-	}
-
-	if s.LivenessProbe == nil && livenessProbe != nil {
-		addLivenessReadinessIntervals(livenessProbe)
-		s.LivenessProbe = livenessProbe
-	}
-
-	if s.ReadinessProbe == nil && readinessProbe != nil {
-		addLivenessReadinessIntervals(readinessProbe)
-		s.ReadinessProbe = readinessProbe
+	if s.ReadinessProbe == nil && probes.readiness != nil {
+		addLivenessReadinessIntervals(probes.readiness, hchkProps)
+		s.ReadinessProbe = probes.readiness
 	}
 }
 
-func (s *XMiniEnvK8sService) decodeNestedStructures(values map[string]any) error {
-	servicePorts := []map[string]any{}
-	for _, port := range s.Service.Ports {
-		var mapPort map[string]any
-		if err := mapstructure.Decode(port, &mapPort); err != nil {
-			return errs.Errorf(KindValuesDecode, "failed to resolve service port: %w", err)
+func (s *XMiniEnvK8sService) resolveDeploymentTimeout(
+	mainExt *XMiniEnv,
+) {
+	if s.DeploymentTimeout == "" {
+		if mainExt.K8s.DeploymentTimeout != "" {
+			s.DeploymentTimeout = mainExt.K8s.DeploymentTimeout
+		} else {
+			s.DeploymentTimeout = HELM_DEFAULT_DEPLOYMENT_TIMEOUT
 		}
-		servicePorts = append(servicePorts, mapPort)
 	}
-
-	if mapSvc, ok := values["service"].(map[string]any); ok {
-		mapSvc["ports"] = servicePorts
-		values["service"] = mapSvc
-	}
-
-	if len(s.ImagePullSecrets) != 0 {
-		pullSecrets := []map[string]any{}
-		for _, secret := range s.ImagePullSecrets {
-			var mapSecret map[string]any
-			if err := mapstructure.Decode(secret, &mapSecret); err != nil {
-				return errs.Errorf(
-					KindValuesDecode,
-					"failed to resolve imagePullSecret: %w",
-					err,
-				)
-			}
-			pullSecrets = append(pullSecrets, mapSecret)
-		}
-		values["imagePullSecrets"] = pullSecrets
-	}
-
-	return nil
 }

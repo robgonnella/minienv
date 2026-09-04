@@ -7,6 +7,6 @@ type Deployer interface {
 	String() string
 	ConfigField() string
 	Init(project *config.ComposeProject) error
-	Deploy(project *config.ComposeProject) error
-	Destroy(project *config.ComposeProject) error
+	Deploy() error
+	Destroy() error
 }

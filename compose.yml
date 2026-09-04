@@ -4,7 +4,7 @@ x-minienv:
   k8s:
     context: minikube
     namespace: $MINIENV_NAMESPACE
-    deploymentTimeout: 15s
+    # deploymentTimeout: 15s
 
 services:
   hello:
@@ -22,6 +22,35 @@ services:
       - 8080:8080
     healthcheck:
       test: curl http://localhost:8080
+    depends_on:
+      service-tail:
+        condition: service_healthy
+      job:
+        condition: service_completed_successfully
+
+  service-tail:
+    image: alpine:3.24
+    command:
+      - /bin/sh
+      - -c
+      - sleep 15 && tail -f /dev/null
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  job:
+    x-minienv-k8s-service:
+      deploymentType: job
+    image: alpine:3.24
+    command:
+      - /bin/sh
+      - -c
+      - sleep 10 && echo "ready"
+    ports:
+      - 8080:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:15

@@ -2,11 +2,10 @@ package deployer
 
 import (
 	"context"
-	"encoding/base64"
-	"fmt"
 	"time"
 
 	composegraph "github.com/compose-spec/compose-go/v2/graph"
+	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
@@ -26,7 +25,12 @@ const maxDeployConcurrency = 5
 
 // deployFn acts on one service. Injected so the dependency-ordered walk is
 // drivable without a cluster.
-type deployFn func(svc config.ComposeService) error
+type deployFn func(ctx context.Context, svc config.ComposeService) error
+
+type serviceTuple struct {
+	compose   config.ComposeService
+	extension config.XMiniEnvK8sService
+}
 
 type HelmOptions struct {
 	Ext            *config.XMiniEnv
@@ -39,6 +43,8 @@ type HelmOptions struct {
 
 type Helm struct {
 	ext            *config.XMiniEnv
+	project        *config.ComposeProject
+	services       map[string]serviceTuple
 	actionConfig   *helmaction.Configuration
 	imageClient    image.Client
 	gitClient      git.Client
@@ -76,6 +82,10 @@ func (h *Helm) Init(project *config.ComposeProject) error {
 		return nil
 	}
 
+	if err := h.initProject(project); err != nil {
+		return err
+	}
+
 	settings := helmcli.New()
 	settings.SetNamespace(h.ext.K8s.Namespace)
 	settings.KubeContext = h.ext.K8s.Context
@@ -95,12 +105,12 @@ func (h *Helm) Init(project *config.ComposeProject) error {
 	return nil
 }
 
-func (h *Helm) Deploy(project *config.ComposeProject) error {
+func (h *Helm) Deploy() error {
 	if !h.Active() {
 		return nil
 	}
 
-	if err := h.buildAndPushServiceImages(project); err != nil {
+	if err := h.buildAndPushServiceImages(); err != nil {
 		return err
 	}
 
@@ -108,15 +118,43 @@ func (h *Helm) Deploy(project *config.ComposeProject) error {
 		return err
 	}
 
-	return h.deployInDependencyOrder(project, h.deployService)
+	return h.deployInDependencyOrder(h.deployService)
 }
 
-func (h *Helm) Destroy(project *config.ComposeProject) error {
+func (h *Helm) Destroy() error {
 	if !h.Active() {
 		return nil
 	}
 
-	return h.destroyInReverseDependencyOrder(project, h.uninstallChart)
+	if err := h.destroyInReverseDependencyOrder(
+		h.uninstallChart,
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// initProject is the half of Init that needs no cluster: it resolves every
+// service extension once, up front, so a bad extension fails before a single
+// release is touched, and so a +git tag costs one git call per run rather than
+// one per service per pass. Everything downstream reads h.services, which makes
+// Init a hard precondition of Deploy and Destroy.
+func (h *Helm) initProject(project *config.ComposeProject) error {
+	services := map[string]serviceTuple{}
+
+	for _, svc := range project.Services {
+		svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
+		if err != nil {
+			return err
+		}
+		services[svc.Name] = serviceTuple{compose: svc, extension: *svcExt}
+	}
+
+	h.services = services
+	h.project = project
+
+	return nil
 }
 
 func (h *Helm) extensionOptions(
@@ -130,13 +168,17 @@ func (h *Helm) extensionOptions(
 	}
 }
 
-func (h *Helm) deployService(svc config.ComposeService) error {
-	svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
-	if err != nil {
-		return err
+func (h *Helm) deployService(ctx context.Context, svc config.ComposeService) error {
+	internalService, ok := h.services[svc.Name]
+	if !ok {
+		return errs.Errorf(
+			KindHelmMissingService,
+			"service not in map: %s",
+			svc.Name,
+		)
 	}
 
-	if svcExt.Skip {
+	if internalService.extension.Skip {
 		log.
 			Warn().
 			Str("service", svc.Name).
@@ -144,36 +186,32 @@ func (h *Helm) deployService(svc config.ComposeService) error {
 		return nil
 	}
 
-	return h.upgradeOrInstallService(svcExt, svc)
+	return h.upgradeOrInstallService(ctx, &internalService.extension, svc)
 }
 
-func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
+func (h *Helm) buildAndPushServiceImages() error {
 	dockerServices := []image.ServiceProperties{}
-	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
-		if err != nil {
-			return err
-		}
-		if svcExt.Skip {
-			log.Warn().Str("service", svc.Name).Msg("detected skip: skipping")
+	for name, svc := range h.services {
+		if svc.extension.Skip {
+			log.Warn().Str("service", name).Msg("detected skip: skipping")
 			continue
 		}
 
 		platforms := []string{"linux/amd64"}
 
-		if len(svcExt.Image.Platforms) != 0 {
-			platforms = svcExt.Image.Platforms
+		if len(svc.extension.Image.Platforms) != 0 {
+			platforms = svc.extension.Image.Platforms
 		}
 
-		if svc.Build != nil {
+		if svc.compose.Build != nil {
 			dockerServices = append(dockerServices, image.ServiceProperties{
-				Name:       svc.Name,
-				Registry:   svcExt.Image.Repository,
-				Tag:        svcExt.Image.Tag,
-				Context:    svc.Build.Context,
-				Dockerfile: svc.Build.Dockerfile,
+				Name:       name,
+				Registry:   svc.extension.Image.Repository,
+				Tag:        svc.extension.Image.Tag,
+				Context:    svc.compose.Build.Context,
+				Dockerfile: svc.compose.Build.Dockerfile,
 				Platforms:  platforms,
-				Args:       svc.Build.Args.ToMapping(),
+				Args:       svc.compose.Build.Args.ToMapping(),
 			})
 		}
 	}
@@ -189,18 +227,17 @@ func (h *Helm) buildAndPushServiceImages(project *config.ComposeProject) error {
 // service only once everything it depends on has been deployed. Services with
 // no unmet dependency are deployed concurrently.
 func (h *Helm) deployInDependencyOrder(
-	project *config.ComposeProject,
 	deploy deployFn,
 ) error {
-	if err := h.checkDependencyGraph(project); err != nil {
+	if err := h.checkDependencyGraph(); err != nil {
 		return err
 	}
 
 	return composegraph.InDependencyOrder(
 		context.Background(),
-		project,
-		func(_ context.Context, _ string, svc config.ComposeService) error {
-			return deploy(svc)
+		h.project,
+		func(ctx context.Context, _ string, svc config.ComposeService) error {
+			return deploy(ctx, svc)
 		},
 		composegraph.WithMaxConcurrency(maxDeployConcurrency),
 	)
@@ -209,18 +246,17 @@ func (h *Helm) deployInDependencyOrder(
 // destroyInReverseDependencyOrder mirrors deployInDependencyOrder: a service is
 // uninstalled only once everything depending on it is gone.
 func (h *Helm) destroyInReverseDependencyOrder(
-	project *config.ComposeProject,
 	uninstall deployFn,
 ) error {
-	if err := h.checkDependencyGraph(project); err != nil {
+	if err := h.checkDependencyGraph(); err != nil {
 		return err
 	}
 
 	return composegraph.InDependencyOrder(
 		context.Background(),
-		project,
-		func(_ context.Context, _ string, svc config.ComposeService) error {
-			return uninstall(svc)
+		h.project,
+		func(ctx context.Context, _ string, svc config.ComposeService) error {
+			return uninstall(ctx, svc)
 		},
 		composegraph.InReverseOrder,
 		composegraph.WithMaxConcurrency(maxDeployConcurrency),
@@ -231,8 +267,8 @@ func (h *Helm) destroyInReverseDependencyOrder(
 // dependency naming a service the project does not define — fails before a
 // single release is touched. It also keeps the traversal's own error return
 // carrying nothing but failures from the injected step.
-func (h *Helm) checkDependencyGraph(project *config.ComposeProject) error {
-	if err := composegraph.CheckCycle(project); err != nil {
+func (h *Helm) checkDependencyGraph() error {
+	if err := composegraph.CheckCycle(h.project); err != nil {
 		return errs.Errorf(
 			KindComposeDependencyGraph,
 			"invalid service dependency graph: %w",
@@ -244,6 +280,7 @@ func (h *Helm) checkDependencyGraph(project *config.ComposeProject) error {
 }
 
 func (h *Helm) upgradeOrInstallService(
+	ctx context.Context,
 	svcExt *config.XMiniEnvK8sService,
 	svc config.ComposeService,
 ) error {
@@ -251,18 +288,19 @@ func (h *Helm) upgradeOrInstallService(
 
 	if exists {
 		log.Info().Str("release", svc.Name).Msg("upgrading release")
-		return h.upgradeChart(svcExt, svc)
+		return h.upgradeChart(ctx, svcExt, svc)
 	} else {
 		log.Info().Str("release", svc.Name).Msg("installing release")
-		return h.installChart(svcExt, svc)
+		return h.installChart(ctx, svcExt, svc)
 	}
 }
 
 func (h *Helm) installChart(
+	ctx context.Context,
 	svcExt *config.XMiniEnvK8sService,
 	svc config.ComposeService,
 ) error {
-	values, err := svcExt.ToValuesMap()
+	values, err := svcExt.ToChartValuesMap()
 	if err != nil {
 		return err
 	}
@@ -288,15 +326,18 @@ func (h *Helm) installChart(
 	client.Wait = true
 	client.Atomic = true
 	client.Wait = true
+	client.WaitForJobs = true
 	client.DryRun = h.dryRun
 	client.Timeout = parsedTimeout
 
-	chart, err := h.loadChart(svc.Name, h.ngrokAuthToken)
+	chart, err := h.loadChart(svc.Name, svcExt.DeploymentType)
 	if err != nil {
 		return errs.Errorf(KindChartLoad, "failed to load in-memory chart: %w", err)
 	}
 
-	if _, err := client.Run(chart, values); err != nil {
+	log.Info().Fields(values).Str("chart", svc.Name).Msg("installing chart")
+
+	if _, err := client.RunWithContext(ctx, chart, values); err != nil {
 		return errs.Errorf(
 			KindChartInstall,
 			"failed to install service chart %s: %w",
@@ -316,10 +357,11 @@ func (h *Helm) installChart(
 }
 
 func (h *Helm) upgradeChart(
+	ctx context.Context,
 	svcExt *config.XMiniEnvK8sService,
 	svc config.ComposeService,
 ) error {
-	values, err := svcExt.ToValuesMap()
+	values, err := svcExt.ToChartValuesMap()
 	if err != nil {
 		return err
 	}
@@ -342,11 +384,16 @@ func (h *Helm) upgradeChart(
 	client.Namespace = h.ext.K8s.Namespace
 	client.Atomic = true
 	client.Wait = true
+	client.WaitForJobs = true
 	client.CleanupOnFail = true
+	client.Force = true
+	client.Install = true
+	client.Recreate = true
+	client.ResetValues = true
 	client.DryRun = h.dryRun
 	client.Timeout = parsedTimeout
 
-	chart, err := h.loadChart(svc.Name, h.ngrokAuthToken)
+	chart, err := h.loadChart(svc.Name, svcExt.DeploymentType)
 	if err != nil {
 		return errs.Errorf(
 			KindChartLoad,
@@ -355,7 +402,9 @@ func (h *Helm) upgradeChart(
 		)
 	}
 
-	if _, err := client.Run(svc.Name, chart, values); err != nil {
+	log.Info().Fields(values).Str("chart", svc.Name).Msg("upgrading chart")
+
+	if _, err := client.RunWithContext(ctx, svc.Name, chart, values); err != nil {
 		return errs.Errorf(
 			KindChartUpgrade,
 			"failed to upgrade service chart %s: %w",
@@ -374,11 +423,13 @@ func (h *Helm) upgradeChart(
 	return nil
 }
 
-func (h *Helm) uninstallChart(svc config.ComposeService) error {
+func (h *Helm) uninstallChart(_ context.Context, svc config.ComposeService) error {
 	client := helmaction.NewUninstall(h.actionConfig)
 	client.Wait = true
 	client.IgnoreNotFound = true
 	client.DryRun = h.dryRun
+
+	log.Info().Str("chart", svc.Name).Msg("uninstalling chart")
 
 	response, err := client.Run(svc.Name)
 	if err != nil {
@@ -448,368 +499,83 @@ func (h *Helm) serviceReleaseExists(name string) bool {
 
 func (h *Helm) loadChart(
 	svcName string,
-	ngrokAuthToken string,
+	deploymentType config.K8sDeploymentType,
 ) (*helmchart.Chart, error) {
+	name := svcName
+	if deploymentType == config.K8sJobDeploymentType {
+		id, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 8)
+		if err != nil {
+			return nil, errs.Errorf(
+				KindChartLoad,
+				"failed to generate uid for job: %s",
+				svcName,
+			)
+		}
+		name = id
+	}
+
 	files := []*helmloader.BufferedFile{
 		{
 			Name: "Chart.yaml",
-			Data: []byte(h.getHelmChartYamlTxt(svcName)),
-		},
-		{
-			Name: "values.yaml",
-			Data: []byte(h.getHelmChartValuesTxt()),
+			Data: []byte(helmChartYamlTmpl(name)),
 		},
 		{
 			Name: "templates/_helpers.tpl",
-			Data: []byte(h.getHelmHelpersTxt(svcName)),
+			Data: []byte(HELM_HELPERS_TMPL),
 		},
-		{
-			Name: "templates/deployment.yaml",
-			Data: []byte(h.getHelmDeploymentTxt(svcName)),
-		},
-		{
-			Name: "templates/service.yaml",
-			Data: []byte(h.getHelmServiceTxt(svcName)),
-		},
-		{
-			Name: "templates/serviceaccount.yaml",
-			Data: []byte(h.getHelmServiceAccountTxt(svcName)),
-		},
-		{
-			Name: "templates/configmap.yaml",
-			Data: []byte(h.getHelmConfigMapTxt(svcName)),
-		},
-		{
-			Name: "templates/secret.yaml",
-			Data: []byte(h.getHelmSecretTxt(ngrokAuthToken)),
-		},
+	}
+
+	if deploymentType == config.K8sJobDeploymentType {
+		files = append(files, h.getJobFiles()...)
+	} else {
+		files = append(files, h.getServiceFiles()...)
 	}
 
 	return helmloader.LoadFiles(files)
 }
 
-func (h *Helm) getHelmChartYamlTxt(svcName string) string {
-	return fmt.Sprintf(`
-type: application
-name: %[1]s
-version: 0.1.0
-appVersion: 0.1.0
-description: A chart for deploying %[1]s service
-`, svcName)
+func (h *Helm) getServiceFiles() []*helmloader.BufferedFile {
+	return []*helmloader.BufferedFile{
+		{
+			Name: "values.yaml",
+			Data: []byte(HELM_DEPLOYMENT_VALUES_TMPL),
+		},
+		{
+			Name: "templates/deployment.yaml",
+			Data: []byte(HELM_DEPLOYMENT_TMPL),
+		},
+		{
+			Name: "templates/service.yaml",
+			Data: []byte(HELM_SERVICE_TMPL),
+		},
+		{
+			Name: "templates/serviceaccount.yaml",
+			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
+		},
+		{
+			Name: "templates/configmap.yaml",
+			Data: []byte(HELM_NGROK_CONFIG_MAP_TMPL),
+		},
+		{
+			Name: "templates/secret.yaml",
+			Data: []byte(helmNgrokSecretTmpl(h.ngrokAuthToken)),
+		},
+	}
 }
 
-func (h *Helm) getHelmChartValuesTxt() string {
-	return `
-replicas: 1
-
-image:
-  repository: ""
-  pullPolicy: IfNotPresent
-  tag: ""
-
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
-
-env: {}
-
-ngrok:
-  enabled: false
-  image: ""
-  configMapName: ""
-  configKey: ""
-  configVolMountPath: ""
-  secretName: ""
-  port: ""
-  url: ""
-  trafficPolicy: ""
-
-serviceAccount:
-  create: true
-  automount: true
-  annotations: {}
-  name: ""
-
-podAnnotations: {}
-podLabels: {}
-podSecurityContext: {}
-securityContext: {}
-
-service:
-  create: true
-  type: ClusterIP
-  ports: []
-
-resources: {}
-
-startupProbe: {}
-livenessProbe: {}
-readinessProbe: {}
-
-volumes: []
-volumeMounts: []
-nodeSelector: {}
-tolerations: []
-affinity: {}
-`
-}
-
-func (h *Helm) getHelmHelpersTxt(svcName string) string {
-	return fmt.Sprintf(`
-{{/*
-Expand the name of the chart.
-*/}}
-{{- define "%[1]s.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
-{{- end }}
-
-{{/*
-Create a default fully qualified app name.
-We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
-If release name contains chart name it will be used as a full name.
-*/}}
-{{- define "%[1]s.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%%s-%%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
-{{- end }}
-
-{{/*
-Create chart name and version as used by the chart label.
-*/}}
-{{- define "%[1]s.chart" -}}
-{{- printf "%%s-%%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{- end }}
-
-{{/*
-Common labels
-*/}}
-{{- define "%[1]s.labels" -}}
-helm.sh/chart: {{ include "%[1]s.chart" . }}
-{{ include "%[1]s.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end }}
-
-{{/*
-Selector labels
-*/}}
-{{- define "%[1]s.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "%[1]s.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
-{{- end }}
-
-{{/*
-Create the name of the service account to use
-*/}}
-{{- define "%[1]s.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "%[1]s.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
-{{- end }}
-`, svcName)
-}
-
-func (h *Helm) getHelmConfigMapTxt(svcName string) string {
-	return fmt.Sprintf(`
-{{- if .Values.ngrok.enabled -}}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ .Values.ngrok.configMapName }}
-data:
-  {{ .Values.ngrok.configKey }}: |
-    version: 3
-    endpoints:
-      - name: {{ include "%[1]s.fullname" . }}
-        url: {{ .Values.ngrok.url }}
-        description: "endpoint for %[1]s"
-        upstream:
-          url: {{ include "%[1]s.fullname" . }}:{{ .Values.ngrok.port }}
-        traffic_policy:
-          {{ .Values.ngrok.trafficPolicy }}
-{{- end -}}
-`,
-		svcName,
-	)
-}
-
-func (h *Helm) getHelmSecretTxt(authToken string) string {
-	return fmt.Sprintf(`
-{{- if .Values.ngrok.enabled -}}
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ .Values.ngrok.secretName }}
-data:
-  NGROK_AUTHTOKEN: %s
-{{- end -}}
-`,
-		base64.StdEncoding.EncodeToString([]byte(authToken)),
-	)
-}
-
-func (h *Helm) getHelmDeploymentTxt(svcName string) string {
-	return fmt.Sprintf(`
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ include "%[1]s.fullname" . }}
-  labels:
-    {{- include "%[1]s.labels" . | nindent 4 }}
-spec:
-  replicas: {{ .Values.replicas }}
-  selector:
-    matchLabels:
-      {{- include "%[1]s.selectorLabels" . | nindent 6 }}
-  template:
-    metadata:
-      {{- with .Values.podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      labels:
-        {{- include "%[1]s.labels" . | nindent 8 }}
-        {{- with .Values.podLabels }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-    spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      serviceAccountName: {{ include "%[1]s.serviceAccountName" . }}
-      {{- with .Values.podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      containers:
-        - name: {{ .Chart.Name }}
-          {{- with .Values.securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            {{- range .Values.service.ports }}
-            - name: {{ .containerPortName }}
-              containerPort: {{ .containerPort }}
-              protocol: {{ .protocol }}
-            {{- end }}
-          {{- if .Values.env }}
-          env:
-            {{- range $k, $v := .Values.env }}
-            - name: {{ $k }}
-              value: {{ $v }}
-            {{- end }}
-          {{- end }}
-          {{- with .Values.startupProbe }}
-          startupProbe:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.livenessProbe }}
-          livenessProbe:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.readinessProbe }}
-          readinessProbe:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.volumeMounts }}
-          volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        {{- if .Values.ngrok.enabled }}
-        - name: ngrok
-          image: {{ .Values.ngrok.image }}
-          imagePullPolicy: IfNotPresent
-          command:
-            - ngrok
-            - start
-            - {{ include "%[1]s.fullname" . }}
-            - --log=stdout
-          envFrom:
-            - secretRef:
-                name: {{ .Values.ngrok.secretName }}
-          volumeMounts:
-            - name: {{ .Values.ngrok.configMapName }}
-              mountPath: {{ .Values.ngrok.configVolMountPath }}
-        {{- end }}
-      {{- with .Values.volumes }}
-      volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-`,
-		svcName,
-	)
-}
-
-func (h *Helm) getHelmServiceTxt(svcName string) string {
-	return fmt.Sprintf(`
-{{- if .Values.service.create -}}
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "%[1]s.fullname" . }}
-  labels:
-    {{- include "%[1]s.labels" . | nindent 4 }}
-spec:
-  type: {{ .Values.service.type }}
-  ports:
-    {{- range .Values.service.ports }}
-    - name: {{ .servicePortName }}
-      port: {{ .servicePort }}
-      targetPort: {{ .containerPortName }}
-      protocol: {{ .protocol }}
-    {{- end }}
-  selector:
-    {{- include "%[1]s.selectorLabels" . | nindent 4 }}
-{{- end -}}
-`, svcName)
-}
-
-func (h *Helm) getHelmServiceAccountTxt(svcName string) string {
-	return fmt.Sprintf(`
-{{- if .Values.serviceAccount.create -}}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ include "%[1]s.serviceAccountName" . }}
-  labels:
-    {{- include "%[1]s.labels" . | nindent 4 }}
-  {{- with .Values.serviceAccount.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
-{{- end -}}
-`, svcName)
+func (h *Helm) getJobFiles() []*helmloader.BufferedFile {
+	return []*helmloader.BufferedFile{
+		{
+			Name: "values.yaml",
+			Data: []byte(HELM_JOB_VALUES_TMPL),
+		},
+		{
+			Name: "templates/serviceaccount.yaml",
+			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
+		},
+		{
+			Name: "templates/job.yaml",
+			Data: []byte(HELM_JOB_TMPL),
+		},
+	}
 }
