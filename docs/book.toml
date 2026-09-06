@@ -1,0 +1,9 @@
+[book]
+title = "minienv"
+authors = ["Rob Gonnella"]
+description = "Effortless remote mini environments generated directly from docker compose config"
+language = "en"
+
+[output.html]
+git-repository-url = "https://github.com/robgonnella/minienv"
+edit-url-template = "https://github.com/robgonnella/minienv/edit/main/docs/{path}"

@@ -48,10 +48,26 @@ coverage-report:
 mock:
     mockery
 
-# runs the entry point using "go run"
-run *args:
-    go run cmd/minienv/main.go {{ args }}
-
 # generates schema files
 gen-schema:
     go run cmd/schema/main.go
+
+# deploys the minienv defined in compose.yml
+up *args:
+    @just _run up {{ args }}
+
+# destroys the minienv defined in compose.yml
+down *args:
+    @just _run down {{ args }}
+
+# builds the documentation book
+docs:
+    mdbook build docs
+
+# serves the documentation book locally with live reload
+docs-serve:
+    mdbook serve docs --open
+
+# runs the entry point using "go run"
+_run *args:
+    go run cmd/minienv/main.go {{ args }}
