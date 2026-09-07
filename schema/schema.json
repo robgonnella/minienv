@@ -316,6 +316,10 @@
           "type": "object",
           "description": "Affinity configuration for the deployment pods"
         },
+        "recreate": {
+          "type": "boolean",
+          "description": "Recreates the service on each deploy even if values have not changed"
+        },
         "deploymentType": {
           "type": "string",
           "enum": [

@@ -548,54 +548,10 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				ngrokEnabled = true
 			})
 
-			It("appends the config volume, preserving user volumes", func() {
-				svc.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
-						"ngrok":   map[string]any{"port": 3000},
-						"volumes": []any{map[string]any{"name": "user-vol"}},
-					},
-				}
-
-				result, err := newSvcExt()
-
-				Expect(err).ShouldNot(HaveOccurred())
-				Expect(result.Volumes).To(HaveLen(2))
-				Expect(result.Volumes[0]).To(HaveKeyWithValue("name", "user-vol"))
-				Expect(result.Volumes[1]).To(
-					HaveKeyWithValue("name", config.NGROK_CONFIG_MAP_NAME),
-				)
-			})
-
-			It("populates every ngrok key the chart templates read", func() {
-				svc.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
-						"ngrok": map[string]any{
-							"port":          3000,
-							"url":           "https://example.ngrok.app",
-							"trafficPolicy": "policy",
-						},
-					},
-				}
-
-				result, err := newSvcExt()
-				Expect(err).ShouldNot(HaveOccurred())
-
-				values, err := result.ToChartValuesMap()
-				Expect(err).ShouldNot(HaveOccurred())
-
-				Expect(values["ngrok"]).To(Equal(map[string]any{
-					"enabled":            true,
-					"port":               uint16(3000),
-					"image":              config.NGROK_IMAGE,
-					"configMapName":      config.NGROK_CONFIG_MAP_NAME,
-					"configKey":          config.NGROK_CONFIG_KEY,
-					"configVolMountPath": config.NGROK_CONFIG_VOL_MOUNT_PATH,
-					"secretName":         config.NGROK_SECRET_NAME,
-					"url":                "https://example.ngrok.app",
-					"trafficPolicy":      "policy",
-				}))
-			})
-
+			// The endpoint's upstream targets a service port, so a port
+			// matching none of them publishes a URL that cannot route. Raised
+			// while the extension resolves, which the deployer does for every
+			// service up front, so it fails before a release is touched.
 			It("errors when the ngrok port matches no service port", func() {
 				svc.Extensions = types.Extensions{
 					config.K8S_SERVICE_EXTENSION: map[string]any{
@@ -603,10 +559,36 @@ var _ = Describe("XMiniEnvK8sService", func() {
 					},
 				}
 
-				result, err := newSvcExt()
-				Expect(err).ShouldNot(HaveOccurred())
+				_, err := newSvcExt()
 
-				_, err = result.ToChartValuesMap()
+				Expect(err).To(MatchError(config.KindNgrokPortMismatch))
+			})
+
+			It("accepts a port matching a mapped service port", func() {
+				svc.Extensions = types.Extensions{
+					config.K8S_SERVICE_EXTENSION: map[string]any{
+						"ngrok": map[string]any{"port": 3000},
+					},
+				}
+
+				result, err := newSvcExt()
+
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(result.Ngrok.Port).To(Equal(uint16(3000)))
+			})
+
+			// The container side of the mapping is not what the Service
+			// exposes, so accepting it would publish an endpoint that
+			// silently fails to route.
+			It("rejects the container side of a port mapping", func() {
+				svc.Extensions = types.Extensions{
+					config.K8S_SERVICE_EXTENSION: map[string]any{
+						"ngrok": map[string]any{"port": 8080},
+					},
+				}
+
+				_, err := newSvcExt()
+
 				Expect(err).To(MatchError(config.KindNgrokPortMismatch))
 			})
 		})

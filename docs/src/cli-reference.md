@@ -2,11 +2,11 @@
 
 ## Commands
 
-| Command | Aliases | Description |
-|---|---|---|
-| `minienv deploy` | `up` | Brings up your remote mini environment |
-| `minienv destroy` | `down` | Tears it down |
-| `minienv version` | — | Prints version info |
+| Command           | Aliases | Description                            |
+| ----------------- | ------- | -------------------------------------- |
+| `minienv deploy`  | `up`    | Brings up your remote mini environment |
+| `minienv destroy` | `down`  | Tears it down                          |
+| `minienv version` | —       | Prints version info                    |
 
 None of them take positional arguments.
 
@@ -14,22 +14,23 @@ None of them take positional arguments.
 
 All flags are global and work on every command.
 
-| Flag | Short | Default | Description |
-|---|---|---|---|
-| `--file` | `-f` | — | Compose configuration file. Repeatable. Same as `docker compose -f` |
-| `--project-directory` | — | — | Alternate working directory. Same as `docker compose --project-directory` |
-| `--project-name` | `-p` | — | Project name. Same as `docker compose -p` |
-| `--dry-run` | — | `false` | Build images without pushing, and run the deploy without applying it |
+| Flag                  | Short | Default | Description                                                               |
+| --------------------- | ----- | ------- | ------------------------------------------------------------------------- |
+| `--file`              | `-f`  | —       | Compose configuration file. Repeatable. Same as `docker compose -f`       |
+| `--project-directory` | —     | —       | Alternate working directory. Same as `docker compose --project-directory` |
+| `--project-name`      | `-p`  | —       | Project name. Same as `docker compose -p`                                 |
+| `--dry-run`           | —     | `false` | Build images without pushing, and run the deploy without applying it      |
 
 The first three behave exactly as they do in `docker compose`, because minienv
 delegates file discovery to the same library.
 
 ## Environment variables
 
-| Variable | Effect |
-|---|---|
+| Variable          | Effect                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `NGROK_AUTHTOKEN` | Enables ngrok. **Unset means all ngrok config is silently ignored** — see [Exposing Services](./exposing-services.md) |
-| `HELM_DRIVER` | Helm storage backend. Defaults to `secret` |
+| `NGROK_API_KEY`   | **Optional.** Only used to print the published URL table after a deploy. Not needed to publish, or by `minienv down`  |
+| `HELM_DRIVER`     | Helm storage backend. Defaults to `secret`                                                                            |
 
 Standard compose environment handling also applies: `COMPOSE_FILE`,
 `COMPOSE_PROJECT_NAME`, `.env` file loading, and `${VAR}` interpolation inside

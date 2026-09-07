@@ -27,7 +27,14 @@ A job accepts the full extension schema, but several keys have no effect on one:
 `tolerations`, the three probes, and `ngrok`.
 
 Ports are still read — they define the container's declared ports — but no
-Kubernetes Service is created for a job.
+Kubernetes Service is created for a job. That is also why `ngrok` is ignored:
+an endpoint's upstream is a Service, and a job has none. minienv logs a warning
+and publishes nothing rather than creating a URL that cannot route.
+
+The Job resource itself is named with a random suffix, because a Job's
+`spec.template` and `spec.selector` are immutable and an upgrade cannot patch
+one in place — every deploy renders a new Job. The helm release is named after
+the service, so `minienv down` finds and removes it.
 
 ## Ordering with `depends_on`
 

@@ -79,7 +79,7 @@ group "default" {
   targets = [{{ .Services | joinServiceNamesQuoted }}]
 }
 
-{{ range .Services -}}
+{{- range .Services }}
 target "{{ .Name }}" {
   context = "{{ .Context }}"
   dockerfile = "{{ .Dockerfile }}"
@@ -92,5 +92,6 @@ target "{{ .Name }}" {
 {{- end }}
 }
 {{- end }}
+
 `
 }

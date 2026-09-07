@@ -1,6 +1,13 @@
 package core
 
 import (
+	"fmt"
+	"maps"
+	"os"
+	"slices"
+	"strings"
+	"text/tabwriter"
+
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer"
 	"github.com/robgonnella/minienv/internal/errs"
@@ -39,7 +46,39 @@ func (c *Core) Deploy() error {
 		return errs.Errorf(KindDeploy, "deploy failed: %w", err)
 	}
 
+	c.printPublishedUrls()
+
 	return nil
+}
+
+// A failed lookup only warns: the environment is already up by this point.
+func (c *Core) printPublishedUrls() {
+	serviceUrlMap, err := c.deployer.PublishedServiceUrls()
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to get published service URLs")
+		return
+	}
+
+	if len(serviceUrlMap) == 0 {
+		return
+	}
+
+	rows := []string{"Service Name\tURL", "--\t----"}
+
+	for _, name := range slices.Sorted(maps.Keys(serviceUrlMap)) {
+		url := serviceUrlMap[name]
+		rows = append(rows, name+"\t"+url.String())
+	}
+
+	var table strings.Builder
+	w := tabwriter.NewWriter(&table, 0, 0, 3, ' ', 0)
+	_, _ = fmt.Fprintln(w, strings.Join(rows, "\n"))
+	_ = w.Flush()
+
+	_, _ = fmt.Fprint(
+		os.Stdout,
+		"\n====== Published Service URLs ======\n"+table.String(),
+	)
 }
 
 func (c *Core) Destroy() error {

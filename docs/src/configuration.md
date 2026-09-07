@@ -2,10 +2,10 @@
 
 minienv adds exactly two fields to your compose file.
 
-| Field | Where | Purpose |
-|---|---|---|
-| `x-minienv` | top level | Chooses and configures the deployment target |
-| `x-minienv-k8s-service` | under a service | Per-service overrides |
+| Field                   | Where           | Purpose                                      |
+| ----------------------- | --------------- | -------------------------------------------- |
+| `x-minienv`             | top level       | Chooses and configures the deployment target |
+| `x-minienv-k8s-service` | under a service | Per-service overrides                        |
 
 Both are standard compose extension fields, so `docker compose` ignores them.
 The same file keeps working locally.
@@ -15,11 +15,11 @@ The same file keeps working locally.
 ```yaml
 x-minienv:
   k8s:
-    context: minikube          # required
-    namespace: my-branch       # required
-    deploymentTimeout: 60s     # optional, default 60s
+    context: minikube # required
+    namespace: my-branch # required
+    deploymentTimeout: 60s # optional, default 60s
   ngrok:
-    trafficPolicy: ""          # optional, applies to all services
+    trafficPolicy: "" # optional, applies to all services
 ```
 
 `k8s.context` and `k8s.namespace` are required — supplying them is what
@@ -49,15 +49,15 @@ compose value.
 
 ## What minienv reads from compose
 
-| Compose field | Becomes |
-|---|---|
-| `image` | The container image. Split on the first `:` into repository and tag when the extension does not set them. |
-| `build.context`, `build.dockerfile`, `build.args` | Built and pushed with `docker buildx bake` before deploying. |
-| `ports` | Container ports and a Kubernetes Service. |
-| `environment` | Container env vars, rendered inline. |
-| `command` | The container `command`. |
-| `healthcheck` | Startup, liveness, and readiness probes. |
-| `depends_on` | Deploy order (and reverse order on destroy). |
+| Compose field                                     | Becomes                                                                                                   |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `image`                                           | The container image. Split on the first `:` into repository and tag when the extension does not set them. |
+| `build.context`, `build.dockerfile`, `build.args` | Built and pushed with `docker buildx bake` before deploying.                                              |
+| `ports`                                           | Container ports and a Kubernetes Service.                                                                 |
+| `environment`                                     | Container env vars, rendered inline.                                                                      |
+| `command`                                         | The container `command`.                                                                                  |
+| `healthcheck`                                     | Startup, liveness, and readiness probes.                                                                  |
+| `depends_on`                                      | Deploy order (and reverse order on destroy).                                                              |
 
 Everything else is ignored — see below.
 
@@ -94,8 +94,8 @@ Port mappings must be written as `host:container`:
 
 ```yaml
 ports:
-  - "8080:8080"     # good
-  - "8080"          # error
+  - "8080:8080" # good
+  - "8080" # error
 ```
 
 The bare form is valid compose but an error in minienv, because it needs both

@@ -40,13 +40,13 @@ var _ = Describe("HclBuilder", func() {
 group "default" {
   targets = ["hello"]
 }
-
 target "hello" {
   context = "."
   dockerfile = "Dockerfile"
   tags = ["reg/hello:v1"]
   platforms = ["linux/amd64"]
 }
+
 `))
 		})
 
@@ -68,6 +68,25 @@ target "hello" {
 			Expect(hcl).To(ContainSubstring(`context = "./world"`))
 			Expect(hcl).To(ContainSubstring(`dockerfile = "world/Dockerfile"`))
 			Expect(hcl).To(ContainSubstring(`tags = ["reg/world:v2"]`))
+		})
+
+		// buildx needs each target block to begin on its own line, so the
+		// boundary between two of them is worth asserting on directly — every
+		// field can be present as a substring without it.
+		It("separates one target block from the next", func() {
+			services = append(services, image.ServiceProperties{
+				Name:       "world",
+				Registry:   "reg/world",
+				Tag:        "v2",
+				Context:    "./world",
+				Dockerfile: "world/Dockerfile",
+				Platforms:  []string{"linux/amd64"},
+			})
+
+			hcl, err := subject.Build(services)
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(hcl).To(ContainSubstring("}\ntarget \"world\" {"))
 		})
 
 		It("quotes every entry of a multi-platform list", func() {

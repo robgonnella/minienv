@@ -43,8 +43,8 @@ A `ports:` entry is missing its host side:
 
 ```yaml
 ports:
-  - "8080"          # error
-  - "8080:8080"     # correct
+  - "8080" # error
+  - "8080:8080" # correct
 ```
 
 **`exposeServicePort must match a mapped port ...`**
@@ -53,6 +53,8 @@ ports:
 the compose mapping — `8080` in `"8080:3000"`, not `3000`.
 
 The message says `exposeServicePort`; the key you actually set is `ngrok.port`.
+It is raised while extensions resolve, before any release is installed, so a
+typo here never leaves half a project up.
 
 ## Deployment errors
 
@@ -78,6 +80,69 @@ These produce no error, which makes them the ones worth knowing about.
 
 `NGROK_AUTHTOKEN` is not set. When it is missing, every `ngrok` block in your
 config is discarded without a warning. Check this before anything else.
+
+**`looking up published service urls requires NGROK_API_KEY to be set`**
+
+A service has `ngrok` config but `NGROK_API_KEY` is unset. It is a different
+credential from `NGROK_AUTHTOKEN`, and it is optional — the deploy still
+succeeds and the services are still reachable. Only the URL table needs it, so
+this arrives as a warning.
+
+**No URL table prints after a successful deploy**
+
+The table is the last, cosmetic step, so a failure reading the URLs back is a
+warning rather than a failed deploy — the environment is already up. Check the
+warning for the reason; an unset or invalid `NGROK_API_KEY` is the usual one.
+
+**A redeploy did not pick up my rebuilt image**
+
+The image tag did not change, so Helm sees an unchanged release and leaves the
+pods alone. Either set `recreate: true` on the service, or use a tag that moves
+— `+git` appends the current short sha. See
+[Configuration Reference](./configuration-reference.md#recreate).
+
+**A published URL changed after a redeploy**
+
+An endpoint with no reserved `ngrok.url` keeps its address only while the ngrok
+pod survives. Changing the set of published services replaces that pod, which
+reassigns every unreserved URL at once. Pin the ones that matter with
+`ngrok.url`. A randomly assigned URL cannot be re-claimed, so a reserved domain
+is the only way to hold an address.
+
+**The ngrok pod will not start, and the deploy rolled back**
+
+Check whether `ngrok.url` names a domain your account actually holds. The agent
+refuses a domain that is not reserved, and the ngrok release installs with
+`--atomic`, so the whole deploy fails at its last step. `kubectl logs -n
+<namespace> -l app.kubernetes.io/name=ngrok` names the domain it could not
+claim.
+
+**Two developers cannot both publish the same service**
+
+Check whether `ngrok.url` is a hardcoded domain. Endpoint _names_ are prefixed
+with the namespace, so lookups never cross environments, but a reserved domain
+is committed to `compose.yml` and is therefore the same for everyone. Two agents
+cannot claim one domain at once. Interpolate the namespace into it:
+
+```yaml
+url: https://${MINIENV_NAMESPACE}-api.example.ngrok.app
+```
+
+**The URL table shows `my-namespace-api` rather than `api`**
+
+That is the ngrok endpoint name, which is deliberately prefixed with the
+namespace so it is unique on the account. It is also the name to look for in the
+ngrok dashboard.
+
+**A new service is not published, or a removed one still is**
+
+Adding or removing an `ngrok` block restarts the ngrok agent, which also
+reassigns every URL that has no reserved `url`. If a URL looks stale, check
+whether the `ngrok` pod actually restarted:
+
+```sh
+kubectl get pods -n <namespace> -l app.kubernetes.io/name=ngrok
+```
 
 **A setting under `x-minienv-k8s-service` has no effect**
 

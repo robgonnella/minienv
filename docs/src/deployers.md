@@ -1,6 +1,6 @@
 # Deployers
 
-minienv separates *reading your compose config* from *deploying it somewhere*.
+minienv separates _reading your compose config_ from _deploying it somewhere_.
 The reading half is fixed; the deploying half is pluggable.
 
 ## Available today

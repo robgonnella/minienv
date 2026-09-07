@@ -13,6 +13,7 @@ import (
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
+	"github.com/robgonnella/minienv/internal/publishing"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,6 +24,7 @@ type LoaderOpts struct {
 	DryRun           bool
 	ImageClient      image.Client
 	GitClient        git.Client
+	PublishClient    publishing.Client
 	NgrokAuthToken   string
 	HelmDriver       string
 }
@@ -123,6 +125,7 @@ func (l *Loader) loadActiveDeployer(
 			Ext:            ext,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,
+			PublishClient:  l.opts.PublishClient,
 			NgrokAuthToken: l.opts.NgrokAuthToken,
 			HelmDriver:     l.opts.HelmDriver,
 			DryRun:         l.opts.DryRun,

@@ -4,7 +4,6 @@ x-minienv:
   k8s:
     context: minikube
     namespace: $MINIENV_NAMESPACE
-    # deploymentTimeout: 15s
 
 services:
   hello:
@@ -23,23 +22,36 @@ services:
     healthcheck:
       test: curl http://localhost:8080
     depends_on:
-      service-tail:
-        condition: service_healthy
       job:
         condition: service_completed_successfully
 
-  service-tail:
-    image: alpine:3.24
-    command:
-      - /bin/sh
-      - -c
-      - sleep 15 && tail -f /dev/null
+  hello2:
+    x-minienv-k8s-service:
+      ngrok:
+        port: 8080
+      service:
+        ports:
+          - containerPortName: hello
+            containerPort: 8080
+            servicePortName: hello
+            servicePort: 8080
+            protocol: TCP
+      image:
+        repository: rgonnella/demo-hello
+        tag: test-+git
+        platforms:
+          - linux/amd64
+          - linux/arm64/v8
+    build: .
+    healthcheck:
+      test: curl http://localhost:8080
     depends_on:
       postgres:
         condition: service_healthy
 
   job:
     x-minienv-k8s-service:
+      skip: false
       deploymentType: job
     image: alpine:3.24
     command:
@@ -53,6 +65,8 @@ services:
         condition: service_healthy
 
   postgres:
+    x-minienv-k8s-service:
+      skip: false
     image: postgres:15
     environment:
       POSTGRES_PASSWORD: secret

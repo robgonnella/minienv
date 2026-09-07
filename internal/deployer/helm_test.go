@@ -2,6 +2,8 @@ package deployer_test
 
 import (
 	"errors"
+	"net/url"
+	"strconv"
 
 	"github.com/compose-spec/compose-go/v2/types"
 
@@ -12,6 +14,7 @@ import (
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	"github.com/robgonnella/minienv/internal/image"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
+	publishingmocks "github.com/robgonnella/minienv/internal/publishing/mocks"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -19,12 +22,35 @@ import (
 // proves BuildAndPushServiceImages passes the error through untouched.
 var errBake = errors.New("bake blew up")
 
+// Asserted by identity, so the spec proves the error passes through untouched.
+var errBoom = errors.New("boom")
+
+// The ngrok port matches the published side of the compose mapping, which is
+// what resolveNgrok requires.
+func exposedService(name string, servicePort int) config.ComposeService {
+	return config.ComposeService{
+		Name:  name,
+		Image: "reg/" + name + ":v1",
+		Ports: []types.ServicePortConfig{
+			{Target: 8080, Published: strconv.Itoa(servicePort)},
+		},
+		Extensions: types.Extensions{
+			config.K8S_SERVICE_EXTENSION: map[string]any{
+				"ngrok": map[string]any{"port": servicePort},
+			},
+		},
+	}
+}
+
 var _ = Describe("Helm", func() {
 	var (
-		ext       *config.XMiniEnv
-		mockImage *imagemocks.MockClient
-		mockGit   *gitmocks.MockClient
-		subject   *deployer.Helm
+		ext         *config.XMiniEnv
+		mockImage   *imagemocks.MockClient
+		mockGit     *gitmocks.MockClient
+		mockPublish *publishingmocks.MockClient
+		subject     *deployer.Helm
+		ngrokToken  string
+		alphaUrl    *url.URL
 	)
 
 	BeforeEach(func() {
@@ -36,6 +62,15 @@ var _ = Describe("Helm", func() {
 		}
 		mockImage = imagemocks.NewMockClient(GinkgoT())
 		mockGit = gitmocks.NewMockClient(GinkgoT())
+		mockPublish = publishingmocks.NewMockClient(GinkgoT())
+		// Reset explicitly: the suite runs --randomize-all, so a token left
+		// set by the ngrok specs would silently enable ngrok for whatever
+		// ran next.
+		ngrokToken = ""
+
+		parsed, err := url.Parse("https://alpha.ngrok.app")
+		Expect(err).ShouldNot(HaveOccurred())
+		alphaUrl = parsed
 	})
 
 	JustBeforeEach(func() {
@@ -43,7 +78,8 @@ var _ = Describe("Helm", func() {
 			Ext:            ext,
 			ImageClient:    mockImage,
 			GitClient:      mockGit,
-			NgrokAuthToken: "",
+			PublishClient:  mockPublish,
+			NgrokAuthToken: ngrokToken,
 			DryRun:         false,
 		})
 	})
@@ -270,6 +306,164 @@ var _ = Describe("Helm", func() {
 			}
 
 			Expect(subject.InitProject(project)).To(Succeed())
+		})
+
+		// initProject runs before any chart is installed, so a typo cannot
+		// leave half a project up.
+		Context("with an ngrok port matching no service port", func() {
+			BeforeEach(func() {
+				ngrokToken = "fake-token-for-tests"
+			})
+
+			It("rejects the project", func() {
+				svc := config.ComposeService{
+					Name:  "hello",
+					Image: "reg/hello:v1",
+					Ports: []types.ServicePortConfig{
+						{Target: 8080, Published: "3000"},
+					},
+					Extensions: types.Extensions{
+						config.K8S_SERVICE_EXTENSION: map[string]any{
+							"ngrok": map[string]any{"port": 9999},
+						},
+					},
+				}
+				project.Services = types.Services{"hello": svc}
+
+				Expect(subject.InitProject(project)).
+					To(MatchError(config.KindNgrokPortMismatch))
+			})
+		})
+	})
+
+	Describe("PublishedServiceUrls", func() {
+		var project *config.ComposeProject
+
+		BeforeEach(func() {
+			ngrokToken = "fake-token-for-tests"
+			project = &config.ComposeProject{
+				Name: "test-project",
+				Services: types.Services{
+					"beta":  exposedService("beta", 3001),
+					"alpha": exposedService("alpha", 3000),
+					"plain": {Name: "plain", Image: "reg/plain:v1"},
+				},
+			}
+		})
+
+		// The api lists every endpoint on the account, so the names asked
+		// about are what keep another project's URLs out of the result.
+		It("asks only about the services it exposed", func() {
+			Expect(subject.InitProject(project)).To(Succeed())
+
+			var asked []string
+			mockPublish.
+				EXPECT().
+				ServiceUrls(mock.Anything).
+				Run(func(names []string) { asked = names }).
+				Return(nil, nil).
+				Once()
+
+			_, err := subject.PublishedServiceUrls()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(asked).To(ConsistOf("namespace-alpha", "namespace-beta"))
+		})
+
+		It("reports the url the api gives for each service", func() {
+			Expect(subject.InitProject(project)).To(Succeed())
+
+			mockPublish.
+				EXPECT().
+				ServiceUrls(mock.Anything).
+				Return(map[string]url.URL{"namespace-alpha": *alphaUrl}, nil).
+				Once()
+
+			Expect(subject.PublishedServiceUrls()).
+				To(Equal(map[string]url.URL{"namespace-alpha": *alphaUrl}))
+		})
+
+		It("propagates an api failure", func() {
+			Expect(subject.InitProject(project)).To(Succeed())
+
+			mockPublish.
+				EXPECT().
+				ServiceUrls(mock.Anything).
+				Return(nil, errBoom).
+				Once()
+
+			_, err := subject.PublishedServiceUrls()
+
+			Expect(err).To(MatchError(errBoom))
+		})
+
+		Context("with no auth token", func() {
+			BeforeEach(func() {
+				ngrokToken = ""
+			})
+
+			// resolveNgrok drops every ngrok block without a token, so there
+			// is nothing to ask about — and a missing key is now an error.
+			It("resolves nothing without calling the api", func() {
+				Expect(subject.InitProject(project)).To(Succeed())
+
+				Expect(subject.PublishedServiceUrls()).To(BeEmpty())
+
+				mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
+			})
+		})
+	})
+
+	Describe("the config the ngrok chart installs", func() {
+		var project *config.ComposeProject
+
+		BeforeEach(func() {
+			ngrokToken = "fake-token-for-tests"
+			project = &config.ComposeProject{
+				Name: "test-project",
+				Services: types.Services{
+					"alpha": exposedService("alpha", 3000),
+				},
+			}
+		})
+
+		// An endpoint's assigned url is ephemeral, and ngrok can only bind a
+		// url that is a domain reserved on the account. Reading one back and
+		// writing it into the agent config produced a url the agent could not
+		// claim, which failed the install after every service release had
+		// landed. The only url that reaches the config is a configured one.
+		It("never adopts the url the api reports", func() {
+			Expect(subject.InitProject(project)).To(Succeed())
+
+			endpoints := subject.NgrokValues()["endpoints"]
+
+			Expect(endpoints).To(HaveLen(1))
+			Expect(endpoints).To(
+				ConsistOf(HaveKeyWithValue("url", BeEmpty())),
+			)
+			mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
+		})
+
+		It("keeps a configured url", func() {
+			svc := exposedService("alpha", 3000)
+			svc.Extensions = types.Extensions{
+				config.K8S_SERVICE_EXTENSION: map[string]any{
+					"ngrok": map[string]any{
+						"port": 3000,
+						"url":  "https://reserved.ngrok.app",
+					},
+				},
+			}
+			project.Services = types.Services{"alpha": svc}
+
+			Expect(subject.InitProject(project)).To(Succeed())
+
+			Expect(subject.NgrokValues()["endpoints"]).To(
+				ConsistOf(
+					HaveKeyWithValue("url", "https://reserved.ngrok.app"),
+				),
+			)
+			mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
 		})
 	})
 })

@@ -5,6 +5,8 @@
 package deployermocks
 
 import (
+	"net/url"
+
 	"github.com/robgonnella/minienv/internal/config"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -259,6 +261,61 @@ func (_c *MockDeployer_Init_Call) Return(err error) *MockDeployer_Init_Call {
 }
 
 func (_c *MockDeployer_Init_Call) RunAndReturn(run func(project *config.ComposeProject) error) *MockDeployer_Init_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PublishedServiceUrls provides a mock function for the type MockDeployer
+func (_mock *MockDeployer) PublishedServiceUrls() (map[string]url.URL, error) {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PublishedServiceUrls")
+	}
+
+	var r0 map[string]url.URL
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func() (map[string]url.URL, error)); ok {
+		return returnFunc()
+	}
+	if returnFunc, ok := ret.Get(0).(func() map[string]url.URL); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]url.URL)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func() error); ok {
+		r1 = returnFunc()
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockDeployer_PublishedServiceUrls_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PublishedServiceUrls'
+type MockDeployer_PublishedServiceUrls_Call struct {
+	*mock.Call
+}
+
+// PublishedServiceUrls is a helper method to define mock.On call
+func (_e *MockDeployer_Expecter) PublishedServiceUrls() *MockDeployer_PublishedServiceUrls_Call {
+	return &MockDeployer_PublishedServiceUrls_Call{Call: _e.mock.On("PublishedServiceUrls")}
+}
+
+func (_c *MockDeployer_PublishedServiceUrls_Call) Run(run func()) *MockDeployer_PublishedServiceUrls_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDeployer_PublishedServiceUrls_Call) Return(stringToURL map[string]url.URL, err error) *MockDeployer_PublishedServiceUrls_Call {
+	_c.Call.Return(stringToURL, err)
+	return _c
+}
+
+func (_c *MockDeployer_PublishedServiceUrls_Call) RunAndReturn(run func() (map[string]url.URL, error)) *MockDeployer_PublishedServiceUrls_Call {
 	_c.Call.Return(run)
 	return _c
 }

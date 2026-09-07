@@ -142,6 +142,8 @@ type XMiniEnvK8sService struct {
 	XMiniEnvCommonService `mapstructure:",squash"`
 	// Chart value overrides for the Helm deployment
 	ChartValues `mapstructure:",squash"`
+	// Recreates the service on each deploy even if values have not changed
+	Recreate bool `json:"recreate,omitempty" mapstructure:"recreate"`
 	// Controls the type of deployment (service | job). Default is "service"
 	DeploymentType K8sDeploymentType `jsonschema:"enum=service,enum=job,default=service" json:"deploymentType,omitempty" mapstructure:"deploymentType,omitempty"`
 	// Controls the Helm timeout for deploying the targeted service
@@ -227,7 +229,12 @@ func (s *XMiniEnvK8sService) resolve(
 	s.resolveContainerCommand(opts.Service)
 	s.resolveHealthCheck(opts.Service)
 	s.resolveEnvironment(opts.Service)
-	s.resolveNgrok(opts.MainExt, opts.NgrokEnabled)
+
+	// After resolveServicePorts, which it checks the ngrok port against.
+	if err := s.resolveNgrok(opts.MainExt, opts.NgrokEnabled); err != nil {
+		return err
+	}
+
 	s.resolveDeploymentTimeout(opts.MainExt)
 
 	return nil
@@ -464,47 +471,6 @@ func (s *XMiniEnvK8sService) ToChartValuesMap() (map[string]any, error) {
 
 	}
 
-	hasServicePort := func(p uint16) bool {
-		return slices.ContainsFunc(
-			s.Service.Ports,
-			func(svcPort ChartServicePort) bool {
-				return svcPort.ServicePort == p
-			},
-		)
-	}
-
-	// resolveNgrok clears Ngrok when no auth token is available, so a non-zero
-	// port here means ngrok is both configured and usable.
-	if s.Ngrok.Port != 0 {
-		if !hasServicePort(s.Ngrok.Port) {
-			return nil, errs.Errorf(
-				KindNgrokPortMismatch,
-				"exposeServicePort must match a mapped port either in extension or"+
-					"from host port mapping in docker compose config",
-			)
-		}
-
-		// The chart templates read every one of these keys; anything left out
-		// here falls back to the empty string in values.yaml and renders a
-		// ConfigMap/Secret with no name and a sidecar with no image.
-		ngrok := map[string]any{
-			"enabled":            true,
-			"port":               s.Ngrok.Port,
-			"image":              NGROK_IMAGE,
-			"configMapName":      NGROK_CONFIG_MAP_NAME,
-			"configKey":          NGROK_CONFIG_KEY,
-			"configVolMountPath": NGROK_CONFIG_VOL_MOUNT_PATH,
-			"secretName":         NGROK_SECRET_NAME,
-			"url":                s.Ngrok.Url,
-		}
-
-		if s.Ngrok.Port != 0 && s.Ngrok.TrafficPolicy != "" {
-			ngrok["trafficPolicy"] = s.Ngrok.TrafficPolicy
-		}
-
-		values["ngrok"] = ngrok
-	}
-
 	return values, nil
 }
 
@@ -540,38 +506,39 @@ func (s *XMiniEnvK8sService) resolveChartValues(rawSvcExt any) error {
 func (s *XMiniEnvK8sService) resolveNgrok(
 	mainExt *XMiniEnv,
 	ngrokEnabled bool,
-) {
+) error {
 	// With no auth token there is nothing to expose, so drop any ngrok config
 	// entirely. Everything downstream can then treat a zero Ngrok.Port as
 	// "ngrok is off" without needing to know about the token.
 	if !ngrokEnabled {
 		s.Ngrok = Ngrok{}
-		return
+		return nil
 	}
 
 	if s.Ngrok.TrafficPolicy == "" && mainExt.Ngrok.TrafficPolicy != "" {
 		s.Ngrok.TrafficPolicy = mainExt.Ngrok.TrafficPolicy
 	}
 
-	if s.Ngrok.Port != 0 {
-		volumes := []map[string]any{}
-		if s.Volumes != nil {
-			volumes = slices.Concat(volumes, s.Volumes)
-		}
-		volumes = append(volumes, map[string]any{
-			"name": NGROK_CONFIG_MAP_NAME,
-			"configMap": map[string]any{
-				"name": NGROK_CONFIG_MAP_NAME,
-				"items": []map[string]any{
-					{
-						"key":  NGROK_CONFIG_KEY,
-						"path": NGROK_CONFIG_KEY,
-					},
-				},
-			},
-		})
-		s.Volumes = volumes
+	if s.Ngrok.Port == 0 {
+		return nil
 	}
+
+	hasServicePort := slices.ContainsFunc(
+		s.Service.Ports,
+		func(svcPort ChartServicePort) bool {
+			return svcPort.ServicePort == s.Ngrok.Port
+		},
+	)
+
+	if !hasServicePort {
+		return errs.Errorf(
+			KindNgrokPortMismatch,
+			"exposeServicePort must match a mapped port either in extension or"+
+				"from host port mapping in docker compose config",
+		)
+	}
+
+	return nil
 }
 
 func (s *XMiniEnvK8sService) resolveServiceImage(

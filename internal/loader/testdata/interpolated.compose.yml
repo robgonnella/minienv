@@ -1,0 +1,14 @@
+x-minienv:
+  k8s:
+    context: test-context
+    namespace: $MINIENV_NAMESPACE
+
+services:
+  api:
+    image: reg/api:v1
+    ports:
+      - "3000:8080"
+    x-minienv-k8s-service:
+      ngrok:
+        port: 3000
+        url: https://${MINIENV_NAMESPACE}-api.example.ngrok.app

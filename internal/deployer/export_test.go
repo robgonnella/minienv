@@ -67,3 +67,17 @@ func (h *Helm) DeployService(
 ) error {
 	return h.deployService(ctx, svc)
 }
+
+// NgrokChart exposes the single in-memory ngrok chart. Deploy only reaches it
+// after every service release has landed on a cluster, so this is the only way
+// to assert on the file set it carries and the token baked into it.
+func (h *Helm) NgrokChart() (*helmchart.Chart, error) {
+	return h.ngrokChart()
+}
+
+// NgrokValues exposes the values that chart renders against. They derive from
+// h.servicesToPublish, which only initProject populates, so specs pair the two:
+// InitProject to resolve the endpoints, this to see what reaches the templates.
+func (h *Helm) NgrokValues() map[string]any {
+	return h.ngrokValues()
+}

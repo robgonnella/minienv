@@ -5,6 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/config"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
 	"github.com/robgonnella/minienv/internal/loader"
@@ -72,6 +73,41 @@ var _ = Describe("Loader", func() {
 			).LoadCore()
 
 			Expect(err).To(MatchError(loader.KindExtensionDecode))
+		})
+	})
+
+	// A reserved ngrok URL is committed to compose.yml, so it can only differ
+	// per developer if compose interpolates it.
+	Describe("interpolation", func() {
+		BeforeEach(func() {
+			GinkgoT().Setenv("MINIENV_NAMESPACE", "alice")
+		})
+
+		It("resolves env vars inside a service extension", func() {
+			project, err := newLoader(
+				fixture("interpolated.compose.yml"),
+			).LoadComposeProject()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			ext := project.Services["api"].
+				Extensions[config.K8S_SERVICE_EXTENSION].(map[string]any)
+			ngrok := ext["ngrok"].(map[string]any)
+
+			Expect(ngrok["url"]).
+				To(Equal("https://alice-api.example.ngrok.app"))
+		})
+
+		It("resolves env vars inside the top level extension", func() {
+			project, err := newLoader(
+				fixture("interpolated.compose.yml"),
+			).LoadComposeProject()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			ext := project.
+				Extensions[config.TOP_LEVEL_EXTENSION].(map[string]any)
+			k8s := ext["k8s"].(map[string]any)
+
+			Expect(k8s["namespace"]).To(Equal("alice"))
 		})
 	})
 })

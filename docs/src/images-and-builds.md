@@ -29,7 +29,7 @@ So this is enough for a service you are not building:
 ```yaml
 services:
   db:
-    image: postgres:15      # repository: postgres, tag: 15
+    image: postgres:15 # repository: postgres, tag: 15
 ```
 
 > **An untagged image is an error.** `image: myapp` gives neither a repository

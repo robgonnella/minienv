@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"errors"
+	"net/url"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -16,13 +17,18 @@ var errBoom = errors.New("boom")
 
 var _ = Describe("Core", func() {
 	var (
-		mockDeployer *deployermocks.MockDeployer
-		project      *config.ComposeProject
-		ext          *config.XMiniEnv
-		subject      *core.Core
+		mockDeployer     *deployermocks.MockDeployer
+		project          *config.ComposeProject
+		ext              *config.XMiniEnv
+		subject          *core.Core
+		testPublishedUrl *url.URL
 	)
 
 	BeforeEach(func() {
+		publishedUrl, err := url.Parse("http://test-url")
+		Expect(err).ShouldNot(HaveOccurred())
+		testPublishedUrl = publishedUrl
+
 		mockDeployer = deployermocks.NewMockDeployer(GinkgoT())
 		project = &config.ComposeProject{Name: "test-project"}
 		ext = &config.XMiniEnv{
@@ -40,12 +46,43 @@ var _ = Describe("Core", func() {
 	Describe("Deploy", func() {
 		It("initializes the deployer then deploys the loaded project", func() {
 			initCall := mockDeployer.EXPECT().Init(project).Return(nil).Once()
-			mockDeployer.
+			deployCall := mockDeployer.
 				EXPECT().
 				Deploy().
 				Return(nil).
 				Once().
 				NotBefore(initCall)
+			mockDeployer.
+				EXPECT().
+				PublishedServiceUrls().
+				Return(map[string]url.URL{"hello": *testPublishedUrl}, nil).
+				Once().
+				NotBefore(deployCall)
+
+			Expect(subject.Deploy()).To(Succeed())
+		})
+
+		It("prints nothing when no service is published", func() {
+			mockDeployer.EXPECT().Init(project).Return(nil).Once()
+			mockDeployer.EXPECT().Deploy().Return(nil).Once()
+			mockDeployer.
+				EXPECT().
+				PublishedServiceUrls().
+				Return(nil, nil).
+				Once()
+
+			Expect(subject.Deploy()).To(Succeed())
+		})
+
+		// The environment is already up by this point.
+		It("succeeds when the published urls cannot be read", func() {
+			mockDeployer.EXPECT().Init(project).Return(nil).Once()
+			mockDeployer.EXPECT().Deploy().Return(nil).Once()
+			mockDeployer.
+				EXPECT().
+				PublishedServiceUrls().
+				Return(nil, errBoom).
+				Once()
 
 			Expect(subject.Deploy()).To(Succeed())
 		})

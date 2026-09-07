@@ -7,6 +7,7 @@ import (
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
 	"github.com/robgonnella/minienv/internal/loader"
+	"github.com/robgonnella/minienv/internal/publishing"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -61,8 +62,18 @@ func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 		return nil, err
 	}
 
+	ngrokApiKey := goos.Getenv("NGROK_API_KEY")
+	if ngrokApiKey == "" {
+		log.
+			Warn().
+			Msg("NGROK_API_KEY environment variable is not set. " +
+				"Published service URLs will not be printed",
+			)
+	}
+
 	imageClient := image.NewDocker(dryRun)
 	gitClient := git.NewGitClient()
+	publishClient := publishing.NewNgrokClient(ngrokApiKey)
 
 	// This is the composition root: the one place that reads runtime
 	// environment values. Reading them here, lazily, keeps credentials out of
@@ -74,6 +85,7 @@ func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 		DryRun:           dryRun,
 		ImageClient:      imageClient,
 		GitClient:        gitClient,
+		PublishClient:    publishClient,
 		NgrokAuthToken:   goos.Getenv("NGROK_AUTHTOKEN"),
 		HelmDriver:       goos.Getenv("HELM_DRIVER"),
 	}, nil

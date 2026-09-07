@@ -20,14 +20,35 @@ Under `services.<name>`. All fields are optional.
 
 ### Deployment
 
-| Field               | Type                    | Default            | Description                                           |
-| ------------------- | ----------------------- | ------------------ | ----------------------------------------------------- |
-| `skip`              | bool                    | `false`            | Excludes the service from image builds and deploys    |
-| `deploymentType`    | `service` \| `job`      | `service`          | Deploy as a Deployment or a run-to-completion Job     |
-| `deploymentTimeout` | duration                | inherits top level | Helm timeout for this service                         |
-| `replicas`          | integer                 | `1`                | Number of replicas. No effect on a job                |
-| `command`           | list of strings         | compose `command`  | Container command                                     |
-| `env`               | map of string to string | —                  | Container env vars, merged over compose `environment` |
+| Field               | Type                    | Default            | Description                                            |
+| ------------------- | ----------------------- | ------------------ | ------------------------------------------------------ |
+| `skip`              | bool                    | `false`            | Excludes the service from image builds and deploys     |
+| `deploymentType`    | `service` \| `job`      | `service`          | Deploy as a Deployment or a run-to-completion Job      |
+| `deploymentTimeout` | duration                | inherits top level | Helm timeout for this service                          |
+| `recreate`          | bool                    | `false`            | Replaces the pods on every deploy, even unchanged ones |
+| `replicas`          | integer                 | `1`                | Number of replicas. No effect on a job                 |
+| `command`           | list of strings         | compose `command`  | Container command                                      |
+| `env`               | map of string to string | —                  | Container env vars, merged over compose `environment`  |
+
+#### recreate
+
+Helm only restarts pods when something in the release actually changed. A
+service whose image tag is fixed — `latest`, or any tag you rebuild in place —
+therefore keeps running the old image after a redeploy, because from Helm's
+point of view nothing about the release moved.
+
+`recreate: true` forces the pods to be replaced on every deploy:
+
+```yaml
+services:
+  api:
+    image: myorg/api:latest
+    x-minienv-k8s-service:
+      recreate: true
+```
+
+The alternative is to make the tag change instead, with `+git` — see
+[Images and Builds](./images-and-builds.md).
 
 ### Image
 
@@ -75,13 +96,17 @@ Ports derived from compose are named `p<port>` — `p8080` for container port
 
 ### ngrok
 
-| Field                 | Type    | Default            | Description                                                                                                     |
-| --------------------- | ------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `ngrok.port`          | integer | —                  | Service port to expose publicly. Must match a resolved service port; use the **host** side of a compose mapping |
-| `ngrok.url`           | string  | random             | Reserved ngrok URL for a stable endpoint                                                                        |
-| `ngrok.trafficPolicy` | string  | inherits top level | ngrok `on_http_request` policy                                                                                  |
+| Field                 | Type    | Default            | Description                                                                                                                                 |
+| --------------------- | ------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ngrok.port`          | integer | —                  | Service port to expose publicly. Must match a resolved service port; use the **host** side of a compose mapping                             |
+| `ngrok.url`           | string  | random             | ngrok URL for a stable endpoint. The domain must already be reserved on the account. Interpolate `${MINIENV_NAMESPACE}` on a shared account |
+| `ngrok.trafficPolicy` | string  | inherits top level | ngrok `on_http_request` policy                                                                                                              |
 
-Requires `NGROK_AUTHTOKEN`. Without it, this whole block is ignored.
+Requires `NGROK_AUTHTOKEN` — without it the whole block is ignored.
+`NGROK_API_KEY` is optional and only used to print the URL table.
+Ignored for `deploymentType: job` and for a service marked `skip`, since neither
+has a k8s Service for an endpoint to route to. See
+[Exposing Services](./exposing-services.md).
 
 ### Kubernetes passthrough fields
 
@@ -100,13 +125,18 @@ one explicitly replaces that.
 
 Per compose service, minienv creates:
 
-| Resource                   | When                                                   |
-| -------------------------- | ------------------------------------------------------ |
-| Deployment                 | `deploymentType: service` (the default)                |
-| Job                        | `deploymentType: job`                                  |
-| Service                    | `deploymentType: service` and `service.create` is true |
-| ServiceAccount             | `serviceAccount.create` is true                        |
-| ConfigMap + Secret (ngrok) | ngrok is enabled for the service                       |
+| Resource       | When                                                   |
+| -------------- | ------------------------------------------------------ |
+| Deployment     | `deploymentType: service` (the default)                |
+| Job            | `deploymentType: job`                                  |
+| Service        | `deploymentType: service` and `service.create` is true |
+| ServiceAccount | `serviceAccount.create` is true                        |
+
+And once per namespace, not per service:
+
+| Resource                                                       | When                            |
+| -------------------------------------------------------------- | ------------------------------- |
+| `ngrok` release: Deployment, ConfigMap, Secret, ServiceAccount | any service publishes via ngrok |
 
 The target namespace is created on deploy if it does not already exist.
 

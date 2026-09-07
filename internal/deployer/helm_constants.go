@@ -17,14 +17,12 @@ description: A chart for deploying service service
 
 func helmNgrokSecretTmpl(authToken string) string {
 	return fmt.Sprintf(`
-{{- if .Values.ngrok.enabled -}}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ .Values.ngrok.secretName }}
+  name: {{ .Values.secretName }}
 data:
   NGROK_AUTHTOKEN: %s
-{{- end -}}
 `,
 		base64.StdEncoding.EncodeToString([]byte(authToken)),
 	)
@@ -112,17 +110,6 @@ command: []
 
 env: {}
 
-ngrok:
-  enabled: false
-  image: ""
-  configMapName: ""
-  configKey: ""
-  configVolMountPath: ""
-  secretName: ""
-  port: ""
-  url: ""
-  trafficPolicy: ""
-
 serviceAccount:
   create: true
   automount: true
@@ -152,23 +139,66 @@ tolerations: []
 affinity: {}
 `
 
+const HELM_NGROK_VALUES_TMPL = `
+replicas: 1
+
+image:
+  repository: ""
+  pullPolicy: IfNotPresent
+  tag: ""
+
+command: []
+
+# Read by the shared deployment template even though this chart renders no
+# Service of its own; without the key the template errors on a nil map.
+service:
+  ports: []
+
+strategy: {}
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+configMapName: ""
+configKey: ""
+configVolMountPath: ""
+secretName: ""
+
+endpoints: []
+
+podAnnotations: {}
+
+env: {}
+envFrom: []
+volumes: []
+volumeMounts: []
+`
+
 const HELM_NGROK_CONFIG_MAP_TMPL = `
-{{- if .Values.ngrok.enabled -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Values.ngrok.configMapName }}
+  name: {{ .Values.configMapName }}
 data:
-  {{ .Values.ngrok.configKey }}: |
+  {{ .Values.configKey }}: |
     version: 3
     endpoints:
-      - name: {{ include "generated.fullname" . }}
-        url: {{ .Values.ngrok.url }}
-        description: "endpoint for service"
+    {{- range .Values.endpoints }}
+      - name: {{ .endpointName }}
+        description: "Endpoint for {{ .serviceName }} service in namespace {{ .namespace }}"
+        {{- if .url }}
+        url: {{ .url }}
+        {{- end }}
         upstream:
-          url: {{ include "generated.fullname" . }}:{{ .Values.ngrok.port }}
-        traffic_policy: {{ .Values.ngrok.trafficPolicy }}
-{{- end -}}
+          url: {{ .serviceName }}:{{ .port }}
+        {{- if .trafficPolicy }}
+        traffic_policy:
+          {{- .trafficPolicy | trim | nindent 10 }}
+        {{- end }}
+    {{- end }}
 `
 
 const HELM_DEPLOYMENT_TMPL = `
@@ -180,6 +210,10 @@ metadata:
     {{- include "generated.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicas }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "generated.selectorLabels" . | nindent 6 }}
@@ -233,6 +267,9 @@ spec:
               value: {{ $v }}
             {{- end }}
           {{- end }}
+          {{- if .Values.envFrom }}
+          envFrom: {{ .Values.envFrom | toYaml | nindent 12 }}
+          {{- end }}
           {{- with .Values.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}
@@ -253,22 +290,6 @@ spec:
           volumeMounts:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-        {{- if .Values.ngrok.enabled }}
-        - name: ngrok
-          image: {{ .Values.ngrok.image }}
-          imagePullPolicy: IfNotPresent
-          command:
-            - ngrok
-            - start
-            - {{ include "generated.fullname" . }}
-            - --log=stdout
-          envFrom:
-            - secretRef:
-                name: {{ .Values.ngrok.secretName }}
-          volumeMounts:
-            - name: {{ .Values.ngrok.configMapName }}
-              mountPath: {{ .Values.ngrok.configVolMountPath }}
-        {{- end }}
       {{- with .Values.volumes }}
       volumes:
         {{- toYaml . | nindent 8 }}
@@ -363,7 +384,7 @@ const HELM_JOB_TMPL = `
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: "{{ include "generated.fullname" . }}"
+  name: "{{ include "generated.fullname" . | trunc 54 | trimSuffix "-" }}-{{ randAlphaNum 8 | lower }}"
 spec:
   backoffLimit: 1
   template:
