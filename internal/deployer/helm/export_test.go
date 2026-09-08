@@ -10,8 +10,11 @@ import (
 // builds a helm action config against a live one, so this is the only way to
 // populate h.services — which buildAndPushServiceImages and deployService both
 // read — in a test binary.
-func (h *Helm) InitProject(project *config.ComposeProject) error {
-	return h.initProject(project)
+func (h *Helm) InitProject(
+	ctx context.Context,
+	project *config.ComposeProject,
+) error {
+	return h.initProject(ctx, project)
 }
 
 // SetProject caches the project without resolving any extension. The dependency
@@ -34,8 +37,8 @@ func (h *Helm) ServicesToPublish() []NgrokConfig {
 // package. Deploy only reaches it after Init has built a real action client
 // and a cluster connection, so this is the only way to assert on the
 // ComposeProject -> []image.ServiceProperties translation.
-func (h *Helm) BuildAndPushServiceImages() error {
-	return h.buildAndPushServiceImages()
+func (h *Helm) BuildAndPushServiceImages(ctx context.Context) error {
+	return h.buildAndPushServiceImages(ctx)
 }
 
 // DeployInDependencyOrder exposes the depends_on-ordered walk with the
@@ -43,16 +46,18 @@ func (h *Helm) BuildAndPushServiceImages() error {
 // built a cluster connection, so this is the only way to assert on ordering,
 // concurrency and abort-on-first-error.
 func (h *Helm) DeployInDependencyOrder(
+	ctx context.Context,
 	deploy func(ctx context.Context, svc config.ComposeService) error,
 ) error {
-	return h.deployInDependencyOrder(deploy)
+	return h.deployInDependencyOrder(ctx, deploy)
 }
 
 // DestroyInReverseDependencyOrder is the teardown counterpart.
 func (h *Helm) DestroyInReverseDependencyOrder(
+	ctx context.Context,
 	uninstall func(ctx context.Context, svc config.ComposeService) error,
 ) error {
-	return h.destroyInReverseDependencyOrder(uninstall)
+	return h.destroyInReverseDependencyOrder(ctx, uninstall)
 }
 
 // DeployService exposes the per-service step the walk dispatches to. Only its

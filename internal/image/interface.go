@@ -1,5 +1,7 @@
 package image
 
+import "context"
+
 type ServiceProperties struct {
 	Name       string
 	Registry   string
@@ -22,5 +24,5 @@ func (bs *ServiceProperties) LogFields() map[string]any {
 }
 
 type Client interface {
-	BuildAndPush([]ServiceProperties) error
+	BuildAndPush(ctx context.Context, services []ServiceProperties) error
 }

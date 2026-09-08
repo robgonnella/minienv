@@ -9,9 +9,11 @@ import (
 )
 
 // Kind classifies a failure. It implements error so it doubles as the sentinel
-// callers match on: errors.Is(err, config.KindInvalidPort). Kind values are
+// callers match on: errors.Is(err, config.ErrInvalidPort). Kind values are
 // namespaced by package ("config.invalid_port") because they share one type,
 // so the compiler cannot stop a loader kind being compared to a config error.
+//
+//nolint:errname // Kind is a classification that implements error, not an error
 type Kind string
 
 func (k Kind) Error() string { return string(k) }
@@ -27,6 +29,7 @@ type Error struct {
 // Errorf builds an Error of the given kind. A %w verb in format captures the
 // wrapped cause, so errors.Is/As traverse into it.
 func Errorf(kind Kind, format string, args ...any) *Error {
+	//nolint:err113 // this is the wrapper the rule exists to push callers to
 	wrapped := fmt.Errorf(format, args...)
 	return &Error{kind: kind, msg: wrapped.Error(), cause: errors.Unwrap(wrapped)}
 }

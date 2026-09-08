@@ -5,6 +5,7 @@
 package deployermocks
 
 import (
+	"context"
 	"net/url"
 
 	"github.com/robgonnella/minienv/internal/config"
@@ -127,16 +128,16 @@ func (_c *MockDeployer_ConfigField_Call) RunAndReturn(run func() string) *MockDe
 }
 
 // Deploy provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Deploy() error {
-	ret := _mock.Called()
+func (_mock *MockDeployer) Deploy(ctx context.Context) error {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Deploy")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func() error); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -149,13 +150,20 @@ type MockDeployer_Deploy_Call struct {
 }
 
 // Deploy is a helper method to define mock.On call
-func (_e *MockDeployer_Expecter) Deploy() *MockDeployer_Deploy_Call {
-	return &MockDeployer_Deploy_Call{Call: _e.mock.On("Deploy")}
+//   - ctx context.Context
+func (_e *MockDeployer_Expecter) Deploy(ctx any) *MockDeployer_Deploy_Call {
+	return &MockDeployer_Deploy_Call{Call: _e.mock.On("Deploy", ctx)}
 }
 
-func (_c *MockDeployer_Deploy_Call) Run(run func()) *MockDeployer_Deploy_Call {
+func (_c *MockDeployer_Deploy_Call) Run(run func(ctx context.Context)) *MockDeployer_Deploy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -165,22 +173,22 @@ func (_c *MockDeployer_Deploy_Call) Return(err error) *MockDeployer_Deploy_Call 
 	return _c
 }
 
-func (_c *MockDeployer_Deploy_Call) RunAndReturn(run func() error) *MockDeployer_Deploy_Call {
+func (_c *MockDeployer_Deploy_Call) RunAndReturn(run func(ctx context.Context) error) *MockDeployer_Deploy_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Destroy provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Destroy() error {
-	ret := _mock.Called()
+func (_mock *MockDeployer) Destroy(ctx context.Context) error {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Destroy")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func() error); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -193,13 +201,20 @@ type MockDeployer_Destroy_Call struct {
 }
 
 // Destroy is a helper method to define mock.On call
-func (_e *MockDeployer_Expecter) Destroy() *MockDeployer_Destroy_Call {
-	return &MockDeployer_Destroy_Call{Call: _e.mock.On("Destroy")}
+//   - ctx context.Context
+func (_e *MockDeployer_Expecter) Destroy(ctx any) *MockDeployer_Destroy_Call {
+	return &MockDeployer_Destroy_Call{Call: _e.mock.On("Destroy", ctx)}
 }
 
-func (_c *MockDeployer_Destroy_Call) Run(run func()) *MockDeployer_Destroy_Call {
+func (_c *MockDeployer_Destroy_Call) Run(run func(ctx context.Context)) *MockDeployer_Destroy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -209,22 +224,22 @@ func (_c *MockDeployer_Destroy_Call) Return(err error) *MockDeployer_Destroy_Cal
 	return _c
 }
 
-func (_c *MockDeployer_Destroy_Call) RunAndReturn(run func() error) *MockDeployer_Destroy_Call {
+func (_c *MockDeployer_Destroy_Call) RunAndReturn(run func(ctx context.Context) error) *MockDeployer_Destroy_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Init provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Init(project *config.ComposeProject) error {
-	ret := _mock.Called(project)
+func (_mock *MockDeployer) Init(ctx context.Context, project *config.ComposeProject) error {
+	ret := _mock.Called(ctx, project)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Init")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*config.ComposeProject) error); ok {
-		r0 = returnFunc(project)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *config.ComposeProject) error); ok {
+		r0 = returnFunc(ctx, project)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -237,19 +252,25 @@ type MockDeployer_Init_Call struct {
 }
 
 // Init is a helper method to define mock.On call
+//   - ctx context.Context
 //   - project *config.ComposeProject
-func (_e *MockDeployer_Expecter) Init(project any) *MockDeployer_Init_Call {
-	return &MockDeployer_Init_Call{Call: _e.mock.On("Init", project)}
+func (_e *MockDeployer_Expecter) Init(ctx any, project any) *MockDeployer_Init_Call {
+	return &MockDeployer_Init_Call{Call: _e.mock.On("Init", ctx, project)}
 }
 
-func (_c *MockDeployer_Init_Call) Run(run func(project *config.ComposeProject)) *MockDeployer_Init_Call {
+func (_c *MockDeployer_Init_Call) Run(run func(ctx context.Context, project *config.ComposeProject)) *MockDeployer_Init_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *config.ComposeProject
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*config.ComposeProject)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *config.ComposeProject
+		if args[1] != nil {
+			arg1 = args[1].(*config.ComposeProject)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -260,14 +281,14 @@ func (_c *MockDeployer_Init_Call) Return(err error) *MockDeployer_Init_Call {
 	return _c
 }
 
-func (_c *MockDeployer_Init_Call) RunAndReturn(run func(project *config.ComposeProject) error) *MockDeployer_Init_Call {
+func (_c *MockDeployer_Init_Call) RunAndReturn(run func(ctx context.Context, project *config.ComposeProject) error) *MockDeployer_Init_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // PublishedServiceUrls provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) PublishedServiceUrls() (map[string]url.URL, error) {
-	ret := _mock.Called()
+func (_mock *MockDeployer) PublishedServiceUrls(ctx context.Context) (map[string]url.URL, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PublishedServiceUrls")
@@ -275,18 +296,18 @@ func (_mock *MockDeployer) PublishedServiceUrls() (map[string]url.URL, error) {
 
 	var r0 map[string]url.URL
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (map[string]url.URL, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (map[string]url.URL, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() map[string]url.URL); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) map[string]url.URL); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]url.URL)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -299,13 +320,20 @@ type MockDeployer_PublishedServiceUrls_Call struct {
 }
 
 // PublishedServiceUrls is a helper method to define mock.On call
-func (_e *MockDeployer_Expecter) PublishedServiceUrls() *MockDeployer_PublishedServiceUrls_Call {
-	return &MockDeployer_PublishedServiceUrls_Call{Call: _e.mock.On("PublishedServiceUrls")}
+//   - ctx context.Context
+func (_e *MockDeployer_Expecter) PublishedServiceUrls(ctx any) *MockDeployer_PublishedServiceUrls_Call {
+	return &MockDeployer_PublishedServiceUrls_Call{Call: _e.mock.On("PublishedServiceUrls", ctx)}
 }
 
-func (_c *MockDeployer_PublishedServiceUrls_Call) Run(run func()) *MockDeployer_PublishedServiceUrls_Call {
+func (_c *MockDeployer_PublishedServiceUrls_Call) Run(run func(ctx context.Context)) *MockDeployer_PublishedServiceUrls_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -315,7 +343,7 @@ func (_c *MockDeployer_PublishedServiceUrls_Call) Return(stringToURL map[string]
 	return _c
 }
 
-func (_c *MockDeployer_PublishedServiceUrls_Call) RunAndReturn(run func() (map[string]url.URL, error)) *MockDeployer_PublishedServiceUrls_Call {
+func (_c *MockDeployer_PublishedServiceUrls_Call) RunAndReturn(run func(ctx context.Context) (map[string]url.URL, error)) *MockDeployer_PublishedServiceUrls_Call {
 	_c.Call.Return(run)
 	return _c
 }

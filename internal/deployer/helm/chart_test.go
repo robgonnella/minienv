@@ -1,6 +1,7 @@
 package helm_test
 
 import (
+	"context"
 	"encoding/base64"
 	"regexp"
 	"strings"
@@ -56,13 +57,14 @@ func templateNamed(rendered map[string]string, suffix string) string {
 	}
 
 	Fail("no rendered template ending in " + suffix)
+
 	return ""
 }
 
 // fileNames lists the chart's raw file set, which is what says a chart carries
 // only the templates its deployment type needs.
 func fileNames(chart *helmchart.Chart) []string {
-	names := []string{}
+	names := make([]string, 0, len(chart.Raw))
 	for _, f := range chart.Raw {
 		names = append(names, f.Name)
 	}
@@ -88,10 +90,10 @@ type ngrokAgentConfig struct {
 	Version   int `yaml:"version"`
 	Endpoints []struct {
 		Name        string `yaml:"name"`
-		Url         string `yaml:"url"`
+		URL         string `yaml:"url"`
 		Description string `yaml:"description"`
 		Upstream    struct {
-			Url string `yaml:"url"`
+			URL string `yaml:"url"`
 		} `yaml:"upstream"`
 		TrafficPolicy map[string]any `yaml:"traffic_policy"`
 	} `yaml:"endpoints"`
@@ -109,12 +111,12 @@ func ngrokAgentConfigFrom(rendered map[string]string) ngrokAgentConfig {
 		&configMap,
 	)).To(Succeed(), "rendered configmap is not valid yaml")
 
-	body, ok := configMap.Data[config.NGROK_CONFIG_KEY]
-	Expect(ok).To(BeTrue(), "configmap carries no %s key", config.NGROK_CONFIG_KEY)
+	body, ok := configMap.Data[config.NgrokConfigKey]
+	Expect(ok).To(BeTrue(), "configmap carries no %s key", config.NgrokConfigKey)
 
 	var parsed ngrokAgentConfig
 	Expect(yaml.Unmarshal([]byte(body), &parsed)).
-		To(Succeed(), "rendered %s is not valid yaml", config.NGROK_CONFIG_KEY)
+		To(Succeed(), "rendered %s is not valid yaml", config.NgrokConfigKey)
 
 	return parsed
 }
@@ -174,6 +176,7 @@ var _ = Describe("ChartBuilder", func() {
 		GinkgoHelper()
 
 		svcExt, err := config.NewXMiniEnvK8sService(
+			context.Background(),
 			config.XMiniEnvK8sServiceOptions{
 				MainExt:      ext,
 				Service:      svc,
@@ -323,7 +326,7 @@ var _ = Describe("ChartBuilder", func() {
 			Context("with replicas set in the extension", func() {
 				BeforeEach(func() {
 					svc.Extensions = types.Extensions{
-						config.K8S_SERVICE_EXTENSION: map[string]any{
+						config.K8sServiceExtension: map[string]any{
 							"replicas": 3,
 						},
 					}
@@ -338,7 +341,7 @@ var _ = Describe("ChartBuilder", func() {
 			Context("with pod annotations set", func() {
 				BeforeEach(func() {
 					svc.Extensions = types.Extensions{
-						config.K8S_SERVICE_EXTENSION: map[string]any{
+						config.K8sServiceExtension: map[string]any{
 							"podAnnotations": map[string]any{
 								"team": "platform",
 							},
@@ -432,7 +435,7 @@ var _ = Describe("ChartBuilder", func() {
 					Image:   "reg/migrate:v1",
 					Command: types.ShellCommand{"/bin/sh", "-c", "echo ready"},
 					Extensions: types.Extensions{
-						config.K8S_SERVICE_EXTENSION: map[string]any{
+						config.K8sServiceExtension: map[string]any{
 							"deploymentType": "job",
 						},
 					},
@@ -556,6 +559,7 @@ var _ = Describe("ChartBuilder", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 
 			var secret string
+
 			for _, f := range chart.Raw {
 				if f.Name == "templates/secret.yaml" {
 					secret = string(f.Data)
@@ -607,9 +611,9 @@ var _ = Describe("ChartBuilder", func() {
 				// collide on the account, while the upstream stays the bare
 				// service name that k8s DNS resolves inside the namespace.
 				Expect(cfg.Endpoints[0].Name).To(Equal("namespace-alpha"))
-				Expect(cfg.Endpoints[0].Upstream.Url).To(Equal("alpha:3000"))
+				Expect(cfg.Endpoints[0].Upstream.URL).To(Equal("alpha:3000"))
 				Expect(cfg.Endpoints[1].Name).To(Equal("namespace-beta"))
-				Expect(cfg.Endpoints[1].Upstream.Url).To(Equal("beta:3001"))
+				Expect(cfg.Endpoints[1].Upstream.URL).To(Equal("beta:3001"))
 			})
 
 			// An upstream is a hostname *and* a port, and the agent dials
@@ -628,22 +632,22 @@ var _ = Describe("ChartBuilder", func() {
 
 					Expect(cfg.Endpoints).To(HaveLen(2))
 					Expect(cfg.Endpoints[0].Name).To(Equal("namespace-alpha"))
-					Expect(cfg.Endpoints[0].Upstream.Url).To(Equal("alpha:8080"))
+					Expect(cfg.Endpoints[0].Upstream.URL).To(Equal("alpha:8080"))
 					Expect(cfg.Endpoints[1].Name).To(Equal("namespace-beta"))
-					Expect(cfg.Endpoints[1].Upstream.Url).To(Equal("beta:8080"))
+					Expect(cfg.Endpoints[1].Upstream.URL).To(Equal("beta:8080"))
 				})
 			})
 
 			It("omits the url when no domain is reserved", func() {
 				for _, ep := range ngrokAgentConfigFrom(rendered).Endpoints {
-					Expect(ep.Url).To(BeEmpty())
+					Expect(ep.URL).To(BeEmpty())
 				}
 			})
 
 			Context("with a reserved domain", func() {
 				BeforeEach(func() {
 					alpha := publishable("alpha", 3000)
-					alpha.Url = "https://example.ngrok.app"
+					alpha.URL = "https://example.ngrok.app"
 					toPublish = []helm.NgrokConfig{alpha}
 				})
 
@@ -651,7 +655,7 @@ var _ = Describe("ChartBuilder", func() {
 					cfg := ngrokAgentConfigFrom(rendered)
 
 					Expect(cfg.Endpoints).To(HaveLen(1))
-					Expect(cfg.Endpoints[0].Url).
+					Expect(cfg.Endpoints[0].URL).
 						To(Equal("https://example.ngrok.app"))
 				})
 			})
@@ -689,14 +693,14 @@ var _ = Describe("ChartBuilder", func() {
 
 				Expect(deployment).To(ContainSubstring("- --all"))
 				Expect(deployment).To(ContainSubstring(
-					"image: \"" + config.NGROK_IMAGE_REPO +
-						":" + config.NGROK_IMAGE_TAG + "\"",
+					"image: \"" + config.NgrokImageRepo +
+						":" + config.NgrokImageTag + "\"",
 				))
 				Expect(deployment).To(ContainSubstring(
-					"mountPath: " + config.NGROK_CONFIG_VOL_MOUNT_PATH,
+					"mountPath: " + config.NgrokConfigVolMountPath,
 				))
 				Expect(deployment).To(ContainSubstring(
-					"name: " + config.NGROK_SECRET_NAME,
+					"name: " + config.NgrokSecretName,
 				))
 			})
 

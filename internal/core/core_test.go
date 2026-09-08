@@ -1,7 +1,9 @@
 package core_test
 
 import (
+	"context"
 	"errors"
+	"github.com/stretchr/testify/mock"
 	"net/url"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -21,13 +23,14 @@ var _ = Describe("Core", func() {
 		project          *config.ComposeProject
 		ext              *config.XMiniEnv
 		subject          *core.Core
-		testPublishedUrl *url.URL
+		testPublishedURL *url.URL
 	)
 
 	BeforeEach(func() {
-		publishedUrl, err := url.Parse("http://test-url")
+		publishedURL, err := url.Parse("http://test-url")
 		Expect(err).ShouldNot(HaveOccurred())
-		testPublishedUrl = publishedUrl
+
+		testPublishedURL = publishedURL
 
 		mockDeployer = deployermocks.NewMockDeployer(GinkgoT())
 		project = &config.ComposeProject{Name: "test-project"}
@@ -45,113 +48,113 @@ var _ = Describe("Core", func() {
 
 	Describe("Deploy", func() {
 		It("initializes the deployer then deploys the loaded project", func() {
-			initCall := mockDeployer.EXPECT().Init(project).Return(nil).Once()
+			initCall := mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
 			deployCall := mockDeployer.
 				EXPECT().
-				Deploy().
+				Deploy(mock.Anything).
 				Return(nil).
 				Once().
 				NotBefore(initCall)
 			mockDeployer.
 				EXPECT().
-				PublishedServiceUrls().
-				Return(map[string]url.URL{"hello": *testPublishedUrl}, nil).
+				PublishedServiceUrls(mock.Anything).
+				Return(map[string]url.URL{"hello": *testPublishedURL}, nil).
 				Once().
 				NotBefore(deployCall)
 
-			Expect(subject.Deploy()).To(Succeed())
+			Expect(subject.Deploy(context.Background())).To(Succeed())
 		})
 
 		It("prints nothing when no service is published", func() {
-			mockDeployer.EXPECT().Init(project).Return(nil).Once()
-			mockDeployer.EXPECT().Deploy().Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+			mockDeployer.EXPECT().Deploy(mock.Anything).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				PublishedServiceUrls().
+				PublishedServiceUrls(mock.Anything).
 				Return(nil, nil).
 				Once()
 
-			Expect(subject.Deploy()).To(Succeed())
+			Expect(subject.Deploy(context.Background())).To(Succeed())
 		})
 
 		// The environment is already up by this point.
 		It("succeeds when the published urls cannot be read", func() {
-			mockDeployer.EXPECT().Init(project).Return(nil).Once()
-			mockDeployer.EXPECT().Deploy().Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+			mockDeployer.EXPECT().Deploy(mock.Anything).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				PublishedServiceUrls().
+				PublishedServiceUrls(mock.Anything).
 				Return(nil, errBoom).
 				Once()
 
-			Expect(subject.Deploy()).To(Succeed())
+			Expect(subject.Deploy(context.Background())).To(Succeed())
 		})
 
 		It("returns a core error and never deploys when Init fails", func() {
 			mockDeployer.
 				EXPECT().
-				Init(project).
+				Init(mock.Anything, project).
 				Return(errBoom).
 				Once()
 
-			err := subject.Deploy()
-			Expect(err).To(MatchError(core.KindDeployerInit))
+			err := subject.Deploy(context.Background())
+			Expect(err).To(MatchError(core.ErrDeployerInit))
 			Expect(err).To(MatchError(errBoom))
 
 			mockDeployer.AssertNotCalled(GinkgoT(), "Deploy")
 		})
 
 		It("returns a core error when the deploy itself fails", func() {
-			mockDeployer.EXPECT().Init(project).Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				Deploy().
+				Deploy(mock.Anything).
 				Return(errBoom).
 				Once()
 
-			err := subject.Deploy()
-			Expect(err).To(MatchError(core.KindDeploy))
+			err := subject.Deploy(context.Background())
+			Expect(err).To(MatchError(core.ErrDeploy))
 			Expect(err).To(MatchError(errBoom))
 		})
 	})
 
 	Describe("Destroy", func() {
 		It("initializes the deployer then destroys the loaded project", func() {
-			initCall := mockDeployer.EXPECT().Init(project).Return(nil).Once()
+			initCall := mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				Destroy().
+				Destroy(mock.Anything).
 				Return(nil).
 				Once().
 				NotBefore(initCall)
 
-			Expect(subject.Destroy()).To(Succeed())
+			Expect(subject.Destroy(context.Background())).To(Succeed())
 		})
 
 		It("returns a core error and never destroys when Init fails", func() {
 			mockDeployer.
 				EXPECT().
-				Init(project).
+				Init(mock.Anything, project).
 				Return(errBoom).
 				Once()
 
-			err := subject.Destroy()
-			Expect(err).To(MatchError(core.KindDeployerInit))
+			err := subject.Destroy(context.Background())
+			Expect(err).To(MatchError(core.ErrDeployerInit))
 			Expect(err).To(MatchError(errBoom))
 
 			mockDeployer.AssertNotCalled(GinkgoT(), "Destroy")
 		})
 
 		It("returns a core error when the destroy itself fails", func() {
-			mockDeployer.EXPECT().Init(project).Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
-				Destroy().
+				Destroy(mock.Anything).
 				Return(errBoom).
 				Once()
 
-			err := subject.Destroy()
-			Expect(err).To(MatchError(core.KindDestroy))
+			err := subject.Destroy(context.Background())
+			Expect(err).To(MatchError(core.ErrDestroy))
 			Expect(err).To(MatchError(errBoom))
 		})
 	})

@@ -1,6 +1,7 @@
 package publishing_test
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -14,10 +15,10 @@ import (
 
 // The real NGROK_API_KEY is only read at the composition root, so no test
 // binary can pick up a live credential.
-const fakeApiKey = "fake-api-key-for-tests"
+const fakeAPIKey = "fake-api-key-for-tests"
 
 // Never reached, so it only has to be a parseable base.
-const fakeApiBaseUrl = "https://api.ngrok.test"
+const fakeAPIBaseURL = "https://api.ngrok.test"
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
@@ -43,7 +44,7 @@ var _ = Describe("NgrokClient", func() {
 
 	BeforeEach(func() {
 		requests = nil
-		apiKey = fakeApiKey
+		apiKey = fakeAPIKey
 		respond = func(*http.Request) (*http.Response, error) {
 			return jsonResponse(
 				http.StatusOK,
@@ -55,7 +56,7 @@ var _ = Describe("NgrokClient", func() {
 	JustBeforeEach(func() {
 		subject = publishing.NewNgrokClientWithTransport(
 			apiKey,
-			fakeApiBaseUrl,
+			fakeAPIBaseURL,
 			roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				requests = append(requests, r)
 				return respond(r)
@@ -72,30 +73,30 @@ var _ = Describe("NgrokClient", func() {
 		})
 
 		It("reports that it is not configured without calling the api", func() {
-			_, err := subject.ServiceUrls([]string{"hello"})
+			_, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
-			Expect(err).To(MatchError(publishing.KindNgrokNotConfigured))
+			Expect(err).To(MatchError(publishing.ErrNgrokNotConfigured))
 			Expect(err.Error()).To(ContainSubstring("NGROK_API_KEY"))
 			Expect(requests).To(BeEmpty())
 		})
 	})
 
 	It("authenticates and pins the api version", func() {
-		_, err := subject.ServiceUrls([]string{"hello"})
+		_, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 		Expect(err).ShouldNot(HaveOccurred())
 
 		Expect(requests).To(HaveLen(1))
 		Expect(requests[0].Method).To(Equal(http.MethodGet))
 		Expect(requests[0].URL.String()).
-			To(Equal(fakeApiBaseUrl + "/endpoints"))
+			To(Equal(fakeAPIBaseURL + "/endpoints"))
 		// The api rejects a number here; it has to be the string "2".
-		Expect(requests[0].Header.Get("ngrok-version")).To(Equal("2"))
+		Expect(requests[0].Header.Get("Ngrok-Version")).To(Equal("2"))
 		Expect(requests[0].Header.Get("Authorization")).
-			To(Equal("Bearer " + fakeApiKey))
+			To(Equal("Bearer " + fakeAPIKey))
 	})
 
 	It("resolves an empty map when the account publishes nothing", func() {
-		urls, err := subject.ServiceUrls([]string{"hello"})
+		urls, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
 		Expect(err).ShouldNot(HaveOccurred())
 		Expect(urls).To(BeEmpty())
@@ -115,7 +116,7 @@ var _ = Describe("NgrokClient", func() {
 		})
 
 		It("returns a parsed url for a requested service", func() {
-			urls, err := subject.ServiceUrls([]string{"hello"})
+			urls, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(urls).To(HaveLen(1))
@@ -126,14 +127,14 @@ var _ = Describe("NgrokClient", func() {
 		// The api lists every endpoint on the account, not just this project's,
 		// so without the filter one namespace would report another's URL.
 		It("omits endpoints no requested service names", func() {
-			urls, err := subject.ServiceUrls([]string{"hello"})
+			urls, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(urls).ToNot(HaveKey("other-project"))
 		})
 
 		It("resolves nothing when no requested service is published", func() {
-			urls, err := subject.ServiceUrls([]string{"absent"})
+			urls, err := subject.ServiceUrls(context.Background(), []string{"absent"})
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(urls).To(BeEmpty())
@@ -165,7 +166,7 @@ var _ = Describe("NgrokClient", func() {
 		})
 
 		It("merges every page into one result", func() {
-			urls, err := subject.ServiceUrls([]string{"alpha", "beta"})
+			urls, err := subject.ServiceUrls(context.Background(), []string{"alpha", "beta"})
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(urls).To(HaveLen(2))
@@ -174,12 +175,12 @@ var _ = Describe("NgrokClient", func() {
 		})
 
 		It("resolves the relative next page against the api root", func() {
-			_, err := subject.ServiceUrls([]string{"alpha", "beta"})
+			_, err := subject.ServiceUrls(context.Background(), []string{"alpha", "beta"})
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(requests).To(HaveLen(2))
 			Expect(requests[1].URL.String()).
-				To(Equal(fakeApiBaseUrl + "/endpoints?before_id=2"))
+				To(Equal(fakeAPIBaseURL + "/endpoints?before_id=2"))
 		})
 
 		// Otherwise it spins to the page cap on a finished deploy.
@@ -194,7 +195,7 @@ var _ = Describe("NgrokClient", func() {
 			})
 
 			It("gives up rather than looping", func() {
-				_, err := subject.ServiceUrls([]string{"hello"})
+				_, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
 				Expect(err).ShouldNot(HaveOccurred())
 				Expect(requests).To(HaveLen(1))
@@ -214,9 +215,9 @@ var _ = Describe("NgrokClient", func() {
 			})
 
 			It("reports the status and the body", func() {
-				_, err := subject.ServiceUrls([]string{"hello"})
+				_, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
-				Expect(err).To(MatchError(publishing.KindNgrokFailedRequest))
+				Expect(err).To(MatchError(publishing.ErrNgrokFailedRequest))
 				Expect(err.Error()).To(ContainSubstring("status=401"))
 				Expect(err.Error()).To(ContainSubstring("invalid credentials"))
 			})
@@ -233,9 +234,9 @@ var _ = Describe("NgrokClient", func() {
 			})
 
 			It("reports a response parse failure", func() {
-				_, err := subject.ServiceUrls([]string{"hello"})
+				_, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
-				Expect(err).To(MatchError(publishing.KindNgrokResponseJson))
+				Expect(err).To(MatchError(publishing.ErrNgrokResponseJSON))
 			})
 		})
 
@@ -254,9 +255,9 @@ var _ = Describe("NgrokClient", func() {
 			})
 
 			It("reports a url parse failure naming the endpoint", func() {
-				_, err := subject.ServiceUrls([]string{"hello"})
+				_, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
-				Expect(err).To(MatchError(publishing.KindNgrokUrlParse))
+				Expect(err).To(MatchError(publishing.ErrNgrokURLParse))
 				Expect(err.Error()).To(ContainSubstring("hello"))
 			})
 		})
@@ -269,9 +270,9 @@ var _ = Describe("NgrokClient", func() {
 			})
 
 			It("reports a request failure and keeps the cause reachable", func() {
-				_, err := subject.ServiceUrls([]string{"hello"})
+				_, err := subject.ServiceUrls(context.Background(), []string{"hello"})
 
-				Expect(err).To(MatchError(publishing.KindNgrokFailedRequest))
+				Expect(err).To(MatchError(publishing.ErrNgrokFailedRequest))
 
 				// %w, not %s: the transport error says what went wrong.
 				var urlErr *url.Error

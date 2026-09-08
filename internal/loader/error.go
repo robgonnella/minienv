@@ -1,3 +1,5 @@
+// Package loader turns docker-compose configuration on disk into a runnable
+// Core, resolving the minienv extensions and picking the active deployer.
 package loader
 
 import "github.com/robgonnella/minienv/internal/errs"
@@ -5,10 +7,10 @@ import "github.com/robgonnella/minienv/internal/errs"
 // Failure modes raised by this package. Values are namespaced because errs.Kind
 // is one shared type — see internal/errs.
 const (
-	KindProjectOptions    errs.Kind = "loader.project_options"
-	KindProjectLoad       errs.Kind = "loader.project_load"
-	KindNoExtension       errs.Kind = "loader.no_extension"
-	KindExtensionDecode   errs.Kind = "loader.extension_decode"
-	KindMultipleDeployers errs.Kind = "loader.multiple_deployers"
-	KindNoActiveDeployer  errs.Kind = "loader.no_active_deployer"
+	ErrProjectOptions    errs.Kind = "loader.project_options"
+	ErrProjectLoad       errs.Kind = "loader.project_load"
+	ErrNoExtension       errs.Kind = "loader.no_extension"
+	ErrExtensionDecode   errs.Kind = "loader.extension_decode"
+	ErrMultipleDeployers errs.Kind = "loader.multiple_deployers"
+	ErrNoActiveDeployer  errs.Kind = "loader.no_active_deployer"
 )

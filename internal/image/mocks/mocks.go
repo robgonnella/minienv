@@ -5,6 +5,8 @@
 package imagemocks
 
 import (
+	"context"
+
 	"github.com/robgonnella/minienv/internal/image"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -37,16 +39,16 @@ func (_m *MockClient) EXPECT() *MockClient_Expecter {
 }
 
 // BuildAndPush provides a mock function for the type MockClient
-func (_mock *MockClient) BuildAndPush(servicePropertiess []image.ServiceProperties) error {
-	ret := _mock.Called(servicePropertiess)
+func (_mock *MockClient) BuildAndPush(ctx context.Context, services []image.ServiceProperties) error {
+	ret := _mock.Called(ctx, services)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BuildAndPush")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func([]image.ServiceProperties) error); ok {
-		r0 = returnFunc(servicePropertiess)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []image.ServiceProperties) error); ok {
+		r0 = returnFunc(ctx, services)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -59,19 +61,25 @@ type MockClient_BuildAndPush_Call struct {
 }
 
 // BuildAndPush is a helper method to define mock.On call
-//   - servicePropertiess []image.ServiceProperties
-func (_e *MockClient_Expecter) BuildAndPush(servicePropertiess any) *MockClient_BuildAndPush_Call {
-	return &MockClient_BuildAndPush_Call{Call: _e.mock.On("BuildAndPush", servicePropertiess)}
+//   - ctx context.Context
+//   - services []image.ServiceProperties
+func (_e *MockClient_Expecter) BuildAndPush(ctx any, services any) *MockClient_BuildAndPush_Call {
+	return &MockClient_BuildAndPush_Call{Call: _e.mock.On("BuildAndPush", ctx, services)}
 }
 
-func (_c *MockClient_BuildAndPush_Call) Run(run func(servicePropertiess []image.ServiceProperties)) *MockClient_BuildAndPush_Call {
+func (_c *MockClient_BuildAndPush_Call) Run(run func(ctx context.Context, services []image.ServiceProperties)) *MockClient_BuildAndPush_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 []image.ServiceProperties
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].([]image.ServiceProperties)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []image.ServiceProperties
+		if args[1] != nil {
+			arg1 = args[1].([]image.ServiceProperties)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -82,7 +90,7 @@ func (_c *MockClient_BuildAndPush_Call) Return(err error) *MockClient_BuildAndPu
 	return _c
 }
 
-func (_c *MockClient_BuildAndPush_Call) RunAndReturn(run func(servicePropertiess []image.ServiceProperties) error) *MockClient_BuildAndPush_Call {
+func (_c *MockClient_BuildAndPush_Call) RunAndReturn(run func(ctx context.Context, services []image.ServiceProperties) error) *MockClient_BuildAndPush_Call {
 	_c.Call.Return(run)
 	return _c
 }

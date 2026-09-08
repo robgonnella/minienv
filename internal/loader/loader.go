@@ -38,8 +38,8 @@ func New(opts *LoaderOpts) *Loader {
 	return &Loader{opts}
 }
 
-func (l *Loader) LoadCore() (*core.Core, error) {
-	project, err := l.loadComposeProject()
+func (l *Loader) LoadCore(ctx context.Context) (*core.Core, error) {
+	project, err := l.loadComposeProject(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,9 @@ func (l *Loader) LoadCore() (*core.Core, error) {
 	return core.New(ext, project, deployer, l.opts.DryRun), nil
 }
 
-func (l *Loader) loadComposeProject() (*config.ComposeProject, error) {
+func (l *Loader) loadComposeProject(
+	ctx context.Context,
+) (*config.ComposeProject, error) {
 	// Same option set the compose CLI builds in its own toProjectOptions, so
 	// project name, .env loading, COMPOSE_FILE and default config-file discovery
 	// all resolve exactly the way `docker compose` resolves them.
@@ -72,16 +74,16 @@ func (l *Loader) loadComposeProject() (*config.ComposeProject, error) {
 	)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindProjectOptions,
+			ErrProjectOptions,
 			"failed to create compose project options: %w",
 			err,
 		)
 	}
 
-	project, err := projectOpts.LoadProject(context.Background())
+	project, err := projectOpts.LoadProject(ctx)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindProjectLoad,
+			ErrProjectLoad,
 			"failed to load compose project: %w",
 			err,
 		)
@@ -93,10 +95,10 @@ func (l *Loader) loadComposeProject() (*config.ComposeProject, error) {
 func (l *Loader) loadMainExtensionConfig(
 	project *config.ComposeProject,
 ) (*config.XMiniEnv, error) {
-	ex, ok := project.Extensions[config.TOP_LEVEL_EXTENSION]
+	ex, ok := project.Extensions[config.TopLevelExtension]
 	if !ok {
 		return nil, errs.Errorf(
-			KindNoExtension,
+			ErrNoExtension,
 			"no minienv extension config found in docker compose configs",
 		)
 	}
@@ -104,7 +106,7 @@ func (l *Loader) loadMainExtensionConfig(
 	var extConfig config.XMiniEnv
 	if err := mapstructure.Decode(ex, &extConfig); err != nil {
 		return nil, errs.Errorf(
-			KindExtensionDecode,
+			ErrExtensionDecode,
 			"failed to parse x-minienv top-level extension: %w",
 			err,
 		)
@@ -112,7 +114,7 @@ func (l *Loader) loadMainExtensionConfig(
 
 	log.
 		Info().
-		Interface(config.TOP_LEVEL_EXTENSION, ex).
+		Interface(config.TopLevelExtension, ex).
 		Msg("loaded top-level extension")
 
 	return &extConfig, nil
@@ -136,6 +138,7 @@ func (l *Loader) loadActiveDeployer(
 	var targetDeployer deployer.Deployer
 
 	activeDeployers := []string{}
+
 	for _, d := range deployers {
 		if d.Active() {
 			activeDeployers = append(activeDeployers, d.ConfigField())
@@ -145,7 +148,7 @@ func (l *Loader) loadActiveDeployer(
 
 	if len(activeDeployers) > 1 {
 		return nil, errs.Errorf(
-			KindMultipleDeployers,
+			ErrMultipleDeployers,
 			"detected multiple active configurations for deployment. "+
 				"only one of [%s] can be configured",
 			strings.Join(activeDeployers, ", "),
@@ -154,7 +157,7 @@ func (l *Loader) loadActiveDeployer(
 
 	if targetDeployer == nil {
 		return nil, errs.Errorf(
-			KindNoActiveDeployer,
+			ErrNoActiveDeployer,
 			"failed to find an active configuration for deployment. "+
 				"configure one of [%s] in x-minienv extension field",
 			slices.Collect(func(yield func(s string) bool) {

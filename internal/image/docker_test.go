@@ -1,6 +1,7 @@
 package image_test
 
 import (
+	"context"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/robgonnella/minienv/internal/image"
@@ -86,11 +87,12 @@ var _ = Describe("Docker", func() {
 		// service reaching the shell-out would fail the suite on a machine
 		// with no docker installed.
 		It("does nothing when given no services", func() {
-			Expect(image.NewDocker(true).BuildAndPush(nil)).To(Succeed())
+			Expect(image.NewDocker(true).BuildAndPush(context.Background(), nil)).To(Succeed())
 		})
 
 		It("does nothing when every service is filtered out", func() {
 			Expect(image.NewDocker(true).BuildAndPush(
+				context.Background(),
 				[]image.ServiceProperties{{Name: "incomplete"}},
 			)).To(Succeed())
 		})

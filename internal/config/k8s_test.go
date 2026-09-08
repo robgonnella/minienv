@@ -1,7 +1,9 @@
 package config_test
 
 import (
+	"context"
 	"errors"
+	"github.com/stretchr/testify/mock"
 	"time"
 
 	"github.com/compose-spec/compose-go/v2/types"
@@ -14,10 +16,6 @@ import (
 func duration(d time.Duration) *types.Duration {
 	converted := types.Duration(d)
 	return &converted
-}
-
-func strPtr(s string) *string {
-	return &s
 }
 
 func k8sExt() *config.XMiniEnv {
@@ -45,12 +43,14 @@ var _ = Describe("XMiniEnvK8sService", func() {
 	// mutate mainExt, svc and ngrokEnabled in their own bodies before
 	// resolving.
 	newSvcExt := func() (*config.XMiniEnvK8sService, error) {
-		return config.NewXMiniEnvK8sService(config.XMiniEnvK8sServiceOptions{
-			MainExt:      mainExt,
-			Service:      svc,
-			GitClient:    mockGit,
-			NgrokEnabled: ngrokEnabled,
-		})
+		return config.NewXMiniEnvK8sService(
+			context.Background(),
+			config.XMiniEnvK8sServiceOptions{
+				MainExt:      mainExt,
+				Service:      svc,
+				GitClient:    mockGit,
+				NgrokEnabled: ngrokEnabled,
+			})
 	}
 
 	BeforeEach(func() {
@@ -70,7 +70,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.KindK8sNotConfigured))
+			Expect(err).To(MatchError(config.ErrK8sNotConfigured))
 		})
 
 		It("errors if the service has neither an image nor an extension", func() {
@@ -80,8 +80,8 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			// resolveServiceImage accumulates both failures with errors.Join;
 			// errors.Is walks the join, so this asserts both were collected.
-			Expect(err).To(MatchError(config.KindImageRepositoryMissing))
-			Expect(err).To(MatchError(config.KindImageTagMissing))
+			Expect(err).To(MatchError(config.ErrImageRepositoryMissing))
+			Expect(err).To(MatchError(config.ErrImageTagMissing))
 		})
 	})
 
@@ -103,7 +103,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("prefers the extension image over the compose image", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"image": map[string]any{
 						"repository": "reg/override",
 						"tag":        "v2",
@@ -128,7 +128,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			// git.Client is responsible for handing back a bare sha; the
 			// trailing-newline contract is pinned in internal/git's own specs.
 			It("substitutes the short sha into the tag", func() {
-				mockGit.EXPECT().ShortSha().Return("abc1234", nil).Once()
+				mockGit.EXPECT().ShortSha(mock.Anything).Return("abc1234", nil).Once()
 
 				result, err := newSvcExt()
 
@@ -139,13 +139,13 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			It("returns a config error when git fails", func() {
 				mockGit.
 					EXPECT().
-					ShortSha().
+					ShortSha(mock.Anything).
 					Return("", errNotARepo).
 					Once()
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.KindGitShortSha))
+				Expect(err).To(MatchError(config.ErrGitShortSha))
 				Expect(err).To(MatchError(errNotARepo))
 			})
 		})
@@ -201,7 +201,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.KindInvalidPort))
+			Expect(err).To(MatchError(config.ErrInvalidPort))
 		})
 
 		It("returns a config error for a mapping with no published port", func() {
@@ -209,7 +209,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.KindInvalidPublishedPort))
+			Expect(err).To(MatchError(config.ErrInvalidPublishedPort))
 		})
 
 		It("does not duplicate a port already declared in the extension", func() {
@@ -217,7 +217,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				{Target: 8080, Published: "3000"},
 			}
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"service": map[string]any{
 						"ports": []any{
 							map[string]any{
@@ -266,7 +266,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 	Describe("environment resolution", func() {
 		It("merges compose environment into the chart values", func() {
 			svc.Environment = types.MappingWithEquals{
-				"FOO": strPtr("bar"),
+				"FOO": new("bar"),
 			}
 
 			result, err := newSvcExt()
@@ -277,11 +277,11 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("lets the extension env win over the compose env", func() {
 			svc.Environment = types.MappingWithEquals{
-				"FOO": strPtr("from-compose"),
-				"BAZ": strPtr("qux"),
+				"FOO": new("from-compose"),
+				"BAZ": new("qux"),
 			}
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"env": map[string]any{"FOO": "from-extension"},
 				},
 			}
@@ -300,7 +300,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			// arrives as a nil *string.
 			svc.Environment = types.MappingWithEquals{
 				"FOO":      nil,
-				"RESOLVED": strPtr("value"),
+				"RESOLVED": new("value"),
 			}
 
 			result, err := newSvcExt()
@@ -422,7 +422,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				Test: types.HealthCheckTest{"CMD", "true"},
 			}
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"livenessProbe": map[string]any{"custom": true},
 				},
 			}
@@ -440,7 +440,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(result.DeploymentTimeout).
-				To(Equal(config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT))
+				To(Equal(config.HelmDefaultDeploymentTimeout))
 		})
 
 		It("prefers the top-level timeout over the default", func() {
@@ -455,7 +455,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		It("prefers the service timeout over the top-level timeout", func() {
 			mainExt.K8s.DeploymentTimeout = "5m"
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"deploymentTimeout": "90s",
 				},
 			}
@@ -478,7 +478,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			ngrokEnabled = true
 			mainExt.Ngrok.TrafficPolicy = "top-level-policy"
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{"port": 3000},
 				},
 			}
@@ -493,7 +493,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			ngrokEnabled = true
 			mainExt.Ngrok.TrafficPolicy = "top-level-policy"
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{
 						"port":          3000,
 						"trafficPolicy": "service-policy",
@@ -509,7 +509,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("wires nothing when no auth token is set", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{"port": 3000},
 				},
 			}
@@ -526,7 +526,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		It("clears all ngrok config when no auth token is available", func() {
 			mainExt.Ngrok.TrafficPolicy = "top-level-policy"
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{
 						"port":          3000,
 						"url":           "https://example.ngrok.app",
@@ -554,19 +554,19 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			// service up front, so it fails before a release is touched.
 			It("errors when the ngrok port matches no service port", func() {
 				svc.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
+					config.K8sServiceExtension: map[string]any{
 						"ngrok": map[string]any{"port": 9999},
 					},
 				}
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.KindNgrokPortMismatch))
+				Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
 			})
 
 			It("accepts a port matching a mapped service port", func() {
 				svc.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
+					config.K8sServiceExtension: map[string]any{
 						"ngrok": map[string]any{"port": 3000},
 					},
 				}
@@ -582,14 +582,14 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			// silently fails to route.
 			It("rejects the container side of a port mapping", func() {
 				svc.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
+					config.K8sServiceExtension: map[string]any{
 						"ngrok": map[string]any{"port": 8080},
 					},
 				}
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.KindNgrokPortMismatch))
+				Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
 			})
 		})
 	})
@@ -605,7 +605,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("reads an explicit job deployment from the extension", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"deploymentType": "job",
 				},
 			}
@@ -621,14 +621,17 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		// guess at what an unrecognized value meant.
 		It("returns a config error for an unrecognized deployment type", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
+					// Deliberately misspelled: the point is that an
+					// unrecognized value is rejected rather than guessed at.
+					//nolint:misspell // intentional typo under test
 					"deploymentType": "sevice",
 				},
 			}
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.KindInvalidDeploymentType))
+			Expect(err).To(MatchError(config.ErrInvalidDeploymentType))
 		})
 	})
 
@@ -645,7 +648,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		It("prefers a command set in the extension", func() {
 			svc.Command = types.ShellCommand{"compose"}
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"command": []any{"extension"},
 				},
 			}
@@ -691,7 +694,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("decodes image pull secrets into the nested chart shape", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"imagePullSecrets": []any{
 						map[string]any{"name": "regcred"},
 					},
@@ -710,7 +713,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("carries replicas through under the key the chart reads", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"replicas": 3,
 				},
 			}
@@ -782,7 +785,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		// values handed to a chart that has no such key.
 		It("omits the deployment type from the chart values", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"deploymentType": "job",
 				},
 			}
@@ -799,7 +802,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 	Describe("skip", func() {
 		It("reads the skip flag from the extension", func() {
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{"skip": true},
+				config.K8sServiceExtension: map[string]any{"skip": true},
 			}
 
 			result, err := newSvcExt()

@@ -1,6 +1,7 @@
 package git_test
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"strings"
@@ -23,14 +24,14 @@ var _ = Describe("GitClient", func() {
 
 	Describe("ShortSha", func() {
 		It("returns the abbreviated hash of HEAD", func() {
-			sha, err := subject.ShortSha()
+			sha, err := subject.ShortSha(context.Background())
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(sha).To(MatchRegexp(`^[0-9a-f]{7,40}$`))
 		})
 
 		It("strips the newline git appends to its output", func() {
-			sha, err := subject.ShortSha()
+			sha, err := subject.ShortSha(context.Background())
 
 			// Callers substitute this straight into an image tag, so a
 			// trailing newline would travel into the rendered chart values.
@@ -48,14 +49,14 @@ var _ = Describe("GitClient", func() {
 			})
 
 			It("returns a git error and no sha", func() {
-				sha, err := outside.ShortSha()
+				sha, err := outside.ShortSha(context.Background())
 
-				Expect(err).To(MatchError(git.KindShortSha))
+				Expect(err).To(MatchError(git.ErrShortSha))
 				Expect(sha).To(BeEmpty())
 			})
 
 			It("keeps git's exit status reachable as the cause", func() {
-				_, err := outside.ShortSha()
+				_, err := outside.ShortSha(context.Background())
 
 				// config wraps this again for the +git tag convention, so the
 				// cause has to survive an Unwrap chain, not just one level.

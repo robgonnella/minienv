@@ -1,6 +1,7 @@
 package helm_test
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"strconv"
@@ -35,7 +36,7 @@ func exposedService(name string, servicePort int) config.ComposeService {
 			{Target: 8080, Published: strconv.Itoa(servicePort)},
 		},
 		Extensions: types.Extensions{
-			config.K8S_SERVICE_EXTENSION: map[string]any{
+			config.K8sServiceExtension: map[string]any{
 				"ngrok": map[string]any{"port": servicePort},
 			},
 		},
@@ -50,7 +51,7 @@ var _ = Describe("Helm", func() {
 		mockPublish *publishingmocks.MockClient
 		subject     *helm.Helm
 		ngrokToken  string
-		alphaUrl    *url.URL
+		alphaURL    *url.URL
 	)
 
 	BeforeEach(func() {
@@ -70,7 +71,8 @@ var _ = Describe("Helm", func() {
 
 		parsed, err := url.Parse("https://alpha.ngrok.app")
 		Expect(err).ShouldNot(HaveOccurred())
-		alphaUrl = parsed
+
+		alphaURL = parsed
 	})
 
 	JustBeforeEach(func() {
@@ -98,16 +100,19 @@ var _ = Describe("Helm", func() {
 
 		It("is inactive with no context", func() {
 			ext.K8s.Context = ""
+
 			Expect(subject.Active()).To(BeFalse())
 		})
 
 		It("is inactive with no namespace", func() {
 			ext.K8s.Namespace = ""
+
 			Expect(subject.Active()).To(BeFalse())
 		})
 
 		It("is inactive with neither configured", func() {
 			ext.K8s = config.XMiniEnvK8s{}
+
 			Expect(subject.Active()).To(BeFalse())
 		})
 	})
@@ -123,15 +128,15 @@ var _ = Describe("Helm", func() {
 		// These return before any helm or kubernetes client is constructed, so
 		// they are safe to exercise without a cluster.
 		It("does nothing on Init", func() {
-			Expect(subject.Init(project)).To(Succeed())
+			Expect(subject.Init(context.Background(), project)).To(Succeed())
 		})
 
 		It("does nothing on Deploy", func() {
-			Expect(subject.Deploy()).To(Succeed())
+			Expect(subject.Deploy(context.Background())).To(Succeed())
 		})
 
 		It("does nothing on Destroy", func() {
-			Expect(subject.Destroy()).To(Succeed())
+			Expect(subject.Destroy(context.Background())).To(Succeed())
 		})
 	})
 
@@ -160,11 +165,11 @@ var _ = Describe("Helm", func() {
 
 		It("translates a buildable service into image properties", func() {
 			project.Services = types.Services{"hello": buildable("hello")}
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			mockImage.
 				EXPECT().
-				BuildAndPush([]image.ServiceProperties{
+				BuildAndPush(mock.Anything, []image.ServiceProperties{
 					{
 						Name:       "hello",
 						Registry:   "reg/hello",
@@ -178,30 +183,31 @@ var _ = Describe("Helm", func() {
 				Return(nil).
 				Once()
 
-			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages(context.Background())).To(Succeed())
 		})
 
 		It("carries the platforms resolved from the extension", func() {
 			svc := buildable("hello")
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"image": map[string]any{
 						"platforms": []any{"linux/arm64", "linux/amd64"},
 					},
 				},
 			}
 			project.Services = types.Services{"hello": svc}
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			var got []image.ServiceProperties
+
 			mockImage.
 				EXPECT().
-				BuildAndPush(mock.Anything).
-				Run(func(s []image.ServiceProperties) { got = s }).
+				BuildAndPush(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, s []image.ServiceProperties) { got = s }).
 				Return(nil).
 				Once()
 
-			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages(context.Background())).To(Succeed())
 			Expect(got).To(HaveLen(1))
 			Expect(got[0].Platforms).
 				To(Equal([]string{"linux/arm64", "linux/amd64"}))
@@ -210,23 +216,24 @@ var _ = Describe("Helm", func() {
 		It("excludes a service flagged skip", func() {
 			skipped := buildable("skipped")
 			skipped.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{"skip": true},
+				config.K8sServiceExtension: map[string]any{"skip": true},
 			}
 			project.Services = types.Services{
 				"hello":   buildable("hello"),
 				"skipped": skipped,
 			}
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			var got []image.ServiceProperties
+
 			mockImage.
 				EXPECT().
-				BuildAndPush(mock.Anything).
-				Run(func(s []image.ServiceProperties) { got = s }).
+				BuildAndPush(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, s []image.ServiceProperties) { got = s }).
 				Return(nil).
 				Once()
 
-			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages(context.Background())).To(Succeed())
 			Expect(got).To(HaveLen(1))
 			Expect(got[0].Name).To(Equal("hello"))
 		})
@@ -237,27 +244,27 @@ var _ = Describe("Helm", func() {
 			project.Services = types.Services{
 				"hello": {Name: "hello", Image: "reg/hello:v1"},
 			}
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
-			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages(context.Background())).To(Succeed())
 		})
 
 		It("never calls the image client for an empty project", func() {
-			Expect(subject.InitProject(project)).To(Succeed())
-			Expect(subject.BuildAndPushServiceImages()).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
+			Expect(subject.BuildAndPushServiceImages(context.Background())).To(Succeed())
 		})
 
 		It("propagates an image client failure", func() {
 			project.Services = types.Services{"hello": buildable("hello")}
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			mockImage.
 				EXPECT().
-				BuildAndPush(mock.Anything).
+				BuildAndPush(mock.Anything, mock.Anything).
 				Return(errBake).
 				Once()
 
-			err := subject.BuildAndPushServiceImages()
+			err := subject.BuildAndPushServiceImages(context.Background())
 
 			Expect(err).To(MatchError(errBake))
 		})
@@ -277,26 +284,29 @@ var _ = Describe("Helm", func() {
 			// No image and no extension: resolution fails before any build.
 			project.Services = types.Services{"broken": {Name: "broken"}}
 
-			err := subject.InitProject(project)
+			err := subject.InitProject(context.Background(), project)
 
 			// resolveServiceImage accumulates its failures with errors.Join, so
 			// the result is a join wrapper. errors.Is walks the join, which lets
 			// this assert that *both* validation failures were collected.
-			Expect(err).To(MatchError(config.KindImageRepositoryMissing))
-			Expect(err).To(MatchError(config.KindImageTagMissing))
+			Expect(err).To(MatchError(config.ErrImageRepositoryMissing))
+			Expect(err).To(MatchError(config.ErrImageTagMissing))
 		})
 
 		It("rejects a service with an unknown deployment type", func() {
 			svc := config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
+					// Deliberately misspelled: the point is that an
+					// unrecognized value is rejected rather than guessed at.
+					//nolint:misspell // intentional typo under test
 					"deploymentType": "sevice",
 				},
 			}
 			project.Services = types.Services{"hello": svc}
 
-			Expect(subject.InitProject(project)).
-				To(MatchError(config.KindInvalidDeploymentType))
+			Expect(subject.InitProject(context.Background(), project)).
+				To(MatchError(config.ErrInvalidDeploymentType))
 		})
 
 		It("resolves every service before any release is touched", func() {
@@ -305,7 +315,7 @@ var _ = Describe("Helm", func() {
 				"job":   {Name: "job", Image: "reg/job:v1"},
 			}
 
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 		})
 
 		// initProject runs before any chart is installed, so a typo cannot
@@ -323,15 +333,15 @@ var _ = Describe("Helm", func() {
 						{Target: 8080, Published: "3000"},
 					},
 					Extensions: types.Extensions{
-						config.K8S_SERVICE_EXTENSION: map[string]any{
+						config.K8sServiceExtension: map[string]any{
 							"ngrok": map[string]any{"port": 9999},
 						},
 					},
 				}
 				project.Services = types.Services{"hello": svc}
 
-				Expect(subject.InitProject(project)).
-					To(MatchError(config.KindNgrokPortMismatch))
+				Expect(subject.InitProject(context.Background(), project)).
+					To(MatchError(config.ErrNgrokPortMismatch))
 			})
 		})
 	})
@@ -354,45 +364,46 @@ var _ = Describe("Helm", func() {
 		// The api lists every endpoint on the account, so the names asked
 		// about are what keep another project's URLs out of the result.
 		It("asks only about the services it exposed", func() {
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			var asked []string
+
 			mockPublish.
 				EXPECT().
-				ServiceUrls(mock.Anything).
-				Run(func(names []string) { asked = names }).
+				ServiceUrls(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, names []string) { asked = names }).
 				Return(nil, nil).
 				Once()
 
-			_, err := subject.PublishedServiceUrls()
+			_, err := subject.PublishedServiceUrls(context.Background())
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(asked).To(ConsistOf("namespace-alpha", "namespace-beta"))
 		})
 
 		It("reports the url the api gives for each service", func() {
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			mockPublish.
 				EXPECT().
-				ServiceUrls(mock.Anything).
-				Return(map[string]url.URL{"namespace-alpha": *alphaUrl}, nil).
+				ServiceUrls(mock.Anything, mock.Anything).
+				Return(map[string]url.URL{"namespace-alpha": *alphaURL}, nil).
 				Once()
 
-			Expect(subject.PublishedServiceUrls()).
-				To(Equal(map[string]url.URL{"namespace-alpha": *alphaUrl}))
+			Expect(subject.PublishedServiceUrls(context.Background())).
+				To(Equal(map[string]url.URL{"namespace-alpha": *alphaURL}))
 		})
 
 		It("propagates an api failure", func() {
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			mockPublish.
 				EXPECT().
-				ServiceUrls(mock.Anything).
+				ServiceUrls(mock.Anything, mock.Anything).
 				Return(nil, errBoom).
 				Once()
 
-			_, err := subject.PublishedServiceUrls()
+			_, err := subject.PublishedServiceUrls(context.Background())
 
 			Expect(err).To(MatchError(errBoom))
 		})
@@ -405,9 +416,9 @@ var _ = Describe("Helm", func() {
 			// resolveNgrok drops every ngrok block without a token, so there
 			// is nothing to ask about — and a missing key is now an error.
 			It("resolves nothing without calling the api", func() {
-				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
-				Expect(subject.PublishedServiceUrls()).To(BeEmpty())
+				Expect(subject.PublishedServiceUrls(context.Background())).To(BeEmpty())
 
 				mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
 			})
@@ -434,7 +445,7 @@ var _ = Describe("Helm", func() {
 		// compose file cannot collide on the shared account, while the upstream
 		// stays the bare service name k8s DNS resolves inside the namespace.
 		It("namespaces each endpoint and keeps the bare service name", func() {
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			Expect(subject.ServicesToPublish()).To(HaveExactElements(
 				helm.NgrokConfig{
@@ -456,11 +467,11 @@ var _ = Describe("Helm", func() {
 		// replaces the agent pod on a deploy that changed nothing, reassigning
 		// every unreserved url.
 		It("resolves the same order every time", func() {
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 			first := subject.ServicesToPublish()
 
 			for range 5 {
-				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 				Expect(subject.ServicesToPublish()).To(Equal(first))
 			}
 		})
@@ -474,7 +485,7 @@ var _ = Describe("Helm", func() {
 				"alpha": exposedService("alpha", 8080),
 			}
 
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			Expect(subject.ServicesToPublish()).To(HaveExactElements(
 				HaveField("EndpointName", "namespace-alpha"),
@@ -488,7 +499,7 @@ var _ = Describe("Helm", func() {
 			})
 
 			It("names each endpoint after that namespace", func() {
-				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 				Expect(subject.ServicesToPublish()).To(ContainElement(
 					HaveField("EndpointName", "other-namespace-alpha"),
@@ -504,7 +515,7 @@ var _ = Describe("Helm", func() {
 			})
 
 			It("publishes nothing for it", func() {
-				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 				Expect(subject.ServicesToPublish()).To(BeEmpty())
 			})
 		})
@@ -513,7 +524,7 @@ var _ = Describe("Helm", func() {
 			BeforeEach(func() {
 				skipped := exposedService("skipped", 3000)
 				skipped.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
+					config.K8sServiceExtension: map[string]any{
 						"skip":  true,
 						"ngrok": map[string]any{"port": 3000},
 					},
@@ -523,7 +534,7 @@ var _ = Describe("Helm", func() {
 
 			// Never installed, so its endpoint would have no upstream.
 			It("publishes nothing for it", func() {
-				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 				Expect(subject.ServicesToPublish()).To(BeEmpty())
 			})
 		})
@@ -532,7 +543,7 @@ var _ = Describe("Helm", func() {
 			BeforeEach(func() {
 				job := exposedService("job", 3000)
 				job.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
+					config.K8sServiceExtension: map[string]any{
 						"deploymentType": "job",
 						"ngrok":          map[string]any{"port": 3000},
 					},
@@ -542,7 +553,7 @@ var _ = Describe("Helm", func() {
 
 			// A job renders no Service for an upstream to route to.
 			It("publishes nothing for it", func() {
-				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 				Expect(subject.ServicesToPublish()).To(BeEmpty())
 			})
 		})
@@ -553,7 +564,7 @@ var _ = Describe("Helm", func() {
 			})
 
 			It("publishes nothing even for a configured service", func() {
-				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 				Expect(subject.ServicesToPublish()).To(BeEmpty())
 			})
 		})
@@ -564,10 +575,10 @@ var _ = Describe("Helm", func() {
 		// claim, which failed the install after every service release had
 		// landed. The only url that reaches the config is a configured one.
 		It("never adopts the url the api reports", func() {
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			Expect(subject.ServicesToPublish()).To(HaveEach(
-				HaveField("Url", BeEmpty()),
+				HaveField("URL", BeEmpty()),
 			))
 			mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
 		})
@@ -575,7 +586,7 @@ var _ = Describe("Helm", func() {
 		It("keeps a configured url", func() {
 			svc := exposedService("alpha", 3000)
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{
+				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{
 						"port": 3000,
 						"url":  "https://reserved.ngrok.app",
@@ -584,10 +595,10 @@ var _ = Describe("Helm", func() {
 			}
 			project.Services = types.Services{"alpha": svc}
 
-			Expect(subject.InitProject(project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			Expect(subject.ServicesToPublish()).To(ConsistOf(
-				HaveField("Url", "https://reserved.ngrok.app"),
+				HaveField("URL", "https://reserved.ngrok.app"),
 			))
 			mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
 		})

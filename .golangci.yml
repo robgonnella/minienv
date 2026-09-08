@@ -1,0 +1,129 @@
+# This file contains all available configuration options
+# with their default values (in comments).
+#
+# This file is not a configuration example,
+# it contains the exhaustive configuration with explanations of the options.
+
+# Defines the configuration version.
+# The only possible value is "2".
+version: "2"
+
+linters:
+  # Default set of linters.
+  # The value can be:
+  # - `standard`: the "Default" linters https://golangci-lint.run/docs/linters/#all-linters
+  # - `all`: enables all linters by default.
+  # - `none`: disables all linters by default.
+  # - `fast`: enables only linters considered as "fast" (`golangci-lint help linters --json | jq '[ .[] | select(.fast==true) ] | map(.name)'`).
+  # Default: standard
+  default: all
+
+  # Disable specific linters. Every entry needs a reason: `default: all` is what
+  # surfaces new linters as golangci-lint adds them, so anything switched off
+  # here has to justify staying off.
+  disable:
+    # Unconfigured, depguard denies every non-stdlib import — including this
+    # module's own internal packages. There is no dependency policy to express.
+    - depguard
+    # Fixtures build on compose-go, helm and jsonschema structs carrying 40+
+    # fields. Spelling out every zero value buries the field a spec is about.
+    - exhaustruct
+    - exhaustruct_v5
+    # Needs a blocked-module list to mean anything.
+    - gomodguard
+    # `ireturn` wants concrete returns, but loadActiveDeployer returning
+    # deployer.Deployer is the injection seam.
+    - ireturn
+    # `if err := ...; err != nil` is the house style, used in ~36 places.
+    - noinlineerr
+    # wsl_v5 below already governs blank lines, and nlreturn disagrees with it.
+    - nlreturn
+    # json/yaml keys here follow ngrok's API and the helm chart's wire formats;
+    # neither is ours to rename.
+    - tagliatelle
+    # Flags idiomatic short receivers and loop variables.
+    - varnamelen
+    # Superseded by wsl_v5.
+    - wsl
+
+  settings:
+    # SplitN's count reads as part of the call, not as a magic number.
+    mnd:
+      ignored-functions:
+        - strings.SplitN
+
+    wsl_v5:
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 2
+
+    lll:
+      # Max line length, lines longer will be reported.
+      line-length: 80
+
+    wrapcheck:
+      ignore-package-globs:
+        # Internal packages already return *errs.Error, which is the wrapper.
+        - github.com/robgonnella/minienv/*
+        # Flag getters are plumbing; there is nothing to add to their errors.
+        - github.com/spf13/pflag
+
+  exclusions:
+    rules:
+      # Specs build fixtures and assert on literals; these linters read that as
+      # duplication and unsafe code rather than as the point of the test.
+      - path: _test\.go
+        linters:
+          - cyclop
+          - dupl
+          - err113
+          - forcetypeassert
+          - funlen
+          - gocognit
+          - goconst
+          - gosec
+          - maintidx
+          - nestif
+          - paralleltest
+          - unparam
+
+      # Specs embed golden YAML and JSON manifests; wrapping them would stop
+      # them matching what the code renders.
+      - path: _test\.go
+        linters:
+          - lll
+
+      # gofmt keeps struct tags on one line and lll has no tag-aware option, so
+      # a tagged field can never satisfy any limit.
+      - linters:
+          - lll
+        source: '`(json|yaml|mapstructure|jsonschema):'
+
+      # Doc comments here are published verbatim as JSON Schema descriptions,
+      # and AddGoComments joins wrapped lines with \n rather than a space, so
+      # wrapping one to hit the limit would rewrite schema.json. lll does not
+      # get to dictate user-facing schema text.
+      - path: internal/config/.*\.go
+        linters:
+          - lll
+        source: '^\s*//'
+
+      # Nothing but embedded YAML in raw string literals; wrapping would change
+      # the rendered manifests.
+      - path: internal/deployer/helm/templates\.go
+        linters:
+          - lll
+
+      # Ginkgo and Gomega are dot-imported by design in specs.
+      - path: _test\.go
+        linters:
+          - revive
+        text: "^dot-imports:"
+
+      # revive's `exported` rule wants "Foo does X" godoc on every identifier,
+      # which restates the code. Comments here explain why, or are absent.
+      # Excluded by text rather than via settings.revive.rules, because listing
+      # rules there replaces the default rule set instead of subtracting from it.
+      - linters:
+          - revive
+        text: "^exported:"

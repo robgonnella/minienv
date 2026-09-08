@@ -7,12 +7,12 @@ import "net/http"
 // server, so the specs need no listener.
 func NewNgrokClientWithTransport(
 	apiKey string,
-	baseUrl string,
+	baseURL string,
 	transport http.RoundTripper,
 ) *NgrokClient {
 	return &NgrokClient{
 		apiKey:     apiKey,
-		baseUrl:    baseUrl,
+		baseURL:    baseURL,
 		httpClient: &http.Client{Transport: transport},
 	}
 }

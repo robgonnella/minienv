@@ -1,8 +1,8 @@
 package publishing
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,7 +15,7 @@ import (
 
 // next_page_uri comes back relative, so requests resolve against the root.
 const (
-	ngrokApiBaseUrl    = "https://api.ngrok.com"
+	ngrokAPIBaseURL    = "https://api.ngrok.com"
 	ngrokEndpointsPath = "/endpoints"
 )
 
@@ -24,8 +24,8 @@ const (
 	ngrokRequestTimeout = 30 * time.Second
 )
 
-// Name is what the chart writes into ngrok.yml, and the only thing tying an
-// endpoint back to a compose service.
+// Endpoint's Name is what the chart writes into ngrok.yml, and the only thing
+// tying an endpoint back to a compose service.
 type Endpoint struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -40,21 +40,23 @@ type EndpointsResponse struct {
 
 type NgrokClient struct {
 	apiKey     string
-	baseUrl    string
+	baseURL    string
 	httpClient *http.Client
 }
 
 func NewNgrokClient(apiKey string) *NgrokClient {
 	return &NgrokClient{
 		apiKey:     apiKey,
-		baseUrl:    ngrokApiBaseUrl,
+		baseURL:    ngrokAPIBaseURL,
 		httpClient: &http.Client{Timeout: ngrokRequestTimeout},
 	}
 }
 
-// A service ngrok knows nothing about is absent from the result, so an empty
-// map means nothing is published rather than that something failed.
+// ServiceUrls returns the published url per service name. A service ngrok knows
+// nothing about is absent from the result, so an empty map means nothing is
+// published rather than that something failed.
 func (c *NgrokClient) ServiceUrls(
+	ctx context.Context,
 	svcNames []string,
 ) (map[string]url.URL, error) {
 	// Reported rather than shrugged off as an empty result: the caller cannot
@@ -62,21 +64,32 @@ func (c *NgrokClient) ServiceUrls(
 	// does not need the key, so the caller downgrades this to a warning.
 	if c.apiKey == "" {
 		return nil, errs.Errorf(
-			KindNgrokNotConfigured,
+			ErrNgrokNotConfigured,
 			"looking up published service urls requires NGROK_API_KEY to be set",
 		)
 	}
 
-	base, err := url.Parse(c.baseUrl)
+	base, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindNgrokUrlParse,
+			ErrNgrokURLParse,
 			"failed to parse ngrok api base url %q: %w",
-			c.baseUrl,
+			c.baseURL,
 			err,
 		)
 	}
 
+	return c.collectPages(ctx, base, svcNames)
+}
+
+// The api pages rather than returning every endpoint at once, and a malformed
+// response could point a page at itself, hence both the self-reference check
+// and the hard cap.
+func (c *NgrokClient) collectPages(
+	ctx context.Context,
+	base *url.URL,
+	svcNames []string,
+) (map[string]url.URL, error) {
 	mappedUrls := map[string]url.URL{}
 	next := ngrokEndpointsPath
 
@@ -84,14 +97,14 @@ func (c *NgrokClient) ServiceUrls(
 		ref, err := url.Parse(next)
 		if err != nil {
 			return nil, errs.Errorf(
-				KindNgrokUrlParse,
+				ErrNgrokURLParse,
 				"failed to parse ngrok api page uri %q: %w",
 				next,
 				err,
 			)
 		}
 
-		data, err := c.getEndpoints(base.ResolveReference(ref).String())
+		data, err := c.getEndpoints(ctx, base.ResolveReference(ref).String())
 		if err != nil {
 			return nil, err
 		}
@@ -134,10 +147,10 @@ func collectEndpoints(
 			continue
 		}
 
-		endpointUrl, err := url.Parse(ep.URL)
+		endpointURL, err := url.Parse(ep.URL)
 		if err != nil {
 			return errs.Errorf(
-				KindNgrokUrlParse,
+				ErrNgrokURLParse,
 				"failed to parse url %q for endpoint %s: %w",
 				ep.URL,
 				ep.Name,
@@ -145,32 +158,38 @@ func collectEndpoints(
 			)
 		}
 
-		urls[ep.Name] = *endpointUrl
+		urls[ep.Name] = *endpointURL
 	}
 
 	return nil
 }
 
 func (c *NgrokClient) getEndpoints(
-	endpointsUrl string,
+	ctx context.Context,
+	endpointsURL string,
 ) (*EndpointsResponse, error) {
-	req, err := http.NewRequest(http.MethodGet, endpointsUrl, nil)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		endpointsURL,
+		nil,
+	)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindNgrokFailedRequest,
+			ErrNgrokFailedRequest,
 			"failed to build ngrok api request: %w",
 			err,
 		)
 	}
 
 	// The API version header must be string "2"
-	req.Header.Add("ngrok-version", "2")
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	req.Header.Add("Ngrok-Version", "2")
+	req.Header.Add("Authorization", "Bearer "+c.apiKey)
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindNgrokFailedRequest,
+			ErrNgrokFailedRequest,
 			"failed to send ngrok api request: %w",
 			err,
 		)
@@ -179,8 +198,9 @@ func (c *NgrokClient) getEndpoints(
 
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
+
 		return nil, errs.Errorf(
-			KindNgrokFailedRequest,
+			ErrNgrokFailedRequest,
 			"ngrok api request failed with status=%d, body=%s",
 			res.StatusCode,
 			string(body),
@@ -190,7 +210,7 @@ func (c *NgrokClient) getEndpoints(
 	var data EndpointsResponse
 	if err := json.NewDecoder(res.Body).Decode(&data); err != nil {
 		return nil, errs.Errorf(
-			KindNgrokResponseJson,
+			ErrNgrokResponseJSON,
 			"failed to parse ngrok api response: %w",
 			err,
 		)

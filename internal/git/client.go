@@ -1,6 +1,8 @@
+// Package git reads the repository state minienv embeds into image tags.
 package git
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"strings"
@@ -21,8 +23,8 @@ func NewGitClient() *GitClient {
 
 // ShortSha returns the abbreviated commit hash of HEAD. The trailing newline
 // git writes is stripped here so callers can embed the value directly.
-func (c *GitClient) ShortSha() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+func (c *GitClient) ShortSha(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
 	cmd.Dir = c.dir
 
 	data, err := cmd.Output()
@@ -33,13 +35,14 @@ func (c *GitClient) ShortSha() (string, error) {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
 			return "", errs.Errorf(
-				KindShortSha,
+				ErrShortSha,
 				"git rev-parse failed: %w: %s",
 				err,
 				strings.TrimSpace(string(exitErr.Stderr)),
 			)
 		}
-		return "", errs.Errorf(KindShortSha, "git rev-parse failed: %w", err)
+
+		return "", errs.Errorf(ErrShortSha, "git rev-parse failed: %w", err)
 	}
 
 	return strings.TrimSpace(string(data)), nil

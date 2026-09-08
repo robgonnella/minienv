@@ -1,6 +1,8 @@
+// Package image builds and pushes the container images a deploy needs.
 package image
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"slices"
@@ -22,11 +24,15 @@ func NewDocker(dryRun bool) *Docker {
 	}
 }
 
-func (d *Docker) BuildAndPush(services []ServiceProperties) error {
+func (d *Docker) BuildAndPush(
+	ctx context.Context,
+	services []ServiceProperties,
+) error {
 	filtered := d.getFilteredList(services)
 
 	if len(filtered) == 0 {
 		log.Warn().Msg("no services to build")
+
 		return nil
 	}
 
@@ -37,13 +43,15 @@ func (d *Docker) BuildAndPush(services []ServiceProperties) error {
 
 	log.Debug().Msgf("building images: \n%s", hcl)
 
-	cmd := exec.Command("docker", d.bakeArgs()...)
+	// #nosec G204 -- argv comes from bakeArgs, which is a fixed list; the
+	// project-supplied part of the build arrives on stdin as hcl.
+	cmd := exec.CommandContext(ctx, "docker", d.bakeArgs()...)
 	cmd.Stdin = strings.NewReader(hcl)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return errs.Errorf(KindBuild, "failed to build or push images: %w", err)
+		return errs.Errorf(ErrBuild, "failed to build or push images: %w", err)
 	}
 
 	return nil

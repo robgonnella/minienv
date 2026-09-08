@@ -23,10 +23,12 @@ import (
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// bounds concurrent helm releases; each one waits on rollout
+// bounds concurrent helm releases; each one waits on rollout.
 const maxDeployConcurrency = 5
 
 const ngrokDeploymentTimeout = time.Minute
+
+const defaultImagePlatform = "linux/amd64"
 
 // deployFn acts on one service. Injected so the dependency-ordered walk is
 // drivable without a cluster.
@@ -41,7 +43,7 @@ type NgrokConfig struct {
 	Namespace     string `mapstructure:"namespace"`
 	EndpointName  string `mapstructure:"endpointName"`
 	ServiceName   string `mapstructure:"serviceName"`
-	Url           string `mapstructure:"url"`
+	URL           string `mapstructure:"url"`
 	Port          uint16 `mapstructure:"port"`
 	TrafficPolicy string `mapstructure:"trafficPolicy"`
 }
@@ -71,15 +73,6 @@ type Helm struct {
 	dryRun            bool
 }
 
-func publishedNames(published []NgrokConfig) []string {
-	names := make([]string, 0, len(published))
-	for _, svc := range published {
-		names = append(names, svc.EndpointName)
-	}
-
-	return names
-}
-
 func New(opts Options) *Helm {
 	return &Helm{
 		ext:            opts.Ext,
@@ -106,12 +99,15 @@ func (h *Helm) String() string {
 	return "Helm"
 }
 
-func (h *Helm) Init(project *config.ComposeProject) error {
+func (h *Helm) Init(
+	ctx context.Context,
+	project *config.ComposeProject,
+) error {
 	if !h.Active() {
 		return nil
 	}
 
-	if err := h.initProject(project); err != nil {
+	if err := h.initProject(ctx, project); err != nil {
 		return err
 	}
 
@@ -127,34 +123,39 @@ func (h *Helm) Init(project *config.ComposeProject) error {
 		h.helmDriver,
 		log.Printf,
 	); err != nil {
-		return err
+		return errs.Errorf(
+			ErrActionConfig,
+			"failed to initialize helm action configuration: %w",
+			err,
+		)
 	}
 
 	h.actionConfig = actionConfig
+
 	return nil
 }
 
-func (h *Helm) Deploy() error {
+func (h *Helm) Deploy(ctx context.Context) error {
 	if !h.Active() {
 		return nil
 	}
 
-	if err := h.buildAndPushServiceImages(); err != nil {
+	if err := h.buildAndPushServiceImages(ctx); err != nil {
 		return err
 	}
 
-	if err := h.createNamespaceIfNotExists(); err != nil {
+	if err := h.createNamespaceIfNotExists(ctx); err != nil {
 		return err
 	}
 
-	if err := h.deployInDependencyOrder(h.deployService); err != nil {
+	if err := h.deployInDependencyOrder(ctx, h.deployService); err != nil {
 		return err
 	}
 
-	return h.installNgrokChart()
+	return h.installNgrokChart(ctx)
 }
 
-func (h *Helm) Destroy() error {
+func (h *Helm) Destroy(ctx context.Context) error {
 	if !h.Active() {
 		return nil
 	}
@@ -167,12 +168,29 @@ func (h *Helm) Destroy() error {
 	}
 
 	if err := h.destroyInReverseDependencyOrder(
+		ctx,
 		destroyService,
 	); err != nil {
 		return err
 	}
 
-	return h.uninstallNgrokChart()
+	return h.uninstallNgrokChart(ctx)
+}
+
+// PublishedServiceUrls returns an empty map rather than a nil one when nothing
+// is published: the caller cannot otherwise distinguish that from a lookup
+// that never ran.
+func (h *Helm) PublishedServiceUrls(
+	ctx context.Context,
+) (map[string]url.URL, error) {
+	if len(h.servicesToPublish) == 0 {
+		return map[string]url.URL{}, nil
+	}
+
+	return h.publishClient.ServiceUrls(
+		ctx,
+		publishedNames(h.servicesToPublish),
+	)
 }
 
 // initProject is the half of Init that needs no cluster: it resolves every
@@ -180,15 +198,22 @@ func (h *Helm) Destroy() error {
 // release is touched, and so a +git tag costs one git call per run rather than
 // one per service per pass. Everything downstream reads h.services, which makes
 // Init a hard precondition of Deploy and Destroy.
-func (h *Helm) initProject(project *config.ComposeProject) error {
+func (h *Helm) initProject(
+	ctx context.Context,
+	project *config.ComposeProject,
+) error {
 	services := map[string]serviceTuple{}
 	servicesToPublish := []NgrokConfig{}
 
 	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(h.extensionOptions(svc))
+		svcExt, err := config.NewXMiniEnvK8sService(
+			ctx,
+			h.extensionOptions(svc),
+		)
 		if err != nil {
 			return err
 		}
+
 		services[svc.Name] = serviceTuple{compose: svc, extension: *svcExt}
 
 		// resolveNgrok clears Ngrok without an auth token, so a non-zero port
@@ -212,7 +237,7 @@ func (h *Helm) initProject(project *config.ComposeProject) error {
 					Namespace:     h.ext.K8s.Namespace,
 					EndpointName:  fmt.Sprintf("%s-%s", h.ext.K8s.Namespace, svc.Name),
 					ServiceName:   svc.Name,
-					Url:           svcExt.Ngrok.Url,
+					URL:           svcExt.Ngrok.URL,
 					Port:          svcExt.Ngrok.Port,
 					TrafficPolicy: svcExt.Ngrok.TrafficPolicy,
 				})
@@ -251,7 +276,7 @@ func (h *Helm) deployService(
 	internalService, ok := h.services[svc.Name]
 	if !ok {
 		return errs.Errorf(
-			KindMissingService,
+			ErrMissingService,
 			"service not in map: %s",
 			svc.Name,
 		)
@@ -262,6 +287,7 @@ func (h *Helm) deployService(
 			Warn().
 			Str("service", svc.Name).
 			Msg("detected skip: omitting service from deployment")
+
 		return nil
 	}
 
@@ -272,13 +298,13 @@ func (h *Helm) deployService(
 
 	timeout := internalService.extension.DeploymentTimeout
 	if timeout == "" {
-		timeout = config.HELM_DEFAULT_DEPLOYMENT_TIMEOUT
+		timeout = config.HelmDefaultDeploymentTimeout
 	}
 
 	parsedTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
 		return errs.Errorf(
-			KindChartDeploymentTimeout,
+			ErrChartDeploymentTimeout,
 			"invalid deploymentTimeout configuration: %w",
 			err,
 		)
@@ -301,15 +327,17 @@ func (h *Helm) deployService(
 	)
 }
 
-func (h *Helm) buildAndPushServiceImages() error {
+func (h *Helm) buildAndPushServiceImages(ctx context.Context) error {
 	dockerServices := []image.ServiceProperties{}
+
 	for name, svc := range h.services {
 		if svc.extension.Skip {
 			log.Warn().Str("service", name).Msg("detected skip: skipping")
+
 			continue
 		}
 
-		platforms := []string{"linux/amd64"}
+		platforms := []string{defaultImagePlatform}
 
 		if len(svc.extension.Image.Platforms) != 0 {
 			platforms = svc.extension.Image.Platforms
@@ -329,7 +357,7 @@ func (h *Helm) buildAndPushServiceImages() error {
 	}
 
 	if len(dockerServices) > 0 {
-		return h.imageClient.BuildAndPush(dockerServices)
+		return h.imageClient.BuildAndPush(ctx, dockerServices)
 	}
 
 	return nil
@@ -339,40 +367,58 @@ func (h *Helm) buildAndPushServiceImages() error {
 // service only once everything it depends on has been deployed. Services with
 // no unmet dependency are deployed concurrently.
 func (h *Helm) deployInDependencyOrder(
+	ctx context.Context,
 	deploy deployFn,
 ) error {
 	if err := h.checkDependencyGraph(); err != nil {
 		return err
 	}
 
-	return composegraph.InDependencyOrder(
-		context.Background(),
+	if err := composegraph.InDependencyOrder(
+		ctx,
 		h.project,
 		func(ctx context.Context, _ string, svc config.ComposeService) error {
 			return deploy(ctx, svc)
 		},
 		composegraph.WithMaxConcurrency(maxDeployConcurrency),
-	)
+	); err != nil {
+		return errs.Errorf(
+			ErrComposeDependencyGraph,
+			"failed to deploy in dependency order: %w",
+			err,
+		)
+	}
+
+	return nil
 }
 
 // destroyInReverseDependencyOrder mirrors deployInDependencyOrder: a service is
 // uninstalled only once everything depending on it is gone.
 func (h *Helm) destroyInReverseDependencyOrder(
+	ctx context.Context,
 	uninstall deployFn,
 ) error {
 	if err := h.checkDependencyGraph(); err != nil {
 		return err
 	}
 
-	return composegraph.InDependencyOrder(
-		context.Background(),
+	if err := composegraph.InDependencyOrder(
+		ctx,
 		h.project,
 		func(ctx context.Context, _ string, svc config.ComposeService) error {
 			return uninstall(ctx, svc)
 		},
 		composegraph.InReverseOrder,
 		composegraph.WithMaxConcurrency(maxDeployConcurrency),
-	)
+	); err != nil {
+		return errs.Errorf(
+			ErrComposeDependencyGraph,
+			"failed to destroy in reverse dependency order: %w",
+			err,
+		)
+	}
+
+	return nil
 }
 
 // Validated up front so an unusable depends_on graph — a cycle, or a required
@@ -382,7 +428,7 @@ func (h *Helm) destroyInReverseDependencyOrder(
 func (h *Helm) checkDependencyGraph() error {
 	if err := composegraph.CheckCycle(h.project); err != nil {
 		return errs.Errorf(
-			KindComposeDependencyGraph,
+			ErrComposeDependencyGraph,
 			"invalid service dependency graph: %w",
 			err,
 		)
@@ -398,15 +444,15 @@ func (h *Helm) upgradeOrInstallChart(
 	timeout time.Duration,
 	restart bool,
 ) error {
-	exists := h.serviceReleaseExists(chart.Name())
-
-	if exists {
+	if h.serviceReleaseExists(chart.Name()) {
 		log.Info().Str("release", chart.Name()).Msg("upgrading release")
+
 		return h.upgradeChart(ctx, chart, values, timeout, restart)
-	} else {
-		log.Info().Str("release", chart.Name()).Msg("installing release")
-		return h.installChart(ctx, chart, values, timeout)
 	}
+
+	log.Info().Str("release", chart.Name()).Msg("installing release")
+
+	return h.installChart(ctx, chart, values, timeout)
 }
 
 func (h *Helm) installChart(
@@ -421,14 +467,13 @@ func (h *Helm) installChart(
 	client.CreateNamespace = false
 	client.Wait = true
 	client.Atomic = true
-	client.Wait = true
 	client.WaitForJobs = true
 	client.DryRun = h.dryRun
 	client.Timeout = timeout
 
 	if _, err := client.RunWithContext(ctx, chart, values); err != nil {
 		return errs.Errorf(
-			KindChartInstall,
+			ErrChartInstall,
 			"failed to install service chart %s: %w",
 			chart.Name(),
 			err,
@@ -474,7 +519,7 @@ func (h *Helm) upgradeChart(
 		values,
 	); err != nil {
 		return errs.Errorf(
-			KindChartUpgrade,
+			ErrChartUpgrade,
 			"failed to upgrade service chart %s: %w",
 			chart.Name(),
 			err,
@@ -502,7 +547,7 @@ func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
 	response, err := client.Run(svcName)
 	if err != nil {
 		return errs.Errorf(
-			KindChartUninstall,
+			ErrChartUninstall,
 			"failed to uninstall service chart %s: %w",
 			svcName,
 			err,
@@ -511,6 +556,7 @@ func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
 
 	if response == nil || response.Release == nil {
 		log.Info().Str("service", svcName).Msg("no release found for service")
+
 		return nil
 	}
 
@@ -524,46 +570,53 @@ func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
 	return nil
 }
 
-func (h *Helm) createNamespaceIfNotExists() error {
+func (h *Helm) createNamespaceIfNotExists(ctx context.Context) error {
 	clientset, err := h.actionConfig.KubernetesClientSet()
 	if err != nil {
-		return err
-	}
-
-	create := false
-
-	_, err = clientset.
-		CoreV1().
-		Namespaces().
-		Get(context.TODO(), h.ext.K8s.Namespace, k8smetav1.GetOptions{})
-
-	if err != nil && k8s_errors.IsNotFound(err) {
-		create = true
-	} else if err != nil {
-		return err
-	}
-
-	if !create {
-		return nil
-	}
-
-	_, err = clientset.
-		CoreV1().
-		Namespaces().
-		Create(
-			context.TODO(),
-			&k8sv1.Namespace{Name: h.ext.K8s.Namespace},
-			k8smetav1.CreateOptions{},
+		return errs.Errorf(
+			ErrK8sNamespace,
+			"failed to build kubernetes client: %w",
+			err,
 		)
+	}
 
-	return err
+	namespaces := clientset.CoreV1().Namespaces()
+
+	_, err = namespaces.Get(ctx, h.ext.K8s.Namespace, k8smetav1.GetOptions{})
+
+	switch {
+	case err == nil:
+		return nil
+	case !k8s_errors.IsNotFound(err):
+		return errs.Errorf(
+			ErrK8sNamespace,
+			"failed to look up namespace %s: %w",
+			h.ext.K8s.Namespace,
+			err,
+		)
+	}
+
+	if _, err := namespaces.Create(
+		ctx,
+		&k8sv1.Namespace{Name: h.ext.K8s.Namespace},
+		k8smetav1.CreateOptions{},
+	); err != nil {
+		return errs.Errorf(
+			ErrK8sNamespace,
+			"failed to create namespace %s: %w",
+			h.ext.K8s.Namespace,
+			err,
+		)
+	}
+
+	return nil
 }
 
 // Deleting the last ngrok block has to uninstall the release, or it keeps
 // serving endpoints the project no longer declares.
-func (h *Helm) installNgrokChart() error {
+func (h *Helm) installNgrokChart(ctx context.Context) error {
 	if len(h.servicesToPublish) == 0 {
-		return h.uninstallNgrokChart()
+		return h.uninstallNgrokChart(ctx)
 	}
 
 	chart, err := h.chartBuilder.NgrokChart()
@@ -574,7 +627,7 @@ func (h *Helm) installNgrokChart() error {
 	// restart=false: the checksum annotations decide when the pod rolls.
 	// Forcing it would reassign every URL without a reserved domain.
 	return h.upgradeOrInstallChart(
-		context.Background(),
+		ctx,
 		chart,
 		h.chartBuilder.NgrokValues(h.servicesToPublish),
 		ngrokDeploymentTimeout,
@@ -582,22 +635,24 @@ func (h *Helm) installNgrokChart() error {
 	)
 }
 
-func (h *Helm) PublishedServiceUrls() (map[string]url.URL, error) {
-	if len(h.servicesToPublish) == 0 {
-		return nil, nil
-	}
-
-	return h.publishClient.ServiceUrls(publishedNames(h.servicesToPublish))
-}
-
 // Unconditional: the current ngrok config may no longer mention what was
 // installed, and uninstallChart tolerates a missing release.
-func (h *Helm) uninstallNgrokChart() error {
-	return h.uninstallChart(context.Background(), ngrokReleaseName)
+func (h *Helm) uninstallNgrokChart(ctx context.Context) error {
+	return h.uninstallChart(ctx, ngrokReleaseName)
 }
 
 func (h *Helm) serviceReleaseExists(name string) bool {
 	client := helmaction.NewGet(h.actionConfig)
 	release, _ := client.Run(name)
+
 	return release != nil
+}
+
+func publishedNames(published []NgrokConfig) []string {
+	names := make([]string, 0, len(published))
+	for _, svc := range published {
+		names = append(names, svc.EndpointName)
+	}
+
+	return names
 }

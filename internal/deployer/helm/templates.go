@@ -11,7 +11,7 @@ type: application
 name: %s
 version: 0.1.0
 appVersion: 0.1.0
-description: A chart for deploying service service
+description: A chart for deploying service
 `, svcName)
 }
 
@@ -28,7 +28,7 @@ data:
 	)
 }
 
-const HELM_HELPERS_TMPL = `
+const helpersTmpl = `
 {{/*
 Expand the name of the chart.
 */}}
@@ -93,7 +93,7 @@ Create the name of the service account to use
 {{- end }}
 `
 
-const HELM_DEPLOYMENT_VALUES_TMPL = `
+const deploymentValuesTmpl = `
 replicas: 1
 
 image:
@@ -139,7 +139,7 @@ tolerations: []
 affinity: {}
 `
 
-const HELM_NGROK_VALUES_TMPL = `
+const ngrokValuesTmpl = `
 replicas: 1
 
 image:
@@ -177,7 +177,7 @@ volumes: []
 volumeMounts: []
 `
 
-const HELM_NGROK_CONFIG_MAP_TMPL = `
+const ngrokConfigMapTmpl = `
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -201,7 +201,7 @@ data:
     {{- end }}
 `
 
-const HELM_DEPLOYMENT_TMPL = `
+const deploymentTmpl = `
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -308,7 +308,7 @@ spec:
       {{- end }}
 `
 
-const HELM_SERVICE_TMPL = `
+const serviceTmpl = `
 {{- if .Values.service.create -}}
 apiVersion: v1
 kind: Service
@@ -330,7 +330,7 @@ spec:
 {{- end -}}
 `
 
-const HELM_SERVICE_ACCOUNT_TMPL = `
+const serviceAccountTmpl = `
 {{- if .Values.serviceAccount.create -}}
 apiVersion: v1
 kind: ServiceAccount
@@ -346,7 +346,7 @@ automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
 {{- end -}}
 `
 
-const HELM_JOB_VALUES_TMPL = `
+const jobValuesTmpl = `
 image:
   repository: ""
   pullPolicy: IfNotPresent
@@ -380,7 +380,7 @@ tolerations: []
 affinity: {}
 `
 
-const HELM_JOB_TMPL = `
+const jobTmpl = `
 apiVersion: batch/v1
 kind: Job
 metadata:

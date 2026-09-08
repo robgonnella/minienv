@@ -15,7 +15,7 @@ import (
 // declaredKind is one errs.Kind constant found in an internal/*/error.go.
 type declaredKind struct {
 	pkg   string // owning package directory, e.g. "config"
-	name  string // constant name, e.g. "KindInvalidPort"
+	name  string // constant name, e.g. "ErrInvalidPort"
 	value string // string value, e.g. "config.invalid_port"
 }
 

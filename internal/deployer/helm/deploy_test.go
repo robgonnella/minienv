@@ -57,7 +57,7 @@ func newRecorder(cancel context.CancelFunc) *recorder {
 	}
 }
 
-func (r *recorder) visit(ctx context.Context, svc config.ComposeService) error {
+func (r *recorder) visit(_ context.Context, svc config.ComposeService) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -127,7 +127,7 @@ var _ = Describe("Helm", func() {
 			}
 			subject.SetProject(project)
 
-			Expect(subject.DeployInDependencyOrder(rec.visit)).
+			Expect(subject.DeployInDependencyOrder(context.Background(), rec.visit)).
 				To(Succeed())
 
 			// The only fully determined order in the suite, so assert it exactly.
@@ -143,7 +143,7 @@ var _ = Describe("Helm", func() {
 			}
 			subject.SetProject(project)
 
-			Expect(subject.DeployInDependencyOrder(rec.visit)).
+			Expect(subject.DeployInDependencyOrder(context.Background(), rec.visit)).
 				To(Succeed())
 
 			// api and worker are free to run concurrently, so only their position
@@ -163,7 +163,7 @@ var _ = Describe("Helm", func() {
 			}
 			subject.SetProject(project)
 
-			Expect(subject.DeployInDependencyOrder(rec.visit)).
+			Expect(subject.DeployInDependencyOrder(context.Background(), rec.visit)).
 				To(Succeed())
 
 			Expect(rec.succeeded()).To(ConsistOf("one", "two", "three"))
@@ -185,8 +185,9 @@ var _ = Describe("Helm", func() {
 				bothIn   = make(chan struct{})
 			)
 
-			deploy := func(ctx context.Context, svc config.ComposeService) error {
+			deploy := func(ctx context.Context, _ config.ComposeService) error {
 				mu.Lock()
+
 				inFlight++
 				if inFlight == 2 {
 					close(bothIn)
@@ -201,7 +202,7 @@ var _ = Describe("Helm", func() {
 				}
 			}
 
-			Expect(subject.DeployInDependencyOrder(deploy)).To(Succeed())
+			Expect(subject.DeployInDependencyOrder(context.Background(), deploy)).To(Succeed())
 		}, SpecTimeout(10*time.Second))
 
 		It("propagates a failure from the last service in a chain", func() {
@@ -214,7 +215,7 @@ var _ = Describe("Helm", func() {
 
 			rec.fail["api"] = errStep
 
-			err := subject.DeployInDependencyOrder(rec.visit)
+			err := subject.DeployInDependencyOrder(context.Background(), rec.visit)
 
 			Expect(err).To(MatchError(errStep))
 			Expect(rec.succeeded()).To(Equal([]string{"db", "cache"}))
@@ -229,7 +230,7 @@ var _ = Describe("Helm", func() {
 
 			rec.fail["db"] = errStep
 
-			err := subject.DeployInDependencyOrder(rec.visit)
+			err := subject.DeployInDependencyOrder(context.Background(), rec.visit)
 
 			// Only the propagation is asserted. Whether api is dispatched before
 			// the group's context cancellation lands is a race inside compose-go's
@@ -246,9 +247,9 @@ var _ = Describe("Helm", func() {
 			}
 			subject.SetProject(project)
 
-			err := subject.DeployInDependencyOrder(rec.visit)
+			err := subject.DeployInDependencyOrder(context.Background(), rec.visit)
 
-			Expect(err).To(MatchError(helm.KindComposeDependencyGraph))
+			Expect(err).To(MatchError(helm.ErrComposeDependencyGraph))
 			Expect(rec.succeeded()).To(BeEmpty())
 		})
 
@@ -258,16 +259,16 @@ var _ = Describe("Helm", func() {
 			}
 			subject.SetProject(project)
 
-			err := subject.DeployInDependencyOrder(rec.visit)
+			err := subject.DeployInDependencyOrder(context.Background(), rec.visit)
 
-			Expect(err).To(MatchError(helm.KindComposeDependencyGraph))
+			Expect(err).To(MatchError(helm.ErrComposeDependencyGraph))
 			Expect(rec.succeeded()).To(BeEmpty())
 		})
 
 		It("deploys nothing for an empty project", func() {
 			subject.SetProject(project)
 
-			Expect(subject.DeployInDependencyOrder(rec.visit)).
+			Expect(subject.DeployInDependencyOrder(context.Background(), rec.visit)).
 				To(Succeed())
 
 			Expect(rec.succeeded()).To(BeEmpty())
@@ -295,7 +296,7 @@ var _ = Describe("Helm", func() {
 
 		It("destroys a chain dependents first", func() {
 			subject.SetProject(project)
-			Expect(subject.DestroyInReverseDependencyOrder(rec.visit)).
+			Expect(subject.DestroyInReverseDependencyOrder(context.Background(), rec.visit)).
 				To(Succeed())
 
 			// The exact inverse of the deploy walk: nothing is uninstalled while
@@ -305,8 +306,9 @@ var _ = Describe("Helm", func() {
 
 		It("propagates a failure from service that failed to be destroyed", func() {
 			subject.SetProject(project)
+
 			rec.fail["api"] = errStep
-			err := subject.DestroyInReverseDependencyOrder(rec.visit)
+			err := subject.DestroyInReverseDependencyOrder(context.Background(), rec.visit)
 			Expect(err).To(MatchError(errStep))
 		})
 
@@ -317,9 +319,9 @@ var _ = Describe("Helm", func() {
 			}
 			subject.SetProject(project)
 
-			err := subject.DestroyInReverseDependencyOrder(rec.visit)
+			err := subject.DestroyInReverseDependencyOrder(context.Background(), rec.visit)
 
-			Expect(err).To(MatchError(helm.KindComposeDependencyGraph))
+			Expect(err).To(MatchError(helm.ErrComposeDependencyGraph))
 			Expect(rec.succeeded()).To(BeEmpty())
 		})
 	})
@@ -331,10 +333,10 @@ var _ = Describe("Helm", func() {
 			ctx := context.Background()
 			svc := config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
 			svc.Extensions = types.Extensions{
-				config.K8S_SERVICE_EXTENSION: map[string]any{"skip": true},
+				config.K8sServiceExtension: map[string]any{"skip": true},
 			}
 
-			Expect(subject.InitProject(&config.ComposeProject{
+			Expect(subject.InitProject(context.Background(), &config.ComposeProject{
 				Name:     "test-project",
 				Services: types.Services{"hello": svc},
 			})).To(Succeed())
@@ -352,13 +354,13 @@ var _ = Describe("Helm", func() {
 		It("errors for a service that was never resolved by Init", func() {
 			ctx := context.Background()
 
-			Expect(subject.InitProject(&config.ComposeProject{
+			Expect(subject.InitProject(context.Background(), &config.ComposeProject{
 				Name: "test-project",
 			})).To(Succeed())
 
 			err := subject.DeployService(ctx, config.ComposeService{Name: "hello"})
 
-			Expect(err).To(MatchError(helm.KindMissingService))
+			Expect(err).To(MatchError(helm.ErrMissingService))
 		})
 	})
 })

@@ -5,6 +5,8 @@
 package gitmocks
 
 import (
+	"context"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -36,8 +38,8 @@ func (_m *MockClient) EXPECT() *MockClient_Expecter {
 }
 
 // ShortSha provides a mock function for the type MockClient
-func (_mock *MockClient) ShortSha() (string, error) {
-	ret := _mock.Called()
+func (_mock *MockClient) ShortSha(ctx context.Context) (string, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ShortSha")
@@ -45,16 +47,16 @@ func (_mock *MockClient) ShortSha() (string, error) {
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (string, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (string, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() string); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) string); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -67,13 +69,20 @@ type MockClient_ShortSha_Call struct {
 }
 
 // ShortSha is a helper method to define mock.On call
-func (_e *MockClient_Expecter) ShortSha() *MockClient_ShortSha_Call {
-	return &MockClient_ShortSha_Call{Call: _e.mock.On("ShortSha")}
+//   - ctx context.Context
+func (_e *MockClient_Expecter) ShortSha(ctx any) *MockClient_ShortSha_Call {
+	return &MockClient_ShortSha_Call{Call: _e.mock.On("ShortSha", ctx)}
 }
 
-func (_c *MockClient_ShortSha_Call) Run(run func()) *MockClient_ShortSha_Call {
+func (_c *MockClient_ShortSha_Call) Run(run func(ctx context.Context)) *MockClient_ShortSha_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -83,7 +92,7 @@ func (_c *MockClient_ShortSha_Call) Return(s string, err error) *MockClient_Shor
 	return _c
 }
 
-func (_c *MockClient_ShortSha_Call) RunAndReturn(run func() (string, error)) *MockClient_ShortSha_Call {
+func (_c *MockClient_ShortSha_Call) RunAndReturn(run func(ctx context.Context) (string, error)) *MockClient_ShortSha_Call {
 	_c.Call.Return(run)
 	return _c
 }

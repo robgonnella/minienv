@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	goos "os"
 
 	"github.com/robgonnella/minienv/internal/core"
@@ -12,33 +13,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type RunContext struct {
-	Core *core.Core
-}
-
-// rootCmd represents the base command when called without any subcommands
-var rootCmd = &cobra.Command{
-	Use: "minienv",
-	Short: `Effortless remote mini environments generated directly from docker
+// Built per call rather than as a package-level var so the flag set starts
+// clean: a shared command accumulates parsed values between invocations.
+func newRootCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "minienv",
+		Short: `Effortless remote mini environments generated directly from docker
 compose config`,
-	Long: `Minienv is a tool for quickly deploying and accessing mini environments
+		Long: `Minienv is a tool for quickly deploying and accessing mini environments
 based on your existing docker-compose config. It allows you to effortlessly
 deploy any docker-compose configuration to various remote environments, and
 make those environments accessible for review and testing.`,
+	}
+
+	flags := cmd.PersistentFlags()
+
+	flags.StringArrayP("file", "f", []string{},
+		`Compose configuration files. Same as "docker compose -f <file>"`)
+	flags.String("project-directory", "",
+		`Specify an alternate working directory. `+
+			`Same as "docker compose --project-directory <dir>"`)
+	flags.StringP("project-name", "p", "",
+		`Project name. Same as "docker compose -p <name>"`)
+	flags.Bool("dry-run", false, "Executes in dry-run mode")
+
+	cmd.AddCommand(newDeployCmd(), newDestroyCmd(), newVersionCmd())
+
+	return cmd
 }
 
+// Execute runs the CLI. Nothing cancels the context it creates yet; it is
+// threaded from here so a signal handler can be added without touching every
+// layer below.
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := newRootCmd().ExecuteContext(context.Background()); err != nil {
 		log.Fatal().Err(err).Msg("command failed")
 	}
-}
-
-func init() {
-	rootCmd.PersistentFlags().StringArrayP("file", "f", []string{}, "Compose configuration files. Same as \"docker compose -f <file>\"")
-	rootCmd.PersistentFlags().String("project-directory", "", "Specify an alternate working directory. Same as \"docker compose --project-directory <dir>\"")
-	rootCmd.PersistentFlags().StringP("project-name", "p", "", "Project name. Same as \"docker compose -p <name>\"")
-	rootCmd.PersistentFlags().Bool("dry-run", false, "Executes in dry-run mode")
 }
 
 func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
@@ -62,8 +72,8 @@ func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 		return nil, err
 	}
 
-	ngrokApiKey := goos.Getenv("NGROK_API_KEY")
-	if ngrokApiKey == "" {
+	ngrokAPIKey := goos.Getenv("NGROK_API_KEY")
+	if ngrokAPIKey == "" {
 		log.
 			Warn().
 			Msg("NGROK_API_KEY environment variable is not set. " +
@@ -73,7 +83,7 @@ func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 
 	imageClient := image.NewDocker(dryRun)
 	gitClient := git.NewGitClient()
-	publishClient := publishing.NewNgrokClient(ngrokApiKey)
+	publishClient := publishing.NewNgrokClient(ngrokAPIKey)
 
 	// This is the composition root: the one place that reads runtime
 	// environment values. Reading them here, lazily, keeps credentials out of
@@ -92,19 +102,13 @@ func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 }
 
 func loadProject(
+	ctx context.Context,
 	cmd *cobra.Command,
-) (*RunContext, error) {
+) (*core.Core, error) {
 	loaderOpts, err := getLoaderOptions(cmd)
 	if err != nil {
 		return nil, err
 	}
 
-	projectLoader := loader.New(loaderOpts)
-
-	core, err := projectLoader.LoadCore()
-	if err != nil {
-		return nil, err
-	}
-
-	return &RunContext{Core: core}, nil
+	return loader.New(loaderOpts).LoadCore(ctx)
 }

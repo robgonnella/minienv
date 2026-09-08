@@ -1,6 +1,7 @@
 package loader_test
 
 import (
+	"context"
 	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -43,36 +44,36 @@ var _ = Describe("Loader", func() {
 
 	Describe("LoadCore", func() {
 		It("builds a core from a compose file with a k8s extension", func() {
-			core, err := newLoader(fixture("valid.compose.yml")).LoadCore()
+			core, err := newLoader(fixture("valid.compose.yml")).LoadCore(context.Background())
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(core).ToNot(BeNil())
 		})
 
 		It("errors when the compose file does not exist", func() {
-			_, err := newLoader(fixture("nope.compose.yml")).LoadCore()
+			_, err := newLoader(fixture("nope.compose.yml")).LoadCore(context.Background())
 
-			Expect(err).To(MatchError(loader.KindProjectLoad))
+			Expect(err).To(MatchError(loader.ErrProjectLoad))
 		})
 
 		It("errors when the compose file has no x-minienv extension", func() {
-			_, err := newLoader(fixture("no-extension.compose.yml")).LoadCore()
+			_, err := newLoader(fixture("no-extension.compose.yml")).LoadCore(context.Background())
 
-			Expect(err).To(MatchError(loader.KindNoExtension))
+			Expect(err).To(MatchError(loader.ErrNoExtension))
 		})
 
 		It("errors when x-minienv configures no deploy target", func() {
-			_, err := newLoader(fixture("no-deployer.compose.yml")).LoadCore()
+			_, err := newLoader(fixture("no-deployer.compose.yml")).LoadCore(context.Background())
 
-			Expect(err).To(MatchError(loader.KindNoActiveDeployer))
+			Expect(err).To(MatchError(loader.ErrNoActiveDeployer))
 		})
 
 		It("errors when the x-minienv extension cannot be decoded", func() {
 			_, err := newLoader(
 				fixture("malformed-extension.compose.yml"),
-			).LoadCore()
+			).LoadCore(context.Background())
 
-			Expect(err).To(MatchError(loader.KindExtensionDecode))
+			Expect(err).To(MatchError(loader.ErrExtensionDecode))
 		})
 	})
 
@@ -86,11 +87,11 @@ var _ = Describe("Loader", func() {
 		It("resolves env vars inside a service extension", func() {
 			project, err := newLoader(
 				fixture("interpolated.compose.yml"),
-			).LoadComposeProject()
+			).LoadComposeProject(context.Background())
 			Expect(err).ShouldNot(HaveOccurred())
 
 			ext := project.Services["api"].
-				Extensions[config.K8S_SERVICE_EXTENSION].(map[string]any)
+				Extensions[config.K8sServiceExtension].(map[string]any)
 			ngrok := ext["ngrok"].(map[string]any)
 
 			Expect(ngrok["url"]).
@@ -100,11 +101,11 @@ var _ = Describe("Loader", func() {
 		It("resolves env vars inside the top level extension", func() {
 			project, err := newLoader(
 				fixture("interpolated.compose.yml"),
-			).LoadComposeProject()
+			).LoadComposeProject(context.Background())
 			Expect(err).ShouldNot(HaveOccurred())
 
 			ext := project.
-				Extensions[config.TOP_LEVEL_EXTENSION].(map[string]any)
+				Extensions[config.TopLevelExtension].(map[string]any)
 			k8s := ext["k8s"].(map[string]any)
 
 			Expect(k8s["namespace"]).To(Equal("alice"))

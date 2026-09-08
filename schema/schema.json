@@ -30,7 +30,7 @@
         "repository",
         "tag"
       ],
-      "description": "Configuration for service image"
+      "description": "ChartImage is the configuration for a service image."
     },
     "ChartImagePullSecret": {
       "properties": {
@@ -44,7 +44,7 @@
       "required": [
         "name"
       ],
-      "description": "Pull secrets to enable pulling private images"
+      "description": "ChartImagePullSecret names a secret that enables pulling private images."
     },
     "ChartService": {
       "properties": {
@@ -69,7 +69,7 @@
       "required": [
         "ports"
       ],
-      "description": "Service configuration"
+      "description": "ChartService is the Kubernetes service configuration."
     },
     "ChartServiceAccount": {
       "properties": {
@@ -95,7 +95,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "ServiceAccount configuration for the deployment service"
+      "description": "ChartServiceAccount is the service account configuration for the deployment."
     },
     "ChartServicePort": {
       "properties": {
@@ -129,7 +129,7 @@
         "servicePort",
         "protocol"
       ],
-      "description": "Port configuration use in services and deployment pod container"
+      "description": "ChartServicePort is the port configuration used by both the service and the deployment pod container."
     },
     "Ngrok": {
       "properties": {
@@ -151,7 +151,7 @@
       "required": [
         "port"
       ],
-      "description": "Ngrok configuration for exposing services publicly"
+      "description": "Ngrok is the configuration for exposing a service publicly."
     },
     "NgrokTopLevel": {
       "properties": {
@@ -162,7 +162,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "Ngrok configuration applied to all services unless overridden in service"
+      "description": "NgrokTopLevel is the ngrok configuration applied to all services unless overridden per service."
     },
     "XMiniEnv": {
       "properties": {
@@ -177,7 +177,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "XMiniEnv top-level extension configuration for deploying to various targets"
+      "description": "XMiniEnv top-level extension configuration for deploying to various targets."
     },
     "XMiniEnvK8s": {
       "properties": {
@@ -200,7 +200,7 @@
         "context",
         "namespace"
       ],
-      "description": "Required fields for deploying to Kubernetes"
+      "description": "XMiniEnvK8s holds the fields required for deploying to Kubernetes."
     },
     "XMiniEnvK8sService": {
       "properties": {
@@ -336,7 +336,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "Service level configuration for controlling Kubernetes deployment properties"
+      "description": "XMiniEnvK8sService is the service level configuration controlling Kubernetes deployment properties."
     },
     "service": {
       "allOf": [

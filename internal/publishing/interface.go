@@ -1,7 +1,10 @@
 package publishing
 
-import "net/url"
+import (
+	"context"
+	"net/url"
+)
 
 type Client interface {
-	ServiceUrls(svcNames []string) (map[string]url.URL, error)
+	ServiceUrls(ctx context.Context, svcNames []string) (map[string]url.URL, error)
 }

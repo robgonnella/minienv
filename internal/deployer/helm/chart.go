@@ -1,3 +1,4 @@
+// Package helm deploys a compose project as a set of in-memory helm charts.
 package helm
 
 import (
@@ -17,6 +18,14 @@ import (
 // Fixed so Destroy can find the release without rebuilding the ngrok config.
 const ngrokReleaseName = "ngrok"
 
+// Chart file names and value keys the templates agree on.
+const (
+	nameKey            = "name"
+	valuesFile         = "values.yaml"
+	serviceAccountFile = "templates/serviceaccount.yaml"
+	deploymentFile     = "templates/deployment.yaml"
+)
+
 // The agent reads ngrok.yml only at startup, and the pod template is otherwise
 // constant, so this is what makes helm replace the pod when the config changes.
 func ngrokConfigChecksum(published []NgrokConfig) string {
@@ -28,7 +37,7 @@ func ngrokConfigChecksum(published []NgrokConfig) string {
 			svc.Namespace,
 			svc.EndpointName,
 			svc.ServiceName,
-			svc.Url,
+			svc.URL,
 			strconv.Itoa(int(svc.Port)),
 			svc.TrafficPolicy,
 		)
@@ -36,9 +45,9 @@ func ngrokConfigChecksum(published []NgrokConfig) string {
 
 	writeChecksumParts(
 		sum,
-		config.NGROK_CONFIG_MAP_NAME,
-		config.NGROK_CONFIG_KEY,
-		HELM_NGROK_CONFIG_MAP_TMPL,
+		config.NgrokConfigMapName,
+		config.NgrokConfigKey,
+		ngrokConfigMapTmpl,
 	)
 
 	return hex.EncodeToString(sum.Sum(nil))
@@ -50,7 +59,7 @@ func ngrokSecretChecksum(authToken string) string {
 
 	writeChecksumParts(
 		sum,
-		config.NGROK_SECRET_NAME,
+		config.NgrokSecretName,
 		helmNgrokSecretTmpl(authToken),
 	)
 
@@ -94,7 +103,7 @@ func (b *ChartBuilder) NgrokChart() (*helmchart.Chart, error) {
 	chart, err := helmloader.LoadFiles(files)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindChartLoad,
+			ErrChartLoad,
 			"failed to load in-memory ngrok chart: %w",
 			err,
 		)
@@ -111,7 +120,7 @@ func (b *ChartBuilder) ServiceChart(
 	chart, err := helmloader.LoadFiles(files)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindChartLoad,
+			ErrChartLoad,
 			"failed to load in-memory chart for %s: %w",
 			svcName,
 			err,
@@ -127,7 +136,7 @@ func (b *ChartBuilder) JobChart(svcName string) (*helmchart.Chart, error) {
 	chart, err := helmloader.LoadFiles(files)
 	if err != nil {
 		return nil, errs.Errorf(
-			KindChartLoad,
+			ErrChartLoad,
 			"failed to load in-memory chart for %s: %w",
 			svcName,
 			err,
@@ -144,13 +153,13 @@ func (b *ChartBuilder) NgrokValues(toPublish []NgrokConfig) map[string]any {
 
 	values := map[string]any{
 		"image": map[string]any{
-			"repository": config.NGROK_IMAGE_REPO,
-			"tag":        config.NGROK_IMAGE_TAG,
+			"repository": config.NgrokImageRepo,
+			"tag":        config.NgrokImageTag,
 		},
-		"configMapName":      config.NGROK_CONFIG_MAP_NAME,
-		"configKey":          config.NGROK_CONFIG_KEY,
-		"configVolMountPath": config.NGROK_CONFIG_VOL_MOUNT_PATH,
-		"secretName":         config.NGROK_SECRET_NAME,
+		"configMapName":      config.NgrokConfigMapName,
+		"configKey":          config.NgrokConfigKey,
+		"configVolMountPath": config.NgrokConfigVolMountPath,
+		"secretName":         config.NgrokSecretName,
 		"command": []string{
 			"ngrok",
 			"start",
@@ -161,28 +170,17 @@ func (b *ChartBuilder) NgrokValues(toPublish []NgrokConfig) map[string]any {
 		"strategy": map[string]any{"type": "Recreate"},
 	}
 
-	endpoints := []map[string]any{}
-	for _, svc := range toPublish {
-		endpoints = append(endpoints, map[string]any{
-			"endpointName":  svc.EndpointName,
-			"namespace":     svc.Namespace,
-			"serviceName":   svc.ServiceName,
-			"url":           svc.Url,
-			"port":          svc.Port,
-			"trafficPolicy": svc.TrafficPolicy,
-		})
-	}
-	values["endpoints"] = endpoints
+	values["endpoints"] = ngrokEndpointValues(toPublish)
 
 	values["volumes"] = []map[string]any{
 		{
-			"name": config.NGROK_CONFIG_MAP_NAME,
+			nameKey: config.NgrokConfigMapName,
 			"configMap": map[string]any{
-				"name": config.NGROK_CONFIG_MAP_NAME,
+				nameKey: config.NgrokConfigMapName,
 				"items": []map[string]any{
 					{
-						"key":  config.NGROK_CONFIG_KEY,
-						"path": config.NGROK_CONFIG_KEY,
+						"key":  config.NgrokConfigKey,
+						"path": config.NgrokConfigKey,
 					},
 				},
 			},
@@ -191,15 +189,15 @@ func (b *ChartBuilder) NgrokValues(toPublish []NgrokConfig) map[string]any {
 
 	values["volumeMounts"] = []map[string]any{
 		{
-			"name":      config.NGROK_CONFIG_MAP_NAME,
-			"mountPath": config.NGROK_CONFIG_VOL_MOUNT_PATH,
+			nameKey:     config.NgrokConfigMapName,
+			"mountPath": config.NgrokConfigVolMountPath,
 		},
 	}
 
 	values["envFrom"] = []map[string]any{
 		{
 			"secretRef": map[string]any{
-				"name": config.NGROK_SECRET_NAME,
+				nameKey: config.NgrokSecretName,
 			},
 		},
 	}
@@ -212,6 +210,22 @@ func (b *ChartBuilder) NgrokValues(toPublish []NgrokConfig) map[string]any {
 	return values
 }
 
+func ngrokEndpointValues(toPublish []NgrokConfig) []map[string]any {
+	endpoints := make([]map[string]any, 0, len(toPublish))
+	for _, svc := range toPublish {
+		endpoints = append(endpoints, map[string]any{
+			"endpointName":  svc.EndpointName,
+			"namespace":     svc.Namespace,
+			"serviceName":   svc.ServiceName,
+			"url":           svc.URL,
+			"port":          svc.Port,
+			"trafficPolicy": svc.TrafficPolicy,
+		})
+	}
+
+	return endpoints
+}
+
 func (b *ChartBuilder) commonFiles(svcName string) []*helmloader.BufferedFile {
 	return []*helmloader.BufferedFile{
 		{
@@ -220,69 +234,72 @@ func (b *ChartBuilder) commonFiles(svcName string) []*helmloader.BufferedFile {
 		},
 		{
 			Name: "templates/_helpers.tpl",
-			Data: []byte(HELM_HELPERS_TMPL),
+			Data: []byte(helpersTmpl),
 		},
 	}
 }
 
 func (b *ChartBuilder) serviceFiles(svcName string) []*helmloader.BufferedFile {
 	files := b.commonFiles(svcName)
+
 	return slices.Concat(files, []*helmloader.BufferedFile{
 		{
-			Name: "values.yaml",
-			Data: []byte(HELM_DEPLOYMENT_VALUES_TMPL),
+			Name: valuesFile,
+			Data: []byte(deploymentValuesTmpl),
 		},
 		{
-			Name: "templates/deployment.yaml",
-			Data: []byte(HELM_DEPLOYMENT_TMPL),
+			Name: deploymentFile,
+			Data: []byte(deploymentTmpl),
 		},
 		{
 			Name: "templates/service.yaml",
-			Data: []byte(HELM_SERVICE_TMPL),
+			Data: []byte(serviceTmpl),
 		},
 		{
-			Name: "templates/serviceaccount.yaml",
-			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
+			Name: serviceAccountFile,
+			Data: []byte(serviceAccountTmpl),
 		},
 	})
 }
 
 func (b *ChartBuilder) jobFiles(svcName string) []*helmloader.BufferedFile {
 	files := b.commonFiles(svcName)
+
 	return slices.Concat(files, []*helmloader.BufferedFile{
 		{
-			Name: "values.yaml",
-			Data: []byte(HELM_JOB_VALUES_TMPL),
+			Name: valuesFile,
+			Data: []byte(jobValuesTmpl),
 		},
 		{
-			Name: "templates/serviceaccount.yaml",
-			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
+			Name: serviceAccountFile,
+			Data: []byte(serviceAccountTmpl),
 		},
 		{
 			Name: "templates/job.yaml",
-			Data: []byte(HELM_JOB_TMPL),
+			Data: []byte(jobTmpl),
 		},
 	})
 }
 
 func (b *ChartBuilder) ngrokFiles() []*helmloader.BufferedFile {
 	files := b.commonFiles(ngrokReleaseName)
+
 	return slices.Concat(files, []*helmloader.BufferedFile{
 		{
-			Name: "values.yaml",
-			Data: []byte(HELM_NGROK_VALUES_TMPL),
+			Name: valuesFile,
+			Data: []byte(ngrokValuesTmpl),
 		},
 		{
-			Name: "templates/deployment.yaml",
-			Data: []byte(HELM_DEPLOYMENT_TMPL),
+			Name: deploymentFile,
+			Data: []byte(deploymentTmpl),
 		},
 		{
-			Name: "templates/serviceaccount.yaml",
-			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
+			Name: serviceAccountFile,
+			Data: []byte(serviceAccountTmpl),
 		},
 		{
 			Name: "templates/configmap.yaml",
-			Data: []byte(HELM_NGROK_CONFIG_MAP_TMPL),
+			Data: []byte(ngrokConfigMapTmpl),
 		},
 		{
 			Name: "templates/secret.yaml",
