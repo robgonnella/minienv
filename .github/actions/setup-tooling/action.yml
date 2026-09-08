@@ -1,0 +1,11 @@
+runs:
+  using: "composite"
+  steps:
+    - name: mise install
+      uses: jdx/mise-action@v4
+      with:
+        version: 2026.9.0
+        install: true
+        cache: true
+        env: true # [default: true] export mise environment variables
+        export_path: true # [default: true] add mise PATH entries to subsequent steps
