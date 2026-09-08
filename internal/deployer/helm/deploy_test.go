@@ -1,4 +1,4 @@
-package deployer_test
+package helm_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/robgonnella/minienv/internal/config"
-	"github.com/robgonnella/minienv/internal/deployer"
+	"github.com/robgonnella/minienv/internal/deployer/helm"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
 )
@@ -83,7 +83,7 @@ var _ = Describe("Helm", func() {
 		ext       *config.XMiniEnv
 		mockImage *imagemocks.MockClient
 		mockGit   *gitmocks.MockClient
-		subject   *deployer.Helm
+		subject   *helm.Helm
 	)
 
 	BeforeEach(func() {
@@ -98,7 +98,7 @@ var _ = Describe("Helm", func() {
 	})
 
 	JustBeforeEach(func() {
-		subject = deployer.NewHelm(deployer.HelmOptions{
+		subject = helm.New(helm.Options{
 			Ext:            ext,
 			ImageClient:    mockImage,
 			GitClient:      mockGit,
@@ -248,7 +248,7 @@ var _ = Describe("Helm", func() {
 
 			err := subject.DeployInDependencyOrder(rec.visit)
 
-			Expect(err).To(MatchError(deployer.KindComposeDependencyGraph))
+			Expect(err).To(MatchError(helm.KindComposeDependencyGraph))
 			Expect(rec.succeeded()).To(BeEmpty())
 		})
 
@@ -260,7 +260,7 @@ var _ = Describe("Helm", func() {
 
 			err := subject.DeployInDependencyOrder(rec.visit)
 
-			Expect(err).To(MatchError(deployer.KindComposeDependencyGraph))
+			Expect(err).To(MatchError(helm.KindComposeDependencyGraph))
 			Expect(rec.succeeded()).To(BeEmpty())
 		})
 
@@ -319,7 +319,7 @@ var _ = Describe("Helm", func() {
 
 			err := subject.DestroyInReverseDependencyOrder(rec.visit)
 
-			Expect(err).To(MatchError(deployer.KindComposeDependencyGraph))
+			Expect(err).To(MatchError(helm.KindComposeDependencyGraph))
 			Expect(rec.succeeded()).To(BeEmpty())
 		})
 	})
@@ -358,7 +358,7 @@ var _ = Describe("Helm", func() {
 
 			err := subject.DeployService(ctx, config.ComposeService{Name: "hello"})
 
-			Expect(err).To(MatchError(deployer.KindHelmMissingService))
+			Expect(err).To(MatchError(helm.KindMissingService))
 		})
 	})
 })

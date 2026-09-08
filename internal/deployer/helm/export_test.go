@@ -1,21 +1,10 @@
-package deployer
+package helm
 
 import (
 	"context"
 
 	"github.com/robgonnella/minienv/internal/config"
-	helmchart "helm.sh/helm/v3/pkg/chart"
 )
-
-// LoadChart exposes the in-memory chart assembly to the external test package.
-// The chart is built from Go string templates rather than files on disk, so
-// this is the only way to assert on what actually gets installed.
-func (h *Helm) LoadChart(
-	svcName string,
-	deploymentType config.K8sDeploymentType,
-) (*helmchart.Chart, error) {
-	return h.loadChart(svcName, deploymentType)
-}
 
 // InitProject exposes the half of Init that needs no cluster. Init itself
 // builds a helm action config against a live one, so this is the only way to
@@ -31,6 +20,14 @@ func (h *Helm) InitProject(project *config.ComposeProject) error {
 // this rather than InitProject.
 func (h *Helm) SetProject(project *config.ComposeProject) {
 	h.project = project
+}
+
+// ServicesToPublish exposes the endpoints initProject derived from the compose
+// project. Which services earn one — and in what order — is a decision made
+// here, not in the chart, so specs assert on it directly rather than digging it
+// back out of rendered ngrok values.
+func (h *Helm) ServicesToPublish() []NgrokConfig {
+	return h.servicesToPublish
 }
 
 // BuildAndPushServiceImages exposes the image-build pass to the external test
@@ -66,18 +63,4 @@ func (h *Helm) DeployService(
 	svc config.ComposeService,
 ) error {
 	return h.deployService(ctx, svc)
-}
-
-// NgrokChart exposes the single in-memory ngrok chart. Deploy only reaches it
-// after every service release has landed on a cluster, so this is the only way
-// to assert on the file set it carries and the token baked into it.
-func (h *Helm) NgrokChart() (*helmchart.Chart, error) {
-	return h.ngrokChart()
-}
-
-// NgrokValues exposes the values that chart renders against. They derive from
-// h.servicesToPublish, which only initProject populates, so specs pair the two:
-// InitProject to resolve the endpoints, this to see what reaches the templates.
-func (h *Helm) NgrokValues() map[string]any {
-	return h.ngrokValues()
 }

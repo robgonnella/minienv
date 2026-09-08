@@ -1,14 +1,10 @@
-package deployer
+package helm
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"hash"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
-	helmloader "helm.sh/helm/v3/pkg/chart/loader"
 	helmcli "helm.sh/helm/v3/pkg/cli"
 	k8sv1 "k8s.io/api/core/v1"
 	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
@@ -30,9 +25,6 @@ import (
 
 // bounds concurrent helm releases; each one waits on rollout
 const maxDeployConcurrency = 5
-
-// Fixed so Destroy can find the release without rebuilding the ngrok config.
-const ngrokReleaseName = "ngrok"
 
 const ngrokDeploymentTimeout = time.Minute
 
@@ -54,7 +46,7 @@ type NgrokConfig struct {
 	TrafficPolicy string `mapstructure:"trafficPolicy"`
 }
 
-type HelmOptions struct {
+type Options struct {
 	Ext            *config.XMiniEnv
 	ImageClient    image.Client
 	GitClient      git.Client
@@ -69,6 +61,7 @@ type Helm struct {
 	project           *config.ComposeProject
 	services          map[string]serviceTuple
 	servicesToPublish []NgrokConfig
+	chartBuilder      *ChartBuilder
 	actionConfig      *helmaction.Configuration
 	imageClient       image.Client
 	gitClient         git.Client
@@ -87,54 +80,7 @@ func publishedNames(published []NgrokConfig) []string {
 	return names
 }
 
-// The agent reads ngrok.yml only at startup, and the pod template is otherwise
-// constant, so this is what makes helm replace the pod when the config changes.
-func ngrokConfigChecksum(published []NgrokConfig) string {
-	sum := sha256.New()
-
-	for _, svc := range published {
-		writeChecksumParts(
-			sum,
-			svc.Namespace,
-			svc.EndpointName,
-			svc.ServiceName,
-			svc.Url,
-			strconv.Itoa(int(svc.Port)),
-			svc.TrafficPolicy,
-		)
-	}
-
-	writeChecksumParts(
-		sum,
-		config.NGROK_CONFIG_MAP_NAME,
-		config.NGROK_CONFIG_KEY,
-		HELM_NGROK_CONFIG_MAP_TMPL,
-	)
-
-	return hex.EncodeToString(sum.Sum(nil))
-}
-
-// Rotating the auth token otherwise leaves the agent on the old credential.
-func ngrokSecretChecksum(authToken string) string {
-	sum := sha256.New()
-
-	writeChecksumParts(
-		sum,
-		config.NGROK_SECRET_NAME,
-		helmNgrokSecretTmpl(authToken),
-	)
-
-	return hex.EncodeToString(sum.Sum(nil))
-}
-
-// Length-prefixed so different splits of the same bytes cannot hash alike.
-func writeChecksumParts(sum hash.Hash, parts ...string) {
-	for _, part := range parts {
-		_, _ = fmt.Fprintf(sum, "%d:%s", len(part), part)
-	}
-}
-
-func NewHelm(opts HelmOptions) *Helm {
+func New(opts Options) *Helm {
 	return &Helm{
 		ext:            opts.Ext,
 		actionConfig:   nil,
@@ -142,6 +88,7 @@ func NewHelm(opts HelmOptions) *Helm {
 		gitClient:      opts.GitClient,
 		publishClient:  opts.PublishClient,
 		ngrokAuthToken: opts.NgrokAuthToken,
+		chartBuilder:   NewChartBuilder(opts.NgrokAuthToken),
 		helmDriver:     opts.HelmDriver,
 		dryRun:         opts.DryRun,
 	}
@@ -304,7 +251,7 @@ func (h *Helm) deployService(
 	internalService, ok := h.services[svc.Name]
 	if !ok {
 		return errs.Errorf(
-			KindHelmMissingService,
+			KindMissingService,
 			"service not in map: %s",
 			svc.Name,
 		)
@@ -337,7 +284,10 @@ func (h *Helm) deployService(
 		)
 	}
 
-	chart, err := h.loadChart(svc.Name, internalService.extension.DeploymentType)
+	chart, err := h.chartBuilder.Chart(
+		svc.Name,
+		internalService.extension.DeploymentType,
+	)
 	if err != nil {
 		return err
 	}
@@ -616,7 +566,7 @@ func (h *Helm) installNgrokChart() error {
 		return h.uninstallNgrokChart()
 	}
 
-	chart, err := h.ngrokChart()
+	chart, err := h.chartBuilder.NgrokChart()
 	if err != nil {
 		return err
 	}
@@ -626,7 +576,7 @@ func (h *Helm) installNgrokChart() error {
 	return h.upgradeOrInstallChart(
 		context.Background(),
 		chart,
-		h.ngrokValues(),
+		h.chartBuilder.NgrokValues(h.servicesToPublish),
 		ngrokDeploymentTimeout,
 		false,
 	)
@@ -646,199 +596,8 @@ func (h *Helm) uninstallNgrokChart() error {
 	return h.uninstallChart(context.Background(), ngrokReleaseName)
 }
 
-func (h *Helm) ngrokValues() map[string]any {
-	if len(h.servicesToPublish) == 0 {
-		return nil
-	}
-
-	values := map[string]any{
-		"image": map[string]any{
-			"repository": config.NGROK_IMAGE_REPO,
-			"tag":        config.NGROK_IMAGE_TAG,
-		},
-		"configMapName":      config.NGROK_CONFIG_MAP_NAME,
-		"configKey":          config.NGROK_CONFIG_KEY,
-		"configVolMountPath": config.NGROK_CONFIG_VOL_MOUNT_PATH,
-		"secretName":         config.NGROK_SECRET_NAME,
-		"command": []string{
-			"ngrok",
-			"start",
-			"--all",
-			"--log=stdout",
-		},
-		// RollingUpdate would overlap two agents claiming the same endpoints.
-		"strategy": map[string]any{"type": "Recreate"},
-	}
-
-	endpoints := []map[string]any{}
-	for _, svc := range h.servicesToPublish {
-		endpoints = append(endpoints, map[string]any{
-			"endpointName":  svc.EndpointName,
-			"namespace":     svc.Namespace,
-			"serviceName":   svc.ServiceName,
-			"url":           svc.Url,
-			"port":          svc.Port,
-			"trafficPolicy": svc.TrafficPolicy,
-		})
-	}
-	values["endpoints"] = endpoints
-
-	values["volumes"] = []map[string]any{
-		{
-			"name": config.NGROK_CONFIG_MAP_NAME,
-			"configMap": map[string]any{
-				"name": config.NGROK_CONFIG_MAP_NAME,
-				"items": []map[string]any{
-					{
-						"key":  config.NGROK_CONFIG_KEY,
-						"path": config.NGROK_CONFIG_KEY,
-					},
-				},
-			},
-		},
-	}
-
-	values["volumeMounts"] = []map[string]any{
-		{
-			"name":      config.NGROK_CONFIG_MAP_NAME,
-			"mountPath": config.NGROK_CONFIG_VOL_MOUNT_PATH,
-		},
-	}
-
-	values["envFrom"] = []map[string]any{
-		{
-			"secretRef": map[string]any{
-				"name": config.NGROK_SECRET_NAME,
-			},
-		},
-	}
-
-	values["podAnnotations"] = map[string]string{
-		"checksum/config": ngrokConfigChecksum(h.servicesToPublish),
-		"checksum/secret": ngrokSecretChecksum(h.ngrokAuthToken),
-	}
-
-	return values
-}
-
-func (h *Helm) ngrokChart() (*helmchart.Chart, error) {
-	files := []*helmloader.BufferedFile{
-		{
-			Name: "Chart.yaml",
-			Data: []byte(helmChartYamlTmpl(ngrokReleaseName)),
-		},
-		{
-			Name: "values.yaml",
-			Data: []byte(HELM_NGROK_VALUES_TMPL),
-		},
-		{
-			Name: "templates/_helpers.tpl",
-			Data: []byte(HELM_HELPERS_TMPL),
-		},
-		{
-			Name: "templates/deployment.yaml",
-			Data: []byte(HELM_DEPLOYMENT_TMPL),
-		},
-		{
-			Name: "templates/serviceaccount.yaml",
-			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
-		},
-		{
-			Name: "templates/configmap.yaml",
-			Data: []byte(HELM_NGROK_CONFIG_MAP_TMPL),
-		},
-		{
-			Name: "templates/secret.yaml",
-			Data: []byte(helmNgrokSecretTmpl(h.ngrokAuthToken)),
-		},
-	}
-
-	chart, err := helmloader.LoadFiles(files)
-	if err != nil {
-		return nil, errs.Errorf(
-			KindChartLoad,
-			"failed to load in-memory ngrok chart: %w",
-			err,
-		)
-	}
-
-	return chart, nil
-}
-
 func (h *Helm) serviceReleaseExists(name string) bool {
 	client := helmaction.NewGet(h.actionConfig)
 	release, _ := client.Run(name)
 	return release != nil
-}
-
-func (h *Helm) loadChart(
-	svcName string,
-	deploymentType config.K8sDeploymentType,
-) (*helmchart.Chart, error) {
-	files := []*helmloader.BufferedFile{
-		{
-			Name: "Chart.yaml",
-			Data: []byte(helmChartYamlTmpl(svcName)),
-		},
-		{
-			Name: "templates/_helpers.tpl",
-			Data: []byte(HELM_HELPERS_TMPL),
-		},
-	}
-
-	if deploymentType == config.K8sJobDeploymentType {
-		files = append(files, h.getJobFiles()...)
-	} else {
-		files = append(files, h.getServiceFiles()...)
-	}
-
-	chart, err := helmloader.LoadFiles(files)
-	if err != nil {
-		return nil, errs.Errorf(
-			KindChartLoad,
-			"failed to load in-memory chart for %s: %w",
-			svcName,
-			err,
-		)
-	}
-
-	return chart, nil
-}
-
-func (h *Helm) getServiceFiles() []*helmloader.BufferedFile {
-	return []*helmloader.BufferedFile{
-		{
-			Name: "values.yaml",
-			Data: []byte(HELM_DEPLOYMENT_VALUES_TMPL),
-		},
-		{
-			Name: "templates/deployment.yaml",
-			Data: []byte(HELM_DEPLOYMENT_TMPL),
-		},
-		{
-			Name: "templates/service.yaml",
-			Data: []byte(HELM_SERVICE_TMPL),
-		},
-		{
-			Name: "templates/serviceaccount.yaml",
-			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
-		},
-	}
-}
-
-func (h *Helm) getJobFiles() []*helmloader.BufferedFile {
-	return []*helmloader.BufferedFile{
-		{
-			Name: "values.yaml",
-			Data: []byte(HELM_JOB_VALUES_TMPL),
-		},
-		{
-			Name: "templates/serviceaccount.yaml",
-			Data: []byte(HELM_SERVICE_ACCOUNT_TMPL),
-		},
-		{
-			Name: "templates/job.yaml",
-			Data: []byte(HELM_JOB_TMPL),
-		},
-	}
 }

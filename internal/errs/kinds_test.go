@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 
@@ -18,15 +19,32 @@ type declaredKind struct {
 	value string // string value, e.g. "config.invalid_port"
 }
 
-// parseDeclaredKinds reads every internal/*/error.go and returns the Kind
+// parseDeclaredKinds reads every error.go under internal and returns the Kind
 // constants it declares. Reading source rather than importing the packages is
 // what makes this catch a kind added later: Go cannot enumerate package-level
 // constants at runtime, so an import-based check would only ever assert on the
 // list someone remembered to update.
 func parseDeclaredKinds() []declaredKind {
-	files, err := filepath.Glob("../*/error.go")
-	Expect(err).ShouldNot(HaveOccurred())
-	Expect(files).ToNot(BeEmpty(), "no internal/*/error.go files found")
+	var files []string
+
+	// Walked rather than globbed: a nested package sits a level deeper than the
+	// rest and would fall out of a single-level glob unnoticed.
+	Expect(filepath.WalkDir(
+		"..",
+		func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !entry.IsDir() && entry.Name() == "error.go" {
+				files = append(files, path)
+			}
+
+			return nil
+		},
+	)).To(Succeed())
+
+	Expect(files).ToNot(BeEmpty(), "no error.go files found under internal")
 
 	var kinds []declaredKind
 

@@ -1,4 +1,4 @@
-package deployer_test
+package helm_test
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/robgonnella/minienv/internal/config"
-	"github.com/robgonnella/minienv/internal/deployer"
+	"github.com/robgonnella/minienv/internal/deployer/helm"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	"github.com/robgonnella/minienv/internal/image"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
@@ -48,7 +48,7 @@ var _ = Describe("Helm", func() {
 		mockImage   *imagemocks.MockClient
 		mockGit     *gitmocks.MockClient
 		mockPublish *publishingmocks.MockClient
-		subject     *deployer.Helm
+		subject     *helm.Helm
 		ngrokToken  string
 		alphaUrl    *url.URL
 	)
@@ -74,7 +74,7 @@ var _ = Describe("Helm", func() {
 	})
 
 	JustBeforeEach(func() {
-		subject = deployer.NewHelm(deployer.HelmOptions{
+		subject = helm.New(helm.Options{
 			Ext:            ext,
 			ImageClient:    mockImage,
 			GitClient:      mockGit,
@@ -414,17 +414,148 @@ var _ = Describe("Helm", func() {
 		})
 	})
 
-	Describe("the config the ngrok chart installs", func() {
+	Describe("the endpoints it resolves to publish", func() {
 		var project *config.ComposeProject
 
 		BeforeEach(func() {
 			ngrokToken = "fake-token-for-tests"
+			// Out of order and in a map, so any ordering in the result has to
+			// come from initProject's own sort.
 			project = &config.ComposeProject{
 				Name: "test-project",
 				Services: types.Services{
+					"beta":  exposedService("beta", 3001),
 					"alpha": exposedService("alpha", 3000),
 				},
 			}
+		})
+
+		// The endpoint name is namespaced so two developers deploying the same
+		// compose file cannot collide on the shared account, while the upstream
+		// stays the bare service name k8s DNS resolves inside the namespace.
+		It("namespaces each endpoint and keeps the bare service name", func() {
+			Expect(subject.InitProject(project)).To(Succeed())
+
+			Expect(subject.ServicesToPublish()).To(HaveExactElements(
+				helm.NgrokConfig{
+					Namespace:    "namespace",
+					EndpointName: "namespace-alpha",
+					ServiceName:  "alpha",
+					Port:         3000,
+				},
+				helm.NgrokConfig{
+					Namespace:    "namespace",
+					EndpointName: "namespace-beta",
+					ServiceName:  "beta",
+					Port:         3001,
+				},
+			))
+		})
+
+		// This ordering is what the chart's config checksum hashes. Unstable, it
+		// replaces the agent pod on a deploy that changed nothing, reassigning
+		// every unreserved url.
+		It("resolves the same order every time", func() {
+			Expect(subject.InitProject(project)).To(Succeed())
+			first := subject.ServicesToPublish()
+
+			for range 5 {
+				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.ServicesToPublish()).To(Equal(first))
+			}
+		})
+
+		// An upstream is a hostname *and* a port, and the agent dials outbound.
+		// compose.yml keeps hello and hello2 both on 8080, and this spec is what
+		// says that is deliberate.
+		It("gives two services on the same port their own endpoints", func() {
+			project.Services = types.Services{
+				"beta":  exposedService("beta", 8080),
+				"alpha": exposedService("alpha", 8080),
+			}
+
+			Expect(subject.InitProject(project)).To(Succeed())
+
+			Expect(subject.ServicesToPublish()).To(HaveExactElements(
+				HaveField("EndpointName", "namespace-alpha"),
+				HaveField("EndpointName", "namespace-beta"),
+			))
+		})
+
+		Context("resolved for a different namespace", func() {
+			BeforeEach(func() {
+				ext.K8s.Namespace = "other-namespace"
+			})
+
+			It("names each endpoint after that namespace", func() {
+				Expect(subject.InitProject(project)).To(Succeed())
+
+				Expect(subject.ServicesToPublish()).To(ContainElement(
+					HaveField("EndpointName", "other-namespace-alpha"),
+				))
+			})
+		})
+
+		Context("with a service declaring no ngrok block", func() {
+			BeforeEach(func() {
+				project.Services = types.Services{
+					"plain": {Name: "plain", Image: "reg/plain:v1"},
+				}
+			})
+
+			It("publishes nothing for it", func() {
+				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.ServicesToPublish()).To(BeEmpty())
+			})
+		})
+
+		Context("with a service flagged skip", func() {
+			BeforeEach(func() {
+				skipped := exposedService("skipped", 3000)
+				skipped.Extensions = types.Extensions{
+					config.K8S_SERVICE_EXTENSION: map[string]any{
+						"skip":  true,
+						"ngrok": map[string]any{"port": 3000},
+					},
+				}
+				project.Services = types.Services{"skipped": skipped}
+			})
+
+			// Never installed, so its endpoint would have no upstream.
+			It("publishes nothing for it", func() {
+				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.ServicesToPublish()).To(BeEmpty())
+			})
+		})
+
+		Context("with a job carrying ngrok config", func() {
+			BeforeEach(func() {
+				job := exposedService("job", 3000)
+				job.Extensions = types.Extensions{
+					config.K8S_SERVICE_EXTENSION: map[string]any{
+						"deploymentType": "job",
+						"ngrok":          map[string]any{"port": 3000},
+					},
+				}
+				project.Services = types.Services{"job": job}
+			})
+
+			// A job renders no Service for an upstream to route to.
+			It("publishes nothing for it", func() {
+				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.ServicesToPublish()).To(BeEmpty())
+			})
+		})
+
+		Context("with no auth token", func() {
+			BeforeEach(func() {
+				ngrokToken = ""
+			})
+
+			It("publishes nothing even for a configured service", func() {
+				Expect(subject.InitProject(project)).To(Succeed())
+				Expect(subject.ServicesToPublish()).To(BeEmpty())
+			})
 		})
 
 		// An endpoint's assigned url is ephemeral, and ngrok can only bind a
@@ -435,12 +566,9 @@ var _ = Describe("Helm", func() {
 		It("never adopts the url the api reports", func() {
 			Expect(subject.InitProject(project)).To(Succeed())
 
-			endpoints := subject.NgrokValues()["endpoints"]
-
-			Expect(endpoints).To(HaveLen(1))
-			Expect(endpoints).To(
-				ConsistOf(HaveKeyWithValue("url", BeEmpty())),
-			)
+			Expect(subject.ServicesToPublish()).To(HaveEach(
+				HaveField("Url", BeEmpty()),
+			))
 			mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
 		})
 
@@ -458,11 +586,9 @@ var _ = Describe("Helm", func() {
 
 			Expect(subject.InitProject(project)).To(Succeed())
 
-			Expect(subject.NgrokValues()["endpoints"]).To(
-				ConsistOf(
-					HaveKeyWithValue("url", "https://reserved.ngrok.app"),
-				),
-			)
+			Expect(subject.ServicesToPublish()).To(ConsistOf(
+				HaveField("Url", "https://reserved.ngrok.app"),
+			))
 			mockPublish.AssertNotCalled(GinkgoT(), "ServiceUrls")
 		})
 	})

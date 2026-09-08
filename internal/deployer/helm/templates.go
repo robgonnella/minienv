@@ -1,4 +1,4 @@
-package deployer
+package helm
 
 import (
 	"encoding/base64"

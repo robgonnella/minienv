@@ -10,6 +10,7 @@ import (
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/core"
 	"github.com/robgonnella/minienv/internal/deployer"
+	"github.com/robgonnella/minienv/internal/deployer/helm"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
@@ -121,7 +122,7 @@ func (l *Loader) loadActiveDeployer(
 	ext *config.XMiniEnv,
 ) (deployer.Deployer, error) {
 	deployers := []deployer.Deployer{
-		deployer.NewHelm(deployer.HelmOptions{
+		helm.New(helm.Options{
 			Ext:            ext,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,

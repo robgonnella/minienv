@@ -1,4 +1,4 @@
-package deployer_test
+package helm_test
 
 import (
 	"encoding/base64"
@@ -12,9 +12,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/robgonnella/minienv/internal/config"
-	"github.com/robgonnella/minienv/internal/deployer"
+	"github.com/robgonnella/minienv/internal/deployer/helm"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
-	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
 	helmengine "helm.sh/helm/v3/pkg/engine"
@@ -58,6 +57,17 @@ func templateNamed(rendered map[string]string, suffix string) string {
 
 	Fail("no rendered template ending in " + suffix)
 	return ""
+}
+
+// fileNames lists the chart's raw file set, which is what says a chart carries
+// only the templates its deployment type needs.
+func fileNames(chart *helmchart.Chart) []string {
+	names := []string{}
+	for _, f := range chart.Raw {
+		names = append(names, f.Name)
+	}
+
+	return names
 }
 
 // The name is randomized per render, so specs need the value itself.
@@ -138,26 +148,45 @@ func podAnnotation(rendered map[string]string, key string) string {
 // serialize it into a rendered chart or a failure report.
 const fakeNgrokToken = "fake-token-for-tests"
 
-var _ = Describe("Helm", func() {
+// publishable is one endpoint shaped the way initProject emits them. Built by
+// hand so these specs state exactly what reaches the templates; which services
+// earn an endpoint, and in what order, is asserted against initProject itself.
+func publishable(name string, port uint16) helm.NgrokConfig {
+	return helm.NgrokConfig{
+		Namespace:    "namespace",
+		EndpointName: "namespace-" + name,
+		ServiceName:  name,
+		Port:         port,
+	}
+}
+
+var _ = Describe("ChartBuilder", func() {
 	var (
-		ext        *config.XMiniEnv
-		mockImage  *imagemocks.MockClient
-		mockGit    *gitmocks.MockClient
-		subject    *deployer.Helm
-		ngrokToken string
+		subject *helm.ChartBuilder
+		ext     *config.XMiniEnv
+		mockGit *gitmocks.MockClient
 	)
 
-	// Assembled lazily: specs mutate ext, svc and ngrokToken in their own
-	// bodies before resolving.
-	extOpts := func(
-		svc config.ComposeService,
-	) config.XMiniEnvK8sServiceOptions {
-		return config.XMiniEnvK8sServiceOptions{
-			MainExt:      ext,
-			Service:      svc,
-			GitClient:    mockGit,
-			NgrokEnabled: ngrokToken != "",
-		}
+	// Specs render against values production actually produces rather than a
+	// hand-written map, so a key the templates read cannot drift from the one
+	// ToChartValuesMap writes.
+	resolvedValues := func(svc config.ComposeService) map[string]any {
+		GinkgoHelper()
+
+		svcExt, err := config.NewXMiniEnvK8sService(
+			config.XMiniEnvK8sServiceOptions{
+				MainExt:      ext,
+				Service:      svc,
+				GitClient:    mockGit,
+				NgrokEnabled: false,
+			},
+		)
+		Expect(err).ShouldNot(HaveOccurred())
+
+		values, err := svcExt.ToChartValuesMap()
+		Expect(err).ShouldNot(HaveOccurred())
+
+		return values
 	}
 
 	BeforeEach(func() {
@@ -167,40 +196,53 @@ var _ = Describe("Helm", func() {
 				Namespace: "namespace",
 			},
 		}
-		mockImage = imagemocks.NewMockClient(GinkgoT())
 		mockGit = gitmocks.NewMockClient(GinkgoT())
-		// Reset explicitly: the suite runs --randomize-all, so a token left set
-		// by the ngrok specs would silently enable ngrok for whatever ran next.
-		ngrokToken = ""
+		subject = helm.NewChartBuilder(fakeNgrokToken)
 	})
 
-	JustBeforeEach(func() {
-		subject = deployer.NewHelm(deployer.HelmOptions{
-			Ext:            ext,
-			ImageClient:    mockImage,
-			GitClient:      mockGit,
-			NgrokAuthToken: ngrokToken,
-			DryRun:         false,
+	// The dispatch deployService relies on. It lives here rather than in
+	// deployService because that method runs straight on into a cluster call,
+	// which leaves the branch untestable anywhere else.
+	Describe("Chart", func() {
+		It("builds a job chart for a job deployment type", func() {
+			chart, err := subject.Chart("hello", config.K8sJobDeploymentType)
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(fileNames(chart)).To(ContainElement("templates/job.yaml"))
+			Expect(fileNames(chart)).
+				ToNot(ContainElement("templates/deployment.yaml"))
+		})
+
+		It("builds a service chart for a service deployment type", func() {
+			chart, err := subject.Chart("hello", config.K8sServiceDeploymentType)
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(fileNames(chart)).
+				To(ContainElement("templates/deployment.yaml"))
+			Expect(fileNames(chart)).ToNot(ContainElement("templates/job.yaml"))
+		})
+
+		// K8sDeploymentType is a string alias, so an unset extension arrives
+		// here as "" rather than as the service default.
+		It("falls back to a service chart for an unset deployment type", func() {
+			chart, err := subject.Chart("hello", "")
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(fileNames(chart)).
+				To(ContainElement("templates/deployment.yaml"))
 		})
 	})
 
-	Describe("LoadChart (service)", func() {
+	Describe("ServiceChart", func() {
 		It("assembles every chart file in memory", func() {
-			chart, err := subject.LoadChart(
-				"hello",
-				config.K8sServiceDeploymentType,
-			)
+			chart, err := subject.ServiceChart("hello")
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Name()).To(Equal("hello"))
 			Expect(chart.Metadata.Version).To(Equal("0.1.0"))
 
-			names := []string{}
-			for _, f := range chart.Raw {
-				names = append(names, f.Name)
-			}
 			// ngrok lives in its own release for the namespace.
-			Expect(names).To(ConsistOf(
+			Expect(fileNames(chart)).To(ConsistOf(
 				"Chart.yaml",
 				"values.yaml",
 				"templates/_helpers.tpl",
@@ -211,10 +253,7 @@ var _ = Describe("Helm", func() {
 		})
 
 		It("produces a chart helm can validate", func() {
-			chart, err := subject.LoadChart(
-				"hello",
-				config.K8sServiceDeploymentType,
-			)
+			chart, err := subject.ServiceChart("hello")
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
@@ -223,7 +262,6 @@ var _ = Describe("Helm", func() {
 		Context("rendered against resolved service values", func() {
 			var (
 				svc      config.ComposeService
-				values   map[string]any
 				rendered map[string]string
 			)
 
@@ -238,19 +276,10 @@ var _ = Describe("Helm", func() {
 			})
 
 			JustBeforeEach(func() {
-				svcExt, err := config.NewXMiniEnvK8sService(extOpts(svc))
+				chart, err := subject.ServiceChart("hello")
 				Expect(err).ShouldNot(HaveOccurred())
 
-				values, err = svcExt.ToChartValuesMap()
-				Expect(err).ShouldNot(HaveOccurred())
-
-				chart, err := subject.LoadChart(
-					"hello",
-					config.K8sServiceDeploymentType,
-				)
-				Expect(err).ShouldNot(HaveOccurred())
-
-				rendered = render(chart, values)
+				rendered = render(chart, resolvedValues(svc))
 			})
 
 			It("renders the resolved image into the deployment", func() {
@@ -325,23 +354,15 @@ var _ = Describe("Helm", func() {
 		})
 	})
 
-	Describe("LoadChart (job)", func() {
+	Describe("JobChart", func() {
 		It("assembles only the files a job needs", func() {
-			chart, err := subject.LoadChart(
-				"hello",
-				config.K8sJobDeploymentType,
-			)
+			chart, err := subject.JobChart("hello")
 
 			Expect(err).ShouldNot(HaveOccurred())
 
-			names := []string{}
-			for _, f := range chart.Raw {
-				names = append(names, f.Name)
-			}
-
 			// No service, and no ngrok configmap or secret: a job serves no
 			// traffic, so there is nothing to expose and no token to mount.
-			Expect(names).To(ConsistOf(
+			Expect(fileNames(chart)).To(ConsistOf(
 				"Chart.yaml",
 				"values.yaml",
 				"templates/_helpers.tpl",
@@ -351,20 +372,17 @@ var _ = Describe("Helm", func() {
 		})
 
 		It("produces a chart that validates", func() {
-			chart, err := subject.LoadChart(
-				"hello",
-				config.K8sJobDeploymentType,
-			)
+			chart, err := subject.JobChart("hello")
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
 		})
 
 		It("names the chart after the service so destroy can find it", func() {
-			first, err := subject.LoadChart("hello", config.K8sJobDeploymentType)
+			first, err := subject.JobChart("hello")
 			Expect(err).ShouldNot(HaveOccurred())
 
-			second, err := subject.LoadChart("hello", config.K8sJobDeploymentType)
+			second, err := subject.JobChart("hello")
 			Expect(err).ShouldNot(HaveOccurred())
 
 			Expect(first.Name()).To(Equal("hello"))
@@ -374,7 +392,7 @@ var _ = Describe("Helm", func() {
 		// A Job's spec.template and spec.selector are immutable, so an upgrade
 		// cannot patch one in place.
 		It("renders a new job name on every render", func() {
-			chart, err := subject.LoadChart("hello", config.K8sJobDeploymentType)
+			chart, err := subject.JobChart("hello")
 			Expect(err).ShouldNot(HaveOccurred())
 
 			values := map[string]any{}
@@ -392,10 +410,7 @@ var _ = Describe("Helm", func() {
 		It("keeps a long service name within the job name limit", func() {
 			longName := strings.Repeat("a", 60)
 
-			chart, err := subject.LoadChart(
-				longName,
-				config.K8sJobDeploymentType,
-			)
+			chart, err := subject.JobChart(longName)
 			Expect(err).ShouldNot(HaveOccurred())
 
 			name := jobName(render(chart, map[string]any{}))
@@ -407,7 +422,6 @@ var _ = Describe("Helm", func() {
 		Context("rendered against resolved job values", func() {
 			var (
 				svc      config.ComposeService
-				values   map[string]any
 				chart    *helmchart.Chart
 				rendered map[string]string
 			)
@@ -426,18 +440,12 @@ var _ = Describe("Helm", func() {
 			})
 
 			JustBeforeEach(func() {
-				svcExt, err := config.NewXMiniEnvK8sService(extOpts(svc))
-				Expect(err).ShouldNot(HaveOccurred())
-				Expect(svcExt.DeploymentType).
-					To(Equal(config.K8sJobDeploymentType))
+				var err error
 
-				values, err = svcExt.ToChartValuesMap()
+				chart, err = subject.JobChart("migrate")
 				Expect(err).ShouldNot(HaveOccurred())
 
-				chart, err = subject.LoadChart("migrate", svcExt.DeploymentType)
-				Expect(err).ShouldNot(HaveOccurred())
-
-				rendered = render(chart, values)
+				rendered = render(chart, resolvedValues(svc))
 			})
 
 			It("renders a batch job that never restarts", func() {
@@ -505,38 +513,20 @@ var _ = Describe("Helm", func() {
 		})
 	})
 
+	Describe("NgrokValues", func() {
+		It("resolves no values with nothing to publish", func() {
+			Expect(subject.NgrokValues(nil)).To(BeNil())
+			Expect(subject.NgrokValues([]helm.NgrokConfig{})).To(BeNil())
+		})
+	})
+
 	Describe("NgrokChart", func() {
-		var project *config.ComposeProject
-
-		BeforeEach(func() {
-			ngrokToken = fakeNgrokToken
-
-			// Out of order and in a map, so any ordering must come from
-			// initProject's own sort.
-			project = &config.ComposeProject{
-				Name: "test-project",
-				Services: types.Services{
-					"beta":  exposedService("beta", 3001),
-					"alpha": exposedService("alpha", 3000),
-				},
-			}
-		})
-
-		JustBeforeEach(func() {
-			Expect(subject.InitProject(project)).To(Succeed())
-		})
-
 		It("assembles only the files the ngrok release needs", func() {
 			chart, err := subject.NgrokChart()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			names := []string{}
-			for _, f := range chart.Raw {
-				names = append(names, f.Name)
-			}
-
 			// No service.yaml: the agent dials out.
-			Expect(names).To(ConsistOf(
+			Expect(fileNames(chart)).To(ConsistOf(
 				"Chart.yaml",
 				"values.yaml",
 				"templates/_helpers.tpl",
@@ -561,81 +551,53 @@ var _ = Describe("Helm", func() {
 			Expect(chart.Validate()).To(Succeed())
 		})
 
-		Context("with nothing to publish", func() {
-			BeforeEach(func() {
-				project.Services = types.Services{
-					"plain": {Name: "plain", Image: "reg/plain:v1"},
+		It("base64 encodes the ngrok auth token into the secret", func() {
+			chart, err := subject.NgrokChart()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			var secret string
+			for _, f := range chart.Raw {
+				if f.Name == "templates/secret.yaml" {
+					secret = string(f.Data)
 				}
-			})
-
-			It("resolves no values", func() {
-				Expect(subject.NgrokValues()).To(BeNil())
-			})
-		})
-
-		Context("with a service flagged skip", func() {
-			BeforeEach(func() {
-				skipped := exposedService("skipped", 3000)
-				skipped.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
-						"skip":  true,
-						"ngrok": map[string]any{"port": 3000},
-					},
-				}
-				project.Services = types.Services{"skipped": skipped}
-			})
-
-			// Never installed, so its endpoint would have no upstream.
-			It("publishes nothing for it", func() {
-				Expect(subject.NgrokValues()).To(BeNil())
-			})
-		})
-
-		Context("with no auth token", func() {
-			BeforeEach(func() {
-				ngrokToken = ""
-			})
-
-			It("resolves no values even for a configured service", func() {
-				Expect(subject.NgrokValues()).To(BeNil())
-			})
-		})
-
-		Context("with a job carrying ngrok config", func() {
-			BeforeEach(func() {
-				job := exposedService("job", 3000)
-				job.Extensions = types.Extensions{
-					config.K8S_SERVICE_EXTENSION: map[string]any{
-						"deploymentType": "job",
-						"ngrok":          map[string]any{"port": 3000},
-					},
-				}
-				project.Services = types.Services{"job": job}
-			})
-
-			// A job renders no Service for an upstream to route to.
-			It("publishes nothing for it", func() {
-				Expect(subject.NgrokValues()).To(BeNil())
-			})
-		})
-
-		Context("rendered against the resolved endpoints", func() {
-			var rendered map[string]string
-
-			renderNgrok := func() map[string]string {
-				GinkgoHelper()
-
-				chart, err := subject.NgrokChart()
-				Expect(err).ShouldNot(HaveOccurred())
-
-				return render(chart, subject.NgrokValues())
 			}
 
-			JustBeforeEach(func() {
-				rendered = renderNgrok()
+			Expect(secret).To(ContainSubstring(
+				base64.StdEncoding.EncodeToString([]byte(fakeNgrokToken)),
+			))
+			Expect(secret).ToNot(ContainSubstring(fakeNgrokToken))
+		})
+
+		Context("rendered against the endpoints to publish", func() {
+			var (
+				toPublish []helm.NgrokConfig
+				rendered  map[string]string
+			)
+
+			renderNgrok := func(
+				builder *helm.ChartBuilder,
+				endpoints []helm.NgrokConfig,
+			) map[string]string {
+				GinkgoHelper()
+
+				chart, err := builder.NgrokChart()
+				Expect(err).ShouldNot(HaveOccurred())
+
+				return render(chart, builder.NgrokValues(endpoints))
+			}
+
+			BeforeEach(func() {
+				toPublish = []helm.NgrokConfig{
+					publishable("alpha", 3000),
+					publishable("beta", 3001),
+				}
 			})
 
-			It("publishes every configured service from one config", func() {
+			JustBeforeEach(func() {
+				rendered = renderNgrok(subject, toPublish)
+			})
+
+			It("publishes every endpoint from one config", func() {
 				cfg := ngrokAgentConfigFrom(rendered)
 
 				Expect(cfg.Version).To(Equal(3))
@@ -644,12 +606,32 @@ var _ = Describe("Helm", func() {
 				// The endpoint name is namespaced so two environments cannot
 				// collide on the account, while the upstream stays the bare
 				// service name that k8s DNS resolves inside the namespace.
-				//
-				// Sorted, not map order: this feeds the checksum.
 				Expect(cfg.Endpoints[0].Name).To(Equal("namespace-alpha"))
 				Expect(cfg.Endpoints[0].Upstream.Url).To(Equal("alpha:3000"))
 				Expect(cfg.Endpoints[1].Name).To(Equal("namespace-beta"))
 				Expect(cfg.Endpoints[1].Upstream.Url).To(Equal("beta:3001"))
+			})
+
+			// An upstream is a hostname *and* a port, and the agent dials
+			// outbound. compose.yml keeps hello and hello2 both on 8080, and
+			// this spec is what says that is deliberate.
+			Context("with two endpoints on the same port", func() {
+				BeforeEach(func() {
+					toPublish = []helm.NgrokConfig{
+						publishable("alpha", 8080),
+						publishable("beta", 8080),
+					}
+				})
+
+				It("gives each its own endpoint and upstream", func() {
+					cfg := ngrokAgentConfigFrom(rendered)
+
+					Expect(cfg.Endpoints).To(HaveLen(2))
+					Expect(cfg.Endpoints[0].Name).To(Equal("namespace-alpha"))
+					Expect(cfg.Endpoints[0].Upstream.Url).To(Equal("alpha:8080"))
+					Expect(cfg.Endpoints[1].Name).To(Equal("namespace-beta"))
+					Expect(cfg.Endpoints[1].Upstream.Url).To(Equal("beta:8080"))
+				})
 			})
 
 			It("omits the url when no domain is reserved", func() {
@@ -658,60 +640,48 @@ var _ = Describe("Helm", func() {
 				}
 			})
 
-			// The agent reads ngrok.yml only at startup, so without this the
-			// ConfigMap updates and the agent serves the previous set.
-			It("changes the config checksum when an endpoint is added", func() {
-				before := podAnnotation(rendered, "checksum/config")
-
-				project.Services["gamma"] = exposedService("gamma", 3002)
-				Expect(subject.InitProject(project)).To(Succeed())
-
-				Expect(podAnnotation(renderNgrok(), "checksum/config")).
-					ToNot(Equal(before))
-			})
-
-			It("changes the config checksum when a port changes", func() {
-				before := podAnnotation(rendered, "checksum/config")
-
-				project.Services["alpha"] = exposedService("alpha", 3009)
-				Expect(subject.InitProject(project)).To(Succeed())
-
-				Expect(podAnnotation(renderNgrok(), "checksum/config")).
-					ToNot(Equal(before))
-			})
-
-			// A deploy that changed nothing must not replace the pod, or every
-			// unreserved URL is reassigned. Repeating exercises the sort.
-			It("keeps the config checksum stable across re-resolution", func() {
-				before := podAnnotation(rendered, "checksum/config")
-
-				for range 5 {
-					Expect(subject.InitProject(project)).To(Succeed())
-
-					Expect(podAnnotation(renderNgrok(), "checksum/config")).
-						To(Equal(before))
-				}
-			})
-
-			// Nothing else in the pod template changes on rotation.
-			It("changes the secret checksum when the token rotates", func() {
-				before := podAnnotation(rendered, "checksum/secret")
-
-				rotated := deployer.NewHelm(deployer.HelmOptions{
-					Ext:            ext,
-					ImageClient:    mockImage,
-					GitClient:      mockGit,
-					NgrokAuthToken: "a-different-token",
-					DryRun:         false,
+			Context("with a reserved domain", func() {
+				BeforeEach(func() {
+					alpha := publishable("alpha", 3000)
+					alpha.Url = "https://example.ngrok.app"
+					toPublish = []helm.NgrokConfig{alpha}
 				})
-				Expect(rotated.InitProject(project)).To(Succeed())
 
-				chart, err := rotated.NgrokChart()
-				Expect(err).ShouldNot(HaveOccurred())
+				It("pins the endpoint to it", func() {
+					cfg := ngrokAgentConfigFrom(rendered)
 
-				Expect(podAnnotation(
-					render(chart, rotated.NgrokValues()), "checksum/secret",
-				)).ToNot(Equal(before))
+					Expect(cfg.Endpoints).To(HaveLen(1))
+					Expect(cfg.Endpoints[0].Url).
+						To(Equal("https://example.ngrok.app"))
+				})
+			})
+
+			Context("with a multi-line traffic policy", func() {
+				BeforeEach(func() {
+					alpha := publishable("alpha", 3000)
+					alpha.TrafficPolicy = "on_http_request:\n" +
+						"  - actions:\n" +
+						"      - type: deny\n"
+					toPublish = []helm.NgrokConfig{alpha}
+				})
+
+				// The documented form is a block scalar; interpolated flat it
+				// breaks out of the ConfigMap's own block.
+				It("nests the policy under the endpoint as yaml", func() {
+					cfg := ngrokAgentConfigFrom(rendered)
+
+					Expect(cfg.Endpoints).To(HaveLen(1))
+					Expect(cfg.Endpoints[0].TrafficPolicy).
+						To(HaveKey("on_http_request"))
+				})
+			})
+
+			Context("with no traffic policy", func() {
+				It("omits the traffic policy key", func() {
+					for _, ep := range ngrokAgentConfigFrom(rendered).Endpoints {
+						Expect(ep.TrafficPolicy).To(BeNil())
+					}
+				})
 			})
 
 			It("runs one agent for every endpoint at once", func() {
@@ -736,130 +706,49 @@ var _ = Describe("Helm", func() {
 					To(ContainSubstring("type: Recreate"))
 			})
 
-			It("base64 encodes the ngrok auth token into the secret", func() {
-				chart, err := subject.NgrokChart()
-				Expect(err).ShouldNot(HaveOccurred())
+			// The agent reads ngrok.yml only at startup, so without this the
+			// ConfigMap updates and the agent serves the previous set.
+			It("changes the config checksum when an endpoint is added", func() {
+				before := podAnnotation(rendered, "checksum/config")
 
-				var secret string
-				for _, f := range chart.Raw {
-					if f.Name == "templates/secret.yaml" {
-						secret = string(f.Data)
-					}
+				added := append(toPublish, publishable("gamma", 3002))
+
+				Expect(podAnnotation(
+					renderNgrok(subject, added), "checksum/config",
+				)).ToNot(Equal(before))
+			})
+
+			It("changes the config checksum when a port changes", func() {
+				before := podAnnotation(rendered, "checksum/config")
+
+				toPublish[0].Port = 3009
+
+				Expect(podAnnotation(
+					renderNgrok(subject, toPublish), "checksum/config",
+				)).ToNot(Equal(before))
+			})
+
+			// A deploy that changed nothing must not replace the pod, or every
+			// unreserved URL is reassigned.
+			It("keeps the config checksum stable for the same endpoints", func() {
+				before := podAnnotation(rendered, "checksum/config")
+
+				for range 5 {
+					Expect(podAnnotation(
+						renderNgrok(subject, toPublish), "checksum/config",
+					)).To(Equal(before))
 				}
-
-				Expect(secret).To(ContainSubstring(
-					base64.StdEncoding.EncodeToString([]byte(fakeNgrokToken)),
-				))
-				Expect(secret).ToNot(ContainSubstring(fakeNgrokToken))
 			})
 
-			// An upstream is a hostname *and* a port, and the agent dials
-			// outbound. compose.yml keeps hello and hello2 both on 8080, and
-			// this spec is what says that is deliberate.
-			Context("with two services publishing the same port", func() {
-				BeforeEach(func() {
-					project.Services = types.Services{
-						"beta":  exposedService("beta", 8080),
-						"alpha": exposedService("alpha", 8080),
-					}
-				})
+			// Nothing else in the pod template changes on rotation.
+			It("changes the secret checksum when the token rotates", func() {
+				before := podAnnotation(rendered, "checksum/secret")
 
-				It("gives each its own endpoint and upstream", func() {
-					cfg := ngrokAgentConfigFrom(rendered)
+				rotated := helm.NewChartBuilder("a-different-token")
 
-					Expect(cfg.Endpoints).To(HaveLen(2))
-					Expect(cfg.Endpoints[0].Name).To(Equal("namespace-alpha"))
-					Expect(cfg.Endpoints[0].Upstream.Url).To(Equal("alpha:8080"))
-					Expect(cfg.Endpoints[1].Name).To(Equal("namespace-beta"))
-					Expect(cfg.Endpoints[1].Upstream.Url).To(Equal("beta:8080"))
-				})
-			})
-
-			// The whole point of namespacing the endpoint name: two developers
-			// deploying the same compose file must not collide on the shared
-			// ngrok account. The upstream is identical in both, which is fine
-			// because each resolves inside its own namespace.
-			Context("resolved for a different namespace", func() {
-				It("names the endpoint after that namespace", func() {
-					ext.K8s.Namespace = "other-namespace"
-					other := deployer.NewHelm(deployer.HelmOptions{
-						Ext:            ext,
-						ImageClient:    mockImage,
-						GitClient:      mockGit,
-						NgrokAuthToken: ngrokToken,
-						DryRun:         false,
-					})
-					Expect(other.InitProject(project)).To(Succeed())
-
-					chart, err := other.NgrokChart()
-					Expect(err).ShouldNot(HaveOccurred())
-
-					cfg := ngrokAgentConfigFrom(
-						render(chart, other.NgrokValues()),
-					)
-
-					Expect(cfg.Endpoints[0].Name).
-						To(Equal("other-namespace-alpha"))
-					Expect(cfg.Endpoints[0].Upstream.Url).To(Equal("alpha:3000"))
-				})
-			})
-
-			Context("with a reserved domain", func() {
-				BeforeEach(func() {
-					svc := exposedService("alpha", 3000)
-					svc.Extensions = types.Extensions{
-						config.K8S_SERVICE_EXTENSION: map[string]any{
-							"ngrok": map[string]any{
-								"port": 3000,
-								"url":  "https://example.ngrok.app",
-							},
-						},
-					}
-					project.Services = types.Services{"alpha": svc}
-				})
-
-				It("pins the endpoint to it", func() {
-					cfg := ngrokAgentConfigFrom(rendered)
-
-					Expect(cfg.Endpoints).To(HaveLen(1))
-					Expect(cfg.Endpoints[0].Url).
-						To(Equal("https://example.ngrok.app"))
-				})
-			})
-
-			Context("with a multi-line traffic policy", func() {
-				BeforeEach(func() {
-					svc := exposedService("alpha", 3000)
-					svc.Extensions = types.Extensions{
-						config.K8S_SERVICE_EXTENSION: map[string]any{
-							"ngrok": map[string]any{
-								"port": 3000,
-								"trafficPolicy": "on_http_request:\n" +
-									"  - actions:\n" +
-									"      - type: deny\n",
-							},
-						},
-					}
-					project.Services = types.Services{"alpha": svc}
-				})
-
-				// The documented form is a block scalar; interpolated flat it
-				// breaks out of the ConfigMap's own block.
-				It("nests the policy under the endpoint as yaml", func() {
-					cfg := ngrokAgentConfigFrom(rendered)
-
-					Expect(cfg.Endpoints).To(HaveLen(1))
-					Expect(cfg.Endpoints[0].TrafficPolicy).
-						To(HaveKey("on_http_request"))
-				})
-			})
-
-			Context("with no traffic policy", func() {
-				It("omits the traffic policy key", func() {
-					for _, ep := range ngrokAgentConfigFrom(rendered).Endpoints {
-						Expect(ep.TrafficPolicy).To(BeNil())
-					}
-				})
+				Expect(podAnnotation(
+					renderNgrok(rotated, toPublish), "checksum/secret",
+				)).ToNot(Equal(before))
 			})
 		})
 	})

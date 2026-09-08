@@ -18,6 +18,10 @@ install:
 lint:
     golangci-lint run
 
+# formats entire project
+fmt:
+    golangci-lint fmt ./...
+
 # runs all test suites
 test *args:
     cd {{ invocation_directory() }} \

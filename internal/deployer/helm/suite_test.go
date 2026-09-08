@@ -1,4 +1,4 @@
-package deployer_test
+package helm_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestDeployer(t *testing.T) {
+func TestHelm(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Deployer Suite")
+	RunSpecs(t, "Helm Suite")
 }
