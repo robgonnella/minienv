@@ -2,6 +2,7 @@
 _.file = ".env"
 
 [tools]
+just = "1.58"
 go = "1.27"
 golangci-lint = "2.13"
 mockery = "3.7"
