@@ -59,9 +59,8 @@ func (c *NgrokClient) ServiceUrls(
 	ctx context.Context,
 	svcNames []string,
 ) (map[string]url.URL, error) {
-	// Reported rather than shrugged off as an empty result: the caller cannot
-	// otherwise tell a missing key from an account serving nothing. Publishing
-	// does not need the key, so the caller downgrades this to a warning.
+	// Reported rather than shrugged off as an empty result, which would be
+	// indistinguishable from an account serving nothing.
 	if c.apiKey == "" {
 		return nil, errs.Errorf(
 			ErrNgrokNotConfigured,

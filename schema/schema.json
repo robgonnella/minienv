@@ -8,10 +8,6 @@
           "type": "string",
           "description": "Image Repository for the service image"
         },
-        "pullPolicy": {
-          "type": "string",
-          "description": "PullPolicy for this image"
-        },
         "tag": {
           "type": "string",
           "description": "Image tag for the service image"
@@ -22,6 +18,10 @@
           },
           "type": "array",
           "description": "The platforms for which to build and push default [linux/amd64])"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "description": "PullPolicy for this image"
         }
       },
       "additionalProperties": false,
@@ -131,11 +131,11 @@
       ],
       "description": "ChartServicePort is the port configuration used by both the service and the deployment pod container."
     },
-    "Ngrok": {
+    "NgrokServiceLevel": {
       "properties": {
         "port": {
           "type": "integer",
-          "description": "Exposes the specified service port publicly via ngrok. This port must match\none of the configured service ports. If ports were auto-discovered from\ndocker-compose config, this value should match the Host side of the\nmapping, not container."
+          "description": "Exposes the specified service port publicly via ngrok. This port must match\none of the configured service ports. Which side of a docker-compose port\nmapping that is depends on the target: k8s routes through a Service and\nexpects the host side, docker reaches the container directly over the\ncompose network and expects the container side."
         },
         "url": {
           "type": "string",
@@ -151,7 +151,7 @@
       "required": [
         "port"
       ],
-      "description": "Ngrok is the configuration for exposing a service publicly."
+      "description": "NgrokServiceLevel is the configuration for exposing a service publicly."
     },
     "NgrokTopLevel": {
       "properties": {
@@ -164,20 +164,87 @@
       "type": "object",
       "description": "NgrokTopLevel is the ngrok configuration applied to all services unless overridden per service."
     },
+    "ServiceImage": {
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Image Repository for the service image"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Image tag for the service image"
+        },
+        "platforms": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "The platforms for which to build and push default [linux/amd64])"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "repository",
+        "tag"
+      ],
+      "description": "ServiceImage represents the image that will be pulled and used for a service in the remote environment."
+    },
     "XMiniEnv": {
       "properties": {
-        "ngrok": {
-          "$ref": "#/$defs/NgrokTopLevel",
-          "description": "Ngrok configuration for exposing services publicly"
-        },
         "k8s": {
           "$ref": "#/$defs/XMiniEnvK8s",
           "description": "K8s configuration for deploying to Kubernetes"
+        },
+        "docker": {
+          "$ref": "#/$defs/XMiniEnvDocker",
+          "description": "Docker uses docker and a specified transport mechanism to deploy modified\ndocker-compose config on a remote server"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "description": "XMiniEnv top-level extension configuration for deploying to various targets."
+    },
+    "XMiniEnvDocker": {
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "The namespace for this deployment to ensure there are no conflicts\nwith other user minienvs on the same host"
+        },
+        "ssh": {
+          "$ref": "#/$defs/XMiniEnvSSH",
+          "description": "SSH uses SSH transport to connect and deploy remote docker services"
+        },
+        "ngrok": {
+          "$ref": "#/$defs/NgrokTopLevel",
+          "description": "Ngrok configuration for exposing services publicly"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "namespace"
+      ],
+      "description": "XMiniEnvDocker uses docker and a specified transport mechanism to deploy modified docker-compose config on a remote server."
+    },
+    "XMiniEnvDockerService": {
+      "properties": {
+        "ngrok": {
+          "$ref": "#/$defs/NgrokServiceLevel",
+          "description": "Ngrok configuration for exposing services publicly"
+        },
+        "skip": {
+          "type": "boolean",
+          "description": "Prevents the targeted service from being deployed to the cluster"
+        },
+        "image": {
+          "$ref": "#/$defs/ServiceImage",
+          "description": "The image for this deployment. Will try to use compose service image if not set"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "XMiniEnvDockerService is the service level configuration controlling docker deployment properties."
     },
     "XMiniEnvK8s": {
       "properties": {
@@ -192,6 +259,10 @@
         "deploymentTimeout": {
           "type": "string",
           "description": "Controls the Helm timeout. This is applied to all services but can be\noverridden using the service-level extension"
+        },
+        "ngrok": {
+          "$ref": "#/$defs/NgrokTopLevel",
+          "description": "Ngrok configuration for exposing services publicly"
         }
       },
       "additionalProperties": false,
@@ -205,7 +276,7 @@
     "XMiniEnvK8sService": {
       "properties": {
         "ngrok": {
-          "$ref": "#/$defs/Ngrok",
+          "$ref": "#/$defs/NgrokServiceLevel",
           "description": "Ngrok configuration for exposing services publicly"
         },
         "skip": {
@@ -338,6 +409,35 @@
       "type": "object",
       "description": "XMiniEnvK8sService is the service level configuration controlling Kubernetes deployment properties."
     },
+    "XMiniEnvSSH": {
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "The target host for the SSH connection"
+        },
+        "user": {
+          "type": "string",
+          "description": "The user for the SSH connection"
+        },
+        "port": {
+          "type": "integer",
+          "description": "The port for the SSH connection"
+        },
+        "identity": {
+          "type": "string",
+          "description": "The RSA private key identity file for the SSH connection"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "host",
+        "user",
+        "port",
+        "identity"
+      ],
+      "description": "XMiniEnvSSH holds the fields required for deploying to any SSH-enabled remote server."
+    },
     "service": {
       "allOf": [
         {
@@ -348,6 +448,9 @@
       "properties": {
         "x-minienv-k8s-service": {
           "$ref": "#/$defs/XMiniEnvK8sService"
+        },
+        "x-minienv-docker-service": {
+          "$ref": "#/$defs/XMiniEnvDockerService"
         }
       }
     }

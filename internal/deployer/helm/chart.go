@@ -28,7 +28,7 @@ const (
 
 // The agent reads ngrok.yml only at startup, and the pod template is otherwise
 // constant, so this is what makes helm replace the pod when the config changes.
-func ngrokConfigChecksum(published []NgrokConfig) string {
+func ngrokConfigChecksum(published []config.NgrokEndpointConfig) string {
 	sum := sha256.New()
 
 	for _, svc := range published {
@@ -146,7 +146,9 @@ func (b *ChartBuilder) JobChart(svcName string) (*helmchart.Chart, error) {
 	return chart, nil
 }
 
-func (b *ChartBuilder) NgrokValues(toPublish []NgrokConfig) map[string]any {
+func (b *ChartBuilder) NgrokValues(
+	toPublish []config.NgrokEndpointConfig,
+) map[string]any {
 	if len(toPublish) == 0 {
 		return nil
 	}
@@ -172,20 +174,7 @@ func (b *ChartBuilder) NgrokValues(toPublish []NgrokConfig) map[string]any {
 
 	values["endpoints"] = ngrokEndpointValues(toPublish)
 
-	values["volumes"] = []map[string]any{
-		{
-			nameKey: config.NgrokConfigMapName,
-			"configMap": map[string]any{
-				nameKey: config.NgrokConfigMapName,
-				"items": []map[string]any{
-					{
-						"key":  config.NgrokConfigKey,
-						"path": config.NgrokConfigKey,
-					},
-				},
-			},
-		},
-	}
+	values["volumes"] = ngrokVolumeValues()
 
 	values["volumeMounts"] = []map[string]any{
 		{
@@ -210,7 +199,26 @@ func (b *ChartBuilder) NgrokValues(toPublish []NgrokConfig) map[string]any {
 	return values
 }
 
-func ngrokEndpointValues(toPublish []NgrokConfig) []map[string]any {
+func ngrokVolumeValues() []map[string]any {
+	return []map[string]any{
+		{
+			nameKey: config.NgrokConfigMapName,
+			"configMap": map[string]any{
+				nameKey: config.NgrokConfigMapName,
+				"items": []map[string]any{
+					{
+						"key":  config.NgrokConfigKey,
+						"path": config.NgrokConfigKey,
+					},
+				},
+			},
+		},
+	}
+}
+
+func ngrokEndpointValues(
+	toPublish []config.NgrokEndpointConfig,
+) []map[string]any {
 	endpoints := make([]map[string]any, 0, len(toPublish))
 	for _, svc := range toPublish {
 		endpoints = append(endpoints, map[string]any{

@@ -110,7 +110,7 @@ linters:
 
       # Nothing but embedded YAML in raw string literals; wrapping would change
       # the rendered manifests.
-      - path: internal/deployer/helm/templates\.go
+      - path: internal/deployer/.*/templates\.go
         linters:
           - lll
 

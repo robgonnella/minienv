@@ -49,12 +49,19 @@ func writeFile(filepath string, data []byte) error {
 func buildSchema(r *jsonschema.Reflector) jsonschema.Schema {
 	xMiniEnvSchema := r.Reflect(config.XMiniEnv{})
 	xMiniEnvK8sServiceSchema := r.Reflect(config.XMiniEnvK8sService{})
+	xMiniEnvDockerServiceSchema := r.Reflect(config.XMiniEnvDockerService{})
+
 	maps.Copy(xMiniEnvSchema.Definitions, xMiniEnvK8sServiceSchema.Definitions)
+	maps.Copy(xMiniEnvSchema.Definitions, xMiniEnvDockerServiceSchema.Definitions)
 
 	serviceDefProperties := jsonschema.NewProperties()
 	serviceDefProperties.Set(
 		config.K8sServiceExtension,
 		&jsonschema.Schema{Ref: xMiniEnvK8sServiceSchema.Ref},
+	)
+	serviceDefProperties.Set(
+		config.DockerServiceExtension,
+		&jsonschema.Schema{Ref: xMiniEnvDockerServiceSchema.Ref},
 	)
 
 	serviceSchema := jsonschema.Schema{

@@ -2,14 +2,21 @@
 
 ## Prerequisites
 
-| Requirement                    | When you need it                               |
-| ------------------------------ | ---------------------------------------------- |
-| A reachable Kubernetes context | Always                                         |
-| `docker` with `buildx`         | Only for services that have a `build:` section |
-| `git`                          | Only if you use a `+git` image tag             |
+| Requirement                                                | When you need it                               |
+| ---------------------------------------------------------- | ---------------------------------------------- |
+| `docker` with `buildx`                                     | Only for services that have a `build:` section |
+| `git`                                                      | Only if you use a `+git` image tag             |
+| A reachable Kubernetes context                             | Only for the `k8s` deployer                    |
+| An SSH-reachable host with `docker` and its compose plugin | Only for the `docker` deployer                 |
 
 Helm is built into minienv as a library — you do **not** need the `helm` binary
-installed.
+installed. The `docker` deployer likewise needs no extra client: it reaches the
+remote host over SSH directly.
+
+For the `docker` deployer, the remote host must already be in your
+`~/.ssh/known_hosts`. minienv verifies the host key and offers no prompt or
+bypass, so connect once by hand first. Encrypted identity files are not
+supported.
 
 ## Install
 
@@ -60,12 +67,23 @@ Both commands accept `up` and `down` as aliases.
 
 ## Preview without deploying
 
-`--dry-run` builds images without pushing them and runs the Helm actions without
-applying anything to the cluster:
+`--dry-run` previews a deploy without changing the target:
 
 ```sh
 minienv deploy --dry-run
 ```
+
+It is not, however, entirely offline. Images are still built locally with
+`buildx` — they are simply not pushed.
+
+**Kubernetes.** The cluster is still contacted, read-only: reachability checks,
+API discovery, and reading existing release state. Nothing is applied.
+
+> **A `k8s` dry run needs a reachable cluster.** It changes nothing, but it is
+> not a way to check a config without one.
+
+**Docker.** Nothing remote happens at all. minienv renders the files it would
+write and opens no SSH session.
 
 ## File discovery
 

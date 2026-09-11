@@ -10,6 +10,7 @@ const HelmDefaultDeploymentTimeout = "60s"
 
 const TopLevelExtension = "x-minienv"
 const K8sServiceExtension = "x-minienv-k8s-service"
+const DockerServiceExtension = "x-minienv-docker-service"
 
 const NgrokImageRepo = "ngrok/ngrok"
 const NgrokImageTag = "3.39.11-alpine"
@@ -17,3 +18,8 @@ const NgrokConfigMapName = "ngrok-config"
 const NgrokConfigKey = "ngrok.yml"
 const NgrokConfigVolMountPath = "/home/ngrok/.config/ngrok"
 const NgrokSecretName = "ngrok-secret"
+
+// NgrokConfigChecksumLabel exists because compose replaces a container only
+// when its definition changes, and ngrok.yml is a bind mount that is no part
+// of it.
+const NgrokConfigChecksumLabel = "minienv.ngrok/config-checksum"

@@ -39,94 +39,6 @@ func (_m *MockDeployer) EXPECT() *MockDeployer_Expecter {
 	return &MockDeployer_Expecter{mock: &_m.Mock}
 }
 
-// Active provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Active() bool {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Active")
-	}
-
-	var r0 bool
-	if returnFunc, ok := ret.Get(0).(func() bool); ok {
-		r0 = returnFunc()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-	return r0
-}
-
-// MockDeployer_Active_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Active'
-type MockDeployer_Active_Call struct {
-	*mock.Call
-}
-
-// Active is a helper method to define mock.On call
-func (_e *MockDeployer_Expecter) Active() *MockDeployer_Active_Call {
-	return &MockDeployer_Active_Call{Call: _e.mock.On("Active")}
-}
-
-func (_c *MockDeployer_Active_Call) Run(run func()) *MockDeployer_Active_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockDeployer_Active_Call) Return(b bool) *MockDeployer_Active_Call {
-	_c.Call.Return(b)
-	return _c
-}
-
-func (_c *MockDeployer_Active_Call) RunAndReturn(run func() bool) *MockDeployer_Active_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ConfigField provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) ConfigField() string {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for ConfigField")
-	}
-
-	var r0 string
-	if returnFunc, ok := ret.Get(0).(func() string); ok {
-		r0 = returnFunc()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-	return r0
-}
-
-// MockDeployer_ConfigField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfigField'
-type MockDeployer_ConfigField_Call struct {
-	*mock.Call
-}
-
-// ConfigField is a helper method to define mock.On call
-func (_e *MockDeployer_Expecter) ConfigField() *MockDeployer_ConfigField_Call {
-	return &MockDeployer_ConfigField_Call{Call: _e.mock.On("ConfigField")}
-}
-
-func (_c *MockDeployer_ConfigField_Call) Run(run func()) *MockDeployer_ConfigField_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockDeployer_ConfigField_Call) Return(s string) *MockDeployer_ConfigField_Call {
-	_c.Call.Return(s)
-	return _c
-}
-
-func (_c *MockDeployer_ConfigField_Call) RunAndReturn(run func() string) *MockDeployer_ConfigField_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Deploy provides a mock function for the type MockDeployer
 func (_mock *MockDeployer) Deploy(ctx context.Context) error {
 	ret := _mock.Called(ctx)
@@ -230,7 +142,7 @@ func (_c *MockDeployer_Destroy_Call) RunAndReturn(run func(ctx context.Context) 
 }
 
 // Init provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Init(ctx context.Context, project *config.ComposeProject) error {
+func (_mock *MockDeployer) Init(ctx context.Context, project config.ComposeProject) error {
 	ret := _mock.Called(ctx, project)
 
 	if len(ret) == 0 {
@@ -238,7 +150,7 @@ func (_mock *MockDeployer) Init(ctx context.Context, project *config.ComposeProj
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, *config.ComposeProject) error); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, config.ComposeProject) error); ok {
 		r0 = returnFunc(ctx, project)
 	} else {
 		r0 = ret.Error(0)
@@ -253,20 +165,20 @@ type MockDeployer_Init_Call struct {
 
 // Init is a helper method to define mock.On call
 //   - ctx context.Context
-//   - project *config.ComposeProject
+//   - project config.ComposeProject
 func (_e *MockDeployer_Expecter) Init(ctx any, project any) *MockDeployer_Init_Call {
 	return &MockDeployer_Init_Call{Call: _e.mock.On("Init", ctx, project)}
 }
 
-func (_c *MockDeployer_Init_Call) Run(run func(ctx context.Context, project *config.ComposeProject)) *MockDeployer_Init_Call {
+func (_c *MockDeployer_Init_Call) Run(run func(ctx context.Context, project config.ComposeProject)) *MockDeployer_Init_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 *config.ComposeProject
+		var arg1 config.ComposeProject
 		if args[1] != nil {
-			arg1 = args[1].(*config.ComposeProject)
+			arg1 = args[1].(config.ComposeProject)
 		}
 		run(
 			arg0,
@@ -281,7 +193,7 @@ func (_c *MockDeployer_Init_Call) Return(err error) *MockDeployer_Init_Call {
 	return _c
 }
 
-func (_c *MockDeployer_Init_Call) RunAndReturn(run func(ctx context.Context, project *config.ComposeProject) error) *MockDeployer_Init_Call {
+func (_c *MockDeployer_Init_Call) RunAndReturn(run func(ctx context.Context, project config.ComposeProject) error) *MockDeployer_Init_Call {
 	_c.Call.Return(run)
 	return _c
 }

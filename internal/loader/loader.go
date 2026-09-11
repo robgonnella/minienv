@@ -2,7 +2,6 @@ package loader
 
 import (
 	"context"
-	"slices"
 	"strings"
 
 	composecli "github.com/compose-spec/compose-go/v2/cli"
@@ -10,11 +9,13 @@ import (
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/core"
 	"github.com/robgonnella/minienv/internal/deployer"
+	"github.com/robgonnella/minienv/internal/deployer/docker"
 	"github.com/robgonnella/minienv/internal/deployer/helm"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
 	"github.com/robgonnella/minienv/internal/publishing"
+	"github.com/robgonnella/minienv/internal/transport"
 	"github.com/rs/zerolog/log"
 )
 
@@ -54,7 +55,7 @@ func (l *Loader) LoadCore(ctx context.Context) (*core.Core, error) {
 		return nil, err
 	}
 
-	return core.New(ext, project, deployer, l.opts.DryRun), nil
+	return core.New(*ext, *project, deployer, l.opts.DryRun), nil
 }
 
 func (l *Loader) loadComposeProject(
@@ -120,55 +121,100 @@ func (l *Loader) loadMainExtensionConfig(
 	return &extConfig, nil
 }
 
+// Counting the configured targets before building any of them keeps
+// "configure only one deployer" ahead of whatever a half-configured deployer
+// would complain about first.
 func (l *Loader) loadActiveDeployer(
 	ext *config.XMiniEnv,
 ) (deployer.Deployer, error) {
-	deployers := []deployer.Deployer{
-		helm.New(helm.Options{
-			Ext:            ext,
+	configured := 0
+
+	if ext.K8s != nil {
+		configured++
+	}
+
+	if ext.Docker != nil {
+		configured++
+	}
+
+	if configured > 1 {
+		return nil, errs.Errorf(
+			ErrMultipleDeployers,
+			"detected multiple active configurations for deployment. "+
+				"only one of [%s] can be configured",
+			strings.Join(ext.ConfigFields(), ", "),
+		)
+	}
+
+	switch {
+	case ext.K8s != nil:
+		return helm.New(helm.Options{
+			K8sExt:         *ext.K8s,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,
 			PublishClient:  l.opts.PublishClient,
 			NgrokAuthToken: l.opts.NgrokAuthToken,
 			HelmDriver:     l.opts.HelmDriver,
 			DryRun:         l.opts.DryRun,
-		}),
-	}
-
-	var targetDeployer deployer.Deployer
-
-	activeDeployers := []string{}
-
-	for _, d := range deployers {
-		if d.Active() {
-			activeDeployers = append(activeDeployers, d.ConfigField())
-			targetDeployer = d
+		}), nil
+	case ext.Docker != nil:
+		transport, err := l.loadActiveDockerTransport(ext.Docker)
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	if len(activeDeployers) > 1 {
-		return nil, errs.Errorf(
-			ErrMultipleDeployers,
-			"detected multiple active configurations for deployment. "+
-				"only one of [%s] can be configured",
-			strings.Join(activeDeployers, ", "),
-		)
-	}
-
-	if targetDeployer == nil {
+		return docker.New(docker.Options{
+			DockerExt:      *ext.Docker,
+			Transport:      transport,
+			ImageClient:    l.opts.ImageClient,
+			GitClient:      l.opts.GitClient,
+			PublishClient:  l.opts.PublishClient,
+			NgrokAuthToken: l.opts.NgrokAuthToken,
+			DryRun:         l.opts.DryRun,
+		}), nil
+	default:
 		return nil, errs.Errorf(
 			ErrNoActiveDeployer,
 			"failed to find an active configuration for deployment. "+
 				"configure one of [%s] in x-minienv extension field",
-			slices.Collect(func(yield func(s string) bool) {
-				for _, d := range deployers {
-					if !yield(d.ConfigField()) {
-						return
-					}
-				}
-			}),
+			strings.Join(ext.ConfigFields(), ", "),
+		)
+	}
+}
+
+func (l *Loader) loadActiveDockerTransport(
+	ext *config.XMiniEnvDocker,
+) (transport.Client, error) {
+	activeTransports := []transport.Client{}
+
+	if ext.SSH != nil {
+		sshTransport, err := transport.NewSSHTransport(
+			transport.SSHTransportOptions{Config: *ext.SSH},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		activeTransports = append(activeTransports, sshTransport)
+	}
+
+	if len(activeTransports) > 1 {
+		return nil, errs.Errorf(
+			ErrMultipleDockerTransports,
+			"detected multiple active configurations for docker transport. "+
+				"only one of [%s] can be configured",
+			strings.Join(ext.TransportFields(), ", "),
 		)
 	}
 
-	return targetDeployer, nil
+	if len(activeTransports) == 0 {
+		return nil, errs.Errorf(
+			ErrNoActiveDockerTransport,
+			"failed to find an active configuration for docker transport. "+
+				"configure one of [%s] in docker field of x-minienv extension",
+			strings.Join(ext.TransportFields(), ", "),
+		)
+	}
+
+	return activeTransports[0], nil
 }

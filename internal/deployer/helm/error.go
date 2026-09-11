@@ -5,6 +5,7 @@ import "github.com/robgonnella/minienv/internal/errs"
 // Failure modes raised by this package. Values are namespaced because errs.Kind
 // is one shared type — see internal/errs.
 const (
+	ErrInvalidExtension       errs.Kind = "helm.invalid_extension"
 	ErrActionConfig           errs.Kind = "helm.action_config"
 	ErrChartUninstall         errs.Kind = "helm.chart_uninstall"
 	ErrChartDeploymentTimeout errs.Kind = "helm.chart_deployment_timeout"

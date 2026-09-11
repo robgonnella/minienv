@@ -10,6 +10,7 @@ import (
 
 	composegraph "github.com/compose-spec/compose-go/v2/graph"
 	"github.com/robgonnella/minienv/internal/config"
+	"github.com/robgonnella/minienv/internal/deployer"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
@@ -28,8 +29,6 @@ const maxDeployConcurrency = 5
 
 const ngrokDeploymentTimeout = time.Minute
 
-const defaultImagePlatform = "linux/amd64"
-
 // deployFn acts on one service. Injected so the dependency-ordered walk is
 // drivable without a cluster.
 type deployFn func(ctx context.Context, svc config.ComposeService) error
@@ -39,17 +38,8 @@ type serviceTuple struct {
 	extension config.XMiniEnvK8sService
 }
 
-type NgrokConfig struct {
-	Namespace     string `mapstructure:"namespace"`
-	EndpointName  string `mapstructure:"endpointName"`
-	ServiceName   string `mapstructure:"serviceName"`
-	URL           string `mapstructure:"url"`
-	Port          uint16 `mapstructure:"port"`
-	TrafficPolicy string `mapstructure:"trafficPolicy"`
-}
-
 type Options struct {
-	Ext            *config.XMiniEnv
+	K8sExt         config.XMiniEnvK8s
 	ImageClient    image.Client
 	GitClient      git.Client
 	PublishClient  publishing.Client
@@ -59,10 +49,10 @@ type Options struct {
 }
 
 type Helm struct {
-	ext               *config.XMiniEnv
-	project           *config.ComposeProject
+	k8sExt            config.XMiniEnvK8s
+	project           config.ComposeProject
 	services          map[string]serviceTuple
-	servicesToPublish []NgrokConfig
+	servicesToPublish []config.NgrokEndpointConfig
 	chartBuilder      *ChartBuilder
 	actionConfig      *helmaction.Configuration
 	imageClient       image.Client
@@ -75,7 +65,7 @@ type Helm struct {
 
 func New(opts Options) *Helm {
 	return &Helm{
-		ext:            opts.Ext,
+		k8sExt:         opts.K8sExt,
 		actionConfig:   nil,
 		imageClient:    opts.ImageClient,
 		gitClient:      opts.GitClient,
@@ -87,24 +77,16 @@ func New(opts Options) *Helm {
 	}
 }
 
-func (h *Helm) Active() bool {
-	return h.ext.K8s.Context != "" && h.ext.K8s.Namespace != ""
-}
-
-func (h *Helm) ConfigField() string {
-	return "k8s"
-}
-
 func (h *Helm) String() string {
 	return "Helm"
 }
 
 func (h *Helm) Init(
 	ctx context.Context,
-	project *config.ComposeProject,
+	project config.ComposeProject,
 ) error {
-	if !h.Active() {
-		return nil
+	if err := h.validateExtension(); err != nil {
+		return err
 	}
 
 	if err := h.initProject(ctx, project); err != nil {
@@ -112,8 +94,8 @@ func (h *Helm) Init(
 	}
 
 	settings := helmcli.New()
-	settings.SetNamespace(h.ext.K8s.Namespace)
-	settings.KubeContext = h.ext.K8s.Context
+	settings.SetNamespace(h.k8sExt.Namespace)
+	settings.KubeContext = h.k8sExt.Context
 
 	actionConfig := new(helmaction.Configuration)
 
@@ -136,8 +118,8 @@ func (h *Helm) Init(
 }
 
 func (h *Helm) Deploy(ctx context.Context) error {
-	if !h.Active() {
-		return nil
+	if err := h.validateExtension(); err != nil {
+		return err
 	}
 
 	if err := h.buildAndPushServiceImages(ctx); err != nil {
@@ -156,8 +138,8 @@ func (h *Helm) Deploy(ctx context.Context) error {
 }
 
 func (h *Helm) Destroy(ctx context.Context) error {
-	if !h.Active() {
-		return nil
+	if err := h.validateExtension(); err != nil {
+		return err
 	}
 
 	destroyService := func(
@@ -189,26 +171,36 @@ func (h *Helm) PublishedServiceUrls(
 
 	return h.publishClient.ServiceUrls(
 		ctx,
-		publishedNames(h.servicesToPublish),
+		deployer.PublishedNames(h.servicesToPublish),
 	)
 }
 
-// initProject is the half of Init that needs no cluster: it resolves every
-// service extension once, up front, so a bad extension fails before a single
-// release is touched, and so a +git tag costs one git call per run rather than
-// one per service per pass. Everything downstream reads h.services, which makes
-// Init a hard precondition of Deploy and Destroy.
+func (h *Helm) validateExtension() error {
+	if h.k8sExt.Context == "" ||
+		h.k8sExt.Namespace == "" {
+		return errs.Errorf(
+			ErrInvalidExtension,
+			"missing one or both of required fields in k8s extension config: "+
+				"[context, namespace]",
+		)
+	}
+
+	return nil
+}
+
+// initProject is the half of Init that needs no cluster. Resolving every
+// extension up front fails a bad one before any release is touched.
 func (h *Helm) initProject(
 	ctx context.Context,
-	project *config.ComposeProject,
+	project config.ComposeProject,
 ) error {
 	services := map[string]serviceTuple{}
-	servicesToPublish := []NgrokConfig{}
+	servicesToPublish := []config.NgrokEndpointConfig{}
 
 	for _, svc := range project.Services {
 		svcExt, err := config.NewXMiniEnvK8sService(
 			ctx,
-			h.extensionOptions(svc),
+			h.k8sExtensionOptions(svc),
 		)
 		if err != nil {
 			return err
@@ -233,9 +225,9 @@ func (h *Helm) initProject(
 					Str("service", svc.Name).
 					Msg("jobs serve no traffic: not publishing an ngrok endpoint")
 			default:
-				servicesToPublish = append(servicesToPublish, NgrokConfig{
-					Namespace:     h.ext.K8s.Namespace,
-					EndpointName:  fmt.Sprintf("%s-%s", h.ext.K8s.Namespace, svc.Name),
+				servicesToPublish = append(servicesToPublish, config.NgrokEndpointConfig{
+					Namespace:     h.k8sExt.Namespace,
+					EndpointName:  fmt.Sprintf("%s-%s", h.k8sExt.Namespace, svc.Name),
 					ServiceName:   svc.Name,
 					URL:           svcExt.Ngrok.URL,
 					Port:          svcExt.Ngrok.Port,
@@ -247,7 +239,7 @@ func (h *Helm) initProject(
 
 	// project.Services is a map. An unstable order changes the ConfigMap
 	// checksum, which reassigns every unreserved URL on an unchanged deploy.
-	slices.SortFunc(servicesToPublish, func(a, b NgrokConfig) int {
+	slices.SortFunc(servicesToPublish, func(a, b config.NgrokEndpointConfig) int {
 		return strings.Compare(a.ServiceName, b.ServiceName)
 	})
 
@@ -258,11 +250,11 @@ func (h *Helm) initProject(
 	return nil
 }
 
-func (h *Helm) extensionOptions(
+func (h *Helm) k8sExtensionOptions(
 	svc config.ComposeService,
 ) config.XMiniEnvK8sServiceOptions {
 	return config.XMiniEnvK8sServiceOptions{
-		MainExt:      h.ext,
+		K8sExt:       h.k8sExt,
 		Service:      svc,
 		GitClient:    h.gitClient,
 		NgrokEnabled: h.ngrokAuthToken != "",
@@ -337,22 +329,11 @@ func (h *Helm) buildAndPushServiceImages(ctx context.Context) error {
 			continue
 		}
 
-		platforms := []string{defaultImagePlatform}
-
-		if len(svc.extension.Image.Platforms) != 0 {
-			platforms = svc.extension.Image.Platforms
-		}
-
 		if svc.compose.Build != nil {
-			dockerServices = append(dockerServices, image.ServiceProperties{
-				Name:       name,
-				Registry:   svc.extension.Image.Repository,
-				Tag:        svc.extension.Image.Tag,
-				Context:    svc.compose.Build.Context,
-				Dockerfile: svc.compose.Build.Dockerfile,
-				Platforms:  platforms,
-				Args:       svc.compose.Build.Args.ToMapping(),
-			})
+			dockerServices = append(dockerServices, image.NewServiceProperties(
+				svc.compose,
+				svc.extension.Image.ServiceImage,
+			))
 		}
 	}
 
@@ -376,7 +357,7 @@ func (h *Helm) deployInDependencyOrder(
 
 	if err := composegraph.InDependencyOrder(
 		ctx,
-		h.project,
+		&h.project,
 		func(ctx context.Context, _ string, svc config.ComposeService) error {
 			return deploy(ctx, svc)
 		},
@@ -404,7 +385,7 @@ func (h *Helm) destroyInReverseDependencyOrder(
 
 	if err := composegraph.InDependencyOrder(
 		ctx,
-		h.project,
+		&h.project,
 		func(ctx context.Context, _ string, svc config.ComposeService) error {
 			return uninstall(ctx, svc)
 		},
@@ -426,7 +407,7 @@ func (h *Helm) destroyInReverseDependencyOrder(
 // single release is touched. It also keeps the traversal's own error return
 // carrying nothing but failures from the injected step.
 func (h *Helm) checkDependencyGraph() error {
-	if err := composegraph.CheckCycle(h.project); err != nil {
+	if err := composegraph.CheckCycle(&h.project); err != nil {
 		return errs.Errorf(
 			ErrComposeDependencyGraph,
 			"invalid service dependency graph: %w",
@@ -463,7 +444,7 @@ func (h *Helm) installChart(
 ) error {
 	client := helmaction.NewInstall(h.actionConfig)
 	client.ReleaseName = chart.Name()
-	client.Namespace = h.ext.K8s.Namespace
+	client.Namespace = h.k8sExt.Namespace
 	client.CreateNamespace = false
 	client.Wait = true
 	client.Atomic = true
@@ -482,8 +463,8 @@ func (h *Helm) installChart(
 
 	log.
 		Info().
-		Str("context", h.ext.K8s.Context).
-		Str("namespace", h.ext.K8s.Namespace).
+		Str("context", h.k8sExt.Context).
+		Str("namespace", h.k8sExt.Namespace).
 		Str("service", chart.Name()).
 		Msg("successfully installed service chart")
 
@@ -498,7 +479,7 @@ func (h *Helm) upgradeChart(
 	restart bool,
 ) error {
 	client := helmaction.NewUpgrade(h.actionConfig)
-	client.Namespace = h.ext.K8s.Namespace
+	client.Namespace = h.k8sExt.Namespace
 	client.Atomic = true
 	client.Wait = true
 	client.WaitForJobs = true
@@ -528,8 +509,8 @@ func (h *Helm) upgradeChart(
 
 	log.
 		Info().
-		Str("context", h.ext.K8s.Context).
-		Str("namespace", h.ext.K8s.Namespace).
+		Str("context", h.k8sExt.Context).
+		Str("namespace", h.k8sExt.Namespace).
 		Str("service", chart.Name()).
 		Msg("successfully upgraded service chart")
 
@@ -562,7 +543,7 @@ func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
 
 	log.
 		Info().
-		Str("context", h.ext.K8s.Context).
+		Str("context", h.k8sExt.Context).
 		Str("service", response.Release.Name).
 		Str("namespace", response.Release.Namespace).
 		Msg("successfully uninstalled service")
@@ -571,6 +552,14 @@ func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
 }
 
 func (h *Helm) createNamespaceIfNotExists(ctx context.Context) error {
+	if h.dryRun {
+		log.Warn().
+			Str("namespace", h.k8sExt.Namespace).
+			Msg("dry-run mode: skipping namespace creation")
+
+		return nil
+	}
+
 	clientset, err := h.actionConfig.KubernetesClientSet()
 	if err != nil {
 		return errs.Errorf(
@@ -582,7 +571,7 @@ func (h *Helm) createNamespaceIfNotExists(ctx context.Context) error {
 
 	namespaces := clientset.CoreV1().Namespaces()
 
-	_, err = namespaces.Get(ctx, h.ext.K8s.Namespace, k8smetav1.GetOptions{})
+	_, err = namespaces.Get(ctx, h.k8sExt.Namespace, k8smetav1.GetOptions{})
 
 	switch {
 	case err == nil:
@@ -591,20 +580,20 @@ func (h *Helm) createNamespaceIfNotExists(ctx context.Context) error {
 		return errs.Errorf(
 			ErrK8sNamespace,
 			"failed to look up namespace %s: %w",
-			h.ext.K8s.Namespace,
+			h.k8sExt.Namespace,
 			err,
 		)
 	}
 
 	if _, err := namespaces.Create(
 		ctx,
-		&k8sv1.Namespace{Name: h.ext.K8s.Namespace},
+		&k8sv1.Namespace{Name: h.k8sExt.Namespace},
 		k8smetav1.CreateOptions{},
 	); err != nil {
 		return errs.Errorf(
 			ErrK8sNamespace,
 			"failed to create namespace %s: %w",
-			h.ext.K8s.Namespace,
+			h.k8sExt.Namespace,
 			err,
 		)
 	}
@@ -646,13 +635,4 @@ func (h *Helm) serviceReleaseExists(name string) bool {
 	release, _ := client.Run(name)
 
 	return release != nil
-}
-
-func publishedNames(published []NgrokConfig) []string {
-	names := make([]string, 0, len(published))
-	for _, svc := range published {
-		names = append(names, svc.EndpointName)
-	}
-
-	return names
 }

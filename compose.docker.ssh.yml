@@ -1,0 +1,76 @@
+# $schema: ./schema/schema.json
+
+x-minienv:
+  docker:
+    namespace: $MINIENV_NAMESPACE
+    ssh:
+      host: localhost
+      user: rob
+      port: 22220
+      identity: $HOME/.ssh/id_rsa
+
+services:
+  hello:
+    x-minienv-docker-service:
+      image:
+        repository: rgonnella/demo-hello
+        tag: test-+git
+        platforms:
+          - linux/amd64
+          - linux/arm64/v8
+      ngrok:
+        port: 8080
+    build: .
+    ports:
+      - 8080:8080
+    volumes:
+      - test:/etc/test
+      - ./schema:/etc/schema
+    healthcheck:
+      test: curl http://localhost:8080
+    depends_on:
+      job:
+        condition: service_completed_successfully
+
+  hello2:
+    x-minienv-docker-service:
+      image:
+        repository: rgonnella/demo-hello
+        tag: latest
+        platforms:
+          - linux/amd64
+          - linux/arm64/v8
+      ngrok:
+        port: 8080
+    build: .
+    healthcheck:
+      test: curl http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - 8081:8080
+
+  job:
+    image: alpine:3.24
+    command:
+      - /bin/sh
+      - -c
+      - sleep 10 && echo "ready"
+    ports:
+      - 8080:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: secret
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: pg_isready -U postgres -d postgres
+
+volumes:
+  test:

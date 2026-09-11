@@ -29,7 +29,7 @@ services:
     image: myorg/api:v1
     ports:
       - "8080:8080"
-    x-minienv-k8s-service:
+    x-minienv-k8s-service: # or x-minienv-docker-service
       ngrok:
         port: 8080
 ```
@@ -37,46 +37,103 @@ services:
 That is the whole setup. On deploy the service becomes reachable at a public
 URL.
 
+> Put the `ngrok` block under the service extension matching your deployer:
+> `x-minienv-k8s-service` or `x-minienv-docker-service`. The examples below use
+> the former. See [Which port number to use](#which-port-number-to-use) for the
+> port value.
+
 ## How it is deployed
 
-Every service with an `ngrok` block is published by **one ngrok deployment per
-namespace**, installed as its own helm release named `ngrok` after all your
-service releases have landed. Its config lists every published service at once
-and routes each endpoint to that service's k8s Service.
+Every service with an `ngrok` block is published by **one ngrok agent per
+namespace**, holding a single config that lists every published service at once.
 
 Each endpoint is named `<namespace>-<service>`. The ngrok API reports every
 endpoint on the whole account, so the namespace prefix is what keeps one
 developer's environment from resolving another's URL. It is also the name shown
 in the URL table and in the ngrok dashboard.
 
-What this means day to day:
+### Kubernetes
 
-- Your own pods are unchanged — one container each. The agent is a separate
-  `ngrok` pod alongside them.
-- The agent is only restarted when the set of published endpoints actually
-  changes. A deploy that changes nothing leaves it running, so URLs without a
-  reserved domain survive redeploys.
-- Adding or removing an `ngrok` block _does_ restart the agent, so every URL
+The agent is installed as its own helm release named `ngrok`, after all your
+service releases have landed. Its config is a ConfigMap, and each endpoint
+routes to that service's k8s Service. The agent runs in its own pod, alongside
+your service pods.
+
+It reads that config once, at startup, so a `checksum/config` pod annotation is
+what rolls the pod when the published set or the auth token changes.
+
+### Docker
+
+The agent is injected into the rewritten compose project as a service named
+`ngrok`, depending on every other service so it starts last. Its config is
+written to `~/.minienv/<namespace>/ngrok.yml` and bind-mounted in, and each
+endpoint dials the container directly over the compose network. The auth token
+reaches it through a `.env` written alongside — the compose file itself only
+names the variable, never its value.
+
+It reads that config once, at startup. compose replaces a container only when
+its own definition changes, which a bind-mounted file is no part of, so a
+`minienv.ngrok/config-checksum` label on the injected service is what carries a
+config change into that definition.
+
+### What this means day to day
+
+- Your own containers are unchanged — one process each, with the agent running
+  beside them.
+- The agent is only replaced when the set of published endpoints, or the auth
+  token, actually changes. A deploy that changes neither leaves it running, so
+  URLs without a reserved domain survive redeploys.
+- Adding or removing an `ngrok` block _does_ replace the agent, so every URL
   without a reserved domain is reassigned at that point.
-- Removing the last `ngrok` block uninstalls the release, and `minienv down`
-  removes it along with everything else.
+- Removing the last `ngrok` block removes the agent, and `minienv down` removes
+  it along with everything else.
 
 ## Which port number to use
 
-`ngrok.port` must match one of the service's resolved ports. When the ports came
-from a compose mapping, use the **host** side:
+`ngrok.port` must match one of the service's resolved ports. Which number that
+is depends on the deployer you configured.
+
+### Kubernetes
+
+Use the **host** side of a compose mapping. The endpoint routes through a k8s
+Service, and the host side is what becomes the Service port.
 
 ```yaml
 ports:
   - "8080:3000" # host 8080, container 3000
 x-minienv-k8s-service:
   ngrok:
-    port: 8080 # the host side
+    port: 8080
 ```
 
-Using the container port here is an error, not a silent fallback. The whole
-deploy is rejected before anything is installed. See
-[Troubleshooting](./troubleshooting.md).
+### Docker
+
+Use the **container** side of a compose mapping. The agent shares the compose
+network and dials the container directly, so no published port is in the path.
+
+```yaml
+ports:
+  - "8080:3000" # host 8080, container 3000
+x-minienv-docker-service:
+  ngrok:
+    port: 3000
+```
+
+Every `ports:` mapping is cleared before the project reaches the remote host, so
+nothing is published to that host's network and the agent does not need it to
+be.
+
+### When it does not match
+
+Naming a port the service did not resolve is an error, not a silent fallback.
+The whole deploy is rejected before anything is installed, and the message lists
+the ports that _were_ on offer:
+
+```
+ngrok port 8080 matches no port for this service: expected one of [3000]
+```
+
+See [Troubleshooting](./troubleshooting.md).
 
 ## A stable URL
 
@@ -114,8 +171,8 @@ service needs a fixed webhook target.
 > pattern.
 
 Without a reserved domain the URL survives a redeploy that changes nothing, but
-adding or removing any published service replaces the ngrok pod and reassigns
-every unreserved URL at once.
+adding or removing any published service replaces the agent and reassigns every
+unreserved URL at once.
 
 ## Traffic policy
 
@@ -191,8 +248,8 @@ report at the end.
 
 ## Things to expect
 
-- ngrok configuration has **no effect on `deploymentType: job`**. A job renders
-  no k8s Service, so there is nothing for an endpoint to route to. minienv logs
-  a warning and publishes nothing for it.
-- The same applies to a service marked `skip: true` — it is never installed, so
-  it is never published.
+- ngrok configuration has **no effect on a service marked `skip: true`**. It is
+  never deployed, so there is nothing for the endpoint's upstream to reach.
+  minienv logs a warning and publishes nothing for it.
+- On Kubernetes, the same applies to **`deploymentType: job`**. A job renders no
+  k8s Service, so there is nothing for an endpoint to route to.

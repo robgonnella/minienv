@@ -1,8 +1,7 @@
 package image
 
-// GetFilteredList exposes the build-field filter to the external test package.
-// BuildAndPush is the only caller and it shells out to docker immediately
-// afterwards, so this is the only way to assert on the filter alone.
+// GetFilteredList exposes the build-field filter, which is otherwise reachable
+// only through a code path that shells out to docker.
 func (d *Docker) GetFilteredList(
 	services []ServiceProperties,
 ) []ServiceProperties {

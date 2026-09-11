@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -23,22 +22,17 @@ import (
 var urlRegex = regexp.MustCompile(`(?m)http:\/\/localhost(:?\:\d+)?(:?\/.*)?`)
 
 const (
-	defaultImagePlatform = "linux/amd64"
-	defaultPortProtocol  = "TCP"
-	httpDefaultPort      = "80"
-	httpsDefaultPort     = "443"
+	defaultPortProtocol = "TCP"
+	httpDefaultPort     = "80"
+	httpsDefaultPort    = "443"
 )
 
 // ChartImage is the configuration for a service image.
 type ChartImage struct {
-	// Image Repository for the service image
-	Repository string `json:"repository" mapstructure:"repository"`
+	ServiceImage `mapstructure:",squash"`
+
 	// PullPolicy for this image
 	PullPolicy string `json:"pullPolicy,omitempty" mapstructure:"pullPolicy,omitempty"`
-	// Image tag for the service image
-	Tag string `json:"tag" mapstructure:"tag"`
-	// The platforms for which to build and push default [linux/amd64])
-	Platforms []string `json:"platforms,omitempty" mapstructure:"platforms,omitempty"`
 }
 
 // ChartImagePullSecret names a secret that enables pulling private images.
@@ -136,6 +130,8 @@ type XMiniEnvK8s struct {
 	// Controls the Helm timeout. This is applied to all services but can be
 	// overridden using the service-level extension
 	DeploymentTimeout string `json:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
+	// Ngrok configuration for exposing services publicly
+	Ngrok *NgrokTopLevel `json:"ngrok,omitzero" mapstructure:"ngrok,omitzero"`
 }
 
 type K8sDeploymentType = string
@@ -165,7 +161,7 @@ type XMiniEnvK8sService struct {
 // create and resolve a new XMiniEnvK8sService instance.
 type XMiniEnvK8sServiceOptions struct {
 	// The main top-level x-minienv extension config
-	MainExt *XMiniEnv
+	K8sExt XMiniEnvK8s
 	// The specific docker-compose service we are generating config for
 	Service ComposeService
 	// GitClient for resolving short-shas in +git tags
@@ -178,7 +174,7 @@ func NewXMiniEnvK8sService(
 	ctx context.Context,
 	opts XMiniEnvK8sServiceOptions,
 ) (*XMiniEnvK8sService, error) {
-	if opts.MainExt.K8s.Context == "" || opts.MainExt.K8s.Namespace == "" {
+	if opts.K8sExt.Context == "" || opts.K8sExt.Namespace == "" {
 		return nil, errs.Errorf(
 			ErrK8sNotConfigured,
 			"k8s is not configured for this project",
@@ -305,11 +301,11 @@ func (s *XMiniEnvK8sService) resolve(
 	s.resolveEnvironment(opts.Service)
 
 	// After resolveServicePorts, which it checks the ngrok port against.
-	if err := s.resolveNgrok(opts.MainExt, opts.NgrokEnabled); err != nil {
+	if err := s.resolveNgrok(opts.K8sExt, opts.NgrokEnabled); err != nil {
 		return err
 	}
 
-	s.resolveDeploymentTimeout(opts.MainExt)
+	s.resolveDeploymentTimeout(opts.K8sExt)
 
 	return nil
 }
@@ -539,41 +535,15 @@ func (s *XMiniEnvK8sService) resolveChartValues(rawSvcExt any) error {
 }
 
 func (s *XMiniEnvK8sService) resolveNgrok(
-	mainExt *XMiniEnv,
+	k8sExt XMiniEnvK8s,
 	ngrokEnabled bool,
 ) error {
-	// With no auth token there is nothing to expose, so drop any ngrok config
-	// entirely. Everything downstream can then treat a zero Ngrok.Port as
-	// "ngrok is off" without needing to know about the token.
-	if !ngrokEnabled {
-		s.Ngrok = Ngrok{}
-		return nil
+	servicePorts := make([]uint16, 0, len(s.Service.Ports))
+	for _, p := range s.Service.Ports {
+		servicePorts = append(servicePorts, p.ServicePort)
 	}
 
-	if s.Ngrok.TrafficPolicy == "" && mainExt.Ngrok.TrafficPolicy != "" {
-		s.Ngrok.TrafficPolicy = mainExt.Ngrok.TrafficPolicy
-	}
-
-	if s.Ngrok.Port == 0 {
-		return nil
-	}
-
-	hasServicePort := slices.ContainsFunc(
-		s.Service.Ports,
-		func(svcPort ChartServicePort) bool {
-			return svcPort.ServicePort == s.Ngrok.Port
-		},
-	)
-
-	if !hasServicePort {
-		return errs.Errorf(
-			ErrNgrokPortMismatch,
-			"exposeServicePort must match a mapped port either in extension or"+
-				"from host port mapping in docker compose config",
-		)
-	}
-
-	return nil
+	return resolveNgrok(k8sExt.Ngrok, &s.Ngrok, servicePorts, ngrokEnabled)
 }
 
 func (s *XMiniEnvK8sService) resolveServiceImage(
@@ -581,77 +551,19 @@ func (s *XMiniEnvK8sService) resolveServiceImage(
 	svc ComposeService,
 	gitClient git.Client,
 ) error {
-	split := strings.SplitN(svc.Image, ":", 2)
-	svcImageRepo := ""
-	svcImageTag := ""
-
-	if len(split) > 1 {
-		svcImageRepo = split[0]
-		svcImageTag = split[1]
+	image := &ServiceImage{
+		Repository: s.Image.Repository,
+		Tag:        s.Image.Tag,
+		Platforms:  s.Image.Platforms,
 	}
 
-	if s.Image.Repository == "" {
-		s.Image.Repository = svcImageRepo
+	if err := resolveServiceImage(ctx, image, svc, gitClient); err != nil {
+		return err
 	}
 
-	if s.Image.Tag == "" {
-		s.Image.Tag = svcImageTag
-	}
-
-	var err error
-
-	if s.Image.Repository == "" {
-		err = errors.Join(
-			err,
-			errs.Errorf(
-				ErrImageRepositoryMissing,
-				"image.repository must be specified in service extension",
-			),
-		)
-	}
-
-	if s.Image.Tag == "" {
-		err = errors.Join(
-			err,
-			errs.Errorf(
-				ErrImageTagMissing,
-				"image.tag must be specified in service extension",
-			),
-		)
-	}
-
-	if strings.Contains(s.Image.Tag, "+git") {
-		if err := s.expandGitTag(ctx, gitClient); err != nil {
-			return err
-		}
-	}
-
-	s.Image.Repository = strings.TrimSpace(s.Image.Repository)
-	s.Image.Tag = strings.TrimSpace(s.Image.Tag)
-
-	if len(s.Image.Platforms) == 0 {
-		s.Image.Platforms = []string{defaultImagePlatform}
-	}
-
-	return err
-}
-
-// A "+git" tag is resolved here rather than at deploy time so every chart in
-// one run embeds the same sha.
-func (s *XMiniEnvK8sService) expandGitTag(
-	ctx context.Context,
-	gitClient git.Client,
-) error {
-	sha, err := gitClient.ShortSha(ctx)
-	if err != nil {
-		return errs.Errorf(
-			ErrGitShortSha,
-			"failed to get short sha from git for image tag: %w",
-			err,
-		)
-	}
-
-	s.Image.Tag = strings.ReplaceAll(s.Image.Tag, "+git", sha)
+	s.Image.Repository = image.Repository
+	s.Image.Tag = image.Tag
+	s.Image.Platforms = image.Platforms
 
 	return nil
 }
@@ -829,11 +741,11 @@ func (s *XMiniEnvK8sService) applyProbes(
 }
 
 func (s *XMiniEnvK8sService) resolveDeploymentTimeout(
-	mainExt *XMiniEnv,
+	k8sExt XMiniEnvK8s,
 ) {
 	if s.DeploymentTimeout == "" {
-		if mainExt.K8s.DeploymentTimeout != "" {
-			s.DeploymentTimeout = mainExt.K8s.DeploymentTimeout
+		if k8sExt.DeploymentTimeout != "" {
+			s.DeploymentTimeout = k8sExt.DeploymentTimeout
 		} else {
 			s.DeploymentTimeout = HelmDefaultDeploymentTimeout
 		}

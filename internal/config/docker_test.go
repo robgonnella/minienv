@@ -1,0 +1,241 @@
+package config_test
+
+import (
+	"context"
+	"math"
+
+	"github.com/compose-spec/compose-go/v2/types"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/config"
+	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
+)
+
+var _ = Describe("XMiniEnvDockerService", func() {
+	var (
+		dockerExt config.XMiniEnvDocker
+		svc       config.ComposeService
+		mockGit   *gitmocks.MockClient
+	)
+
+	newSvcExt := func() (*config.XMiniEnvDockerService, error) {
+		return config.NewXMiniEnvDockerService(
+			context.Background(),
+			svc,
+			dockerExt,
+			mockGit,
+			false,
+		)
+	}
+
+	BeforeEach(func() {
+		dockerExt = config.XMiniEnvDocker{Namespace: "namespace"}
+		mockGit = gitmocks.NewMockClient(GinkgoT())
+		svc = config.ComposeService{Name: "test-service"}
+	})
+
+	Describe("resolving the image from the compose service", func() {
+		DescribeTable(
+			"splits the reference into repository and tag",
+			func(image, wantRepo, wantTag string) {
+				svc.Image = image
+
+				svcExt, err := newSvcExt()
+
+				Expect(err).ToNot(HaveOccurred())
+				Expect(svcExt.Image.Repository).To(Equal(wantRepo))
+				Expect(svcExt.Image.Tag).To(Equal(wantTag))
+			},
+			Entry("a plain repository and tag", "alpine:3.24", "alpine", "3.24"),
+			Entry("an untagged reference", "alpine", "alpine", "latest"),
+			Entry(
+				"a namespaced untagged reference",
+				"library/alpine",
+				"library/alpine",
+				"latest",
+			),
+			Entry(
+				"a registry port and a tag",
+				"registry.local:5000/app:v1",
+				"registry.local:5000/app",
+				"v1",
+			),
+			Entry(
+				"a registry port and no tag",
+				"registry.local:5000/app",
+				"registry.local:5000/app",
+				"latest",
+			),
+		)
+
+		It("rejects a digest reference rather than mis-splitting it", func() {
+			svc.Image = "app@sha256:abc123"
+
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(config.ErrImageDigestUnsupported))
+		})
+
+		It("lets the extension override the compose image", func() {
+			svc.Image = "alpine:3.24"
+			svc.Extensions = map[string]any{
+				config.DockerServiceExtension: map[string]any{
+					"image": map[string]any{
+						"repository": "repo/override",
+						"tag":        "v2",
+					},
+				},
+			}
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Image.Repository).To(Equal("repo/override"))
+			Expect(svcExt.Image.Tag).To(Equal("v2"))
+		})
+
+		It("errors when there is no image anywhere", func() {
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(config.ErrImageRepositoryMissing))
+		})
+	})
+
+	Describe("resolving ngrok", func() {
+		// ngrok resolves to nothing without a token, so every spec here needs
+		// one; the token-absent case is asserted on its own below.
+		newEnabledSvcExt := func() (*config.XMiniEnvDockerService, error) {
+			return config.NewXMiniEnvDockerService(
+				context.Background(),
+				svc,
+				dockerExt,
+				mockGit,
+				true,
+			)
+		}
+
+		withNgrok := func(ngrok map[string]any) {
+			svc.Extensions = map[string]any{
+				config.DockerServiceExtension: map[string]any{"ngrok": ngrok},
+			}
+		}
+
+		BeforeEach(func() {
+			svc.Image = "reg/app:v1"
+			svc.Ports = []types.ServicePortConfig{
+				{Target: 3000, Published: "8080"},
+			}
+		})
+
+		It("accepts the container side of a mapping", func() {
+			withNgrok(map[string]any{"port": 3000})
+
+			svcExt, err := newEnabledSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Ngrok.Port).To(BeEquivalentTo(3000))
+		})
+
+		It("rejects the published side of a mapping", func() {
+			withNgrok(map[string]any{"port": 8080})
+
+			_, err := newEnabledSvcExt()
+
+			Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
+		})
+
+		It("rejects a port when the service declares none", func() {
+			svc.Ports = nil
+
+			withNgrok(map[string]any{"port": 3000})
+
+			_, err := newEnabledSvcExt()
+
+			Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
+		})
+
+		It("rejects a container port that does not fit a uint16", func() {
+			svc.Ports = []types.ServicePortConfig{
+				{Target: math.MaxUint16 + 1, Published: "8080"},
+			}
+
+			withNgrok(map[string]any{"port": 3000})
+
+			_, err := newEnabledSvcExt()
+
+			Expect(err).To(MatchError(config.ErrInvalidPort))
+		})
+
+		It("inherits the top-level traffic policy", func() {
+			dockerExt.Ngrok = &config.NgrokTopLevel{TrafficPolicy: "top"}
+
+			withNgrok(map[string]any{"port": 3000})
+
+			svcExt, err := newEnabledSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Ngrok.TrafficPolicy).To(Equal("top"))
+		})
+
+		It("lets the service override the top-level traffic policy", func() {
+			dockerExt.Ngrok = &config.NgrokTopLevel{TrafficPolicy: "top"}
+
+			withNgrok(map[string]any{
+				"port":          3000,
+				"trafficPolicy": "mine",
+			})
+
+			svcExt, err := newEnabledSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Ngrok.TrafficPolicy).To(Equal("mine"))
+		})
+
+		It("zeroes the whole block with no auth token", func() {
+			dockerExt.Ngrok = &config.NgrokTopLevel{TrafficPolicy: "top"}
+
+			withNgrok(map[string]any{
+				"port":          3000,
+				"url":           "https://example.ngrok.app",
+				"trafficPolicy": "mine",
+			})
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Ngrok).To(Equal(config.NgrokServiceLevel{}))
+		})
+	})
+
+	Describe("common service properties", func() {
+		It("decodes skip through the squashed common struct", func() {
+			svc.Image = "reg/app:v1"
+			svc.Extensions = map[string]any{
+				config.DockerServiceExtension: map[string]any{"skip": true},
+			}
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Skip).To(BeTrue())
+		})
+
+		It("defaults skip to false when the extension is absent", func() {
+			svc.Image = "reg/app:v1"
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Skip).To(BeFalse())
+		})
+	})
+
+	Describe("XMiniEnvDocker", func() {
+		It("names ssh as its only transport field", func() {
+			ext := config.XMiniEnvDocker{}
+
+			Expect(ext.TransportFields()).To(Equal([]string{"ssh"}))
+		})
+	})
+})

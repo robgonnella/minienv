@@ -153,8 +153,8 @@ const fakeNgrokToken = "fake-token-for-tests"
 // publishable is one endpoint shaped the way initProject emits them. Built by
 // hand so these specs state exactly what reaches the templates; which services
 // earn an endpoint, and in what order, is asserted against initProject itself.
-func publishable(name string, port uint16) helm.NgrokConfig {
-	return helm.NgrokConfig{
+func publishable(name string, port uint16) config.NgrokEndpointConfig {
+	return config.NgrokEndpointConfig{
 		Namespace:    "namespace",
 		EndpointName: "namespace-" + name,
 		ServiceName:  name,
@@ -165,7 +165,7 @@ func publishable(name string, port uint16) helm.NgrokConfig {
 var _ = Describe("ChartBuilder", func() {
 	var (
 		subject *helm.ChartBuilder
-		ext     *config.XMiniEnv
+		k8sExt  config.XMiniEnvK8s
 		mockGit *gitmocks.MockClient
 	)
 
@@ -178,7 +178,7 @@ var _ = Describe("ChartBuilder", func() {
 		svcExt, err := config.NewXMiniEnvK8sService(
 			context.Background(),
 			config.XMiniEnvK8sServiceOptions{
-				MainExt:      ext,
+				K8sExt:       k8sExt,
 				Service:      svc,
 				GitClient:    mockGit,
 				NgrokEnabled: false,
@@ -193,11 +193,9 @@ var _ = Describe("ChartBuilder", func() {
 	}
 
 	BeforeEach(func() {
-		ext = &config.XMiniEnv{
-			K8s: config.XMiniEnvK8s{
-				Context:   "context",
-				Namespace: "namespace",
-			},
+		k8sExt = config.XMiniEnvK8s{
+			Context:   "context",
+			Namespace: "namespace",
 		}
 		mockGit = gitmocks.NewMockClient(GinkgoT())
 		subject = helm.NewChartBuilder(fakeNgrokToken)
@@ -519,7 +517,7 @@ var _ = Describe("ChartBuilder", func() {
 	Describe("NgrokValues", func() {
 		It("resolves no values with nothing to publish", func() {
 			Expect(subject.NgrokValues(nil)).To(BeNil())
-			Expect(subject.NgrokValues([]helm.NgrokConfig{})).To(BeNil())
+			Expect(subject.NgrokValues([]config.NgrokEndpointConfig{})).To(BeNil())
 		})
 	})
 
@@ -574,13 +572,13 @@ var _ = Describe("ChartBuilder", func() {
 
 		Context("rendered against the endpoints to publish", func() {
 			var (
-				toPublish []helm.NgrokConfig
+				toPublish []config.NgrokEndpointConfig
 				rendered  map[string]string
 			)
 
 			renderNgrok := func(
 				builder *helm.ChartBuilder,
-				endpoints []helm.NgrokConfig,
+				endpoints []config.NgrokEndpointConfig,
 			) map[string]string {
 				GinkgoHelper()
 
@@ -591,7 +589,7 @@ var _ = Describe("ChartBuilder", func() {
 			}
 
 			BeforeEach(func() {
-				toPublish = []helm.NgrokConfig{
+				toPublish = []config.NgrokEndpointConfig{
 					publishable("alpha", 3000),
 					publishable("beta", 3001),
 				}
@@ -621,7 +619,7 @@ var _ = Describe("ChartBuilder", func() {
 			// this spec is what says that is deliberate.
 			Context("with two endpoints on the same port", func() {
 				BeforeEach(func() {
-					toPublish = []helm.NgrokConfig{
+					toPublish = []config.NgrokEndpointConfig{
 						publishable("alpha", 8080),
 						publishable("beta", 8080),
 					}
@@ -648,7 +646,7 @@ var _ = Describe("ChartBuilder", func() {
 				BeforeEach(func() {
 					alpha := publishable("alpha", 3000)
 					alpha.URL = "https://example.ngrok.app"
-					toPublish = []helm.NgrokConfig{alpha}
+					toPublish = []config.NgrokEndpointConfig{alpha}
 				})
 
 				It("pins the endpoint to it", func() {
@@ -666,7 +664,7 @@ var _ = Describe("ChartBuilder", func() {
 					alpha.TrafficPolicy = "on_http_request:\n" +
 						"  - actions:\n" +
 						"      - type: deny\n"
-					toPublish = []helm.NgrokConfig{alpha}
+					toPublish = []config.NgrokEndpointConfig{alpha}
 				})
 
 				// The documented form is a block scalar; interpolated flat it

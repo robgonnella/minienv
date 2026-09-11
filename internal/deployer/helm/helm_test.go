@@ -45,7 +45,7 @@ func exposedService(name string, servicePort int) config.ComposeService {
 
 var _ = Describe("Helm", func() {
 	var (
-		ext         *config.XMiniEnv
+		k8sExt      config.XMiniEnvK8s
 		mockImage   *imagemocks.MockClient
 		mockGit     *gitmocks.MockClient
 		mockPublish *publishingmocks.MockClient
@@ -55,11 +55,9 @@ var _ = Describe("Helm", func() {
 	)
 
 	BeforeEach(func() {
-		ext = &config.XMiniEnv{
-			K8s: config.XMiniEnvK8s{
-				Context:   "context",
-				Namespace: "namespace",
-			},
+		k8sExt = config.XMiniEnvK8s{
+			Context:   "context",
+			Namespace: "namespace",
 		}
 		mockImage = imagemocks.NewMockClient(GinkgoT())
 		mockGit = gitmocks.NewMockClient(GinkgoT())
@@ -77,7 +75,7 @@ var _ = Describe("Helm", func() {
 
 	JustBeforeEach(func() {
 		subject = helm.New(helm.Options{
-			Ext:            ext,
+			K8sExt:         k8sExt,
 			ImageClient:    mockImage,
 			GitClient:      mockGit,
 			PublishClient:  mockPublish,
@@ -88,60 +86,35 @@ var _ = Describe("Helm", func() {
 
 	Describe("Deployer interface", func() {
 		It("identifies itself as the k8s deployer", func() {
-			Expect(subject.ConfigField()).To(Equal("k8s"))
 			Expect(subject.String()).To(Equal("Helm"))
 		})
 	})
 
-	Describe("Active", func() {
-		It("is active when both context and namespace are set", func() {
-			Expect(subject.Active()).To(BeTrue())
-		})
-
-		It("is inactive with no context", func() {
-			ext.K8s.Context = ""
-
-			Expect(subject.Active()).To(BeFalse())
-		})
-
-		It("is inactive with no namespace", func() {
-			ext.K8s.Namespace = ""
-
-			Expect(subject.Active()).To(BeFalse())
-		})
-
-		It("is inactive with neither configured", func() {
-			ext.K8s = config.XMiniEnvK8s{}
-
-			Expect(subject.Active()).To(BeFalse())
-		})
-	})
-
 	Describe("when inactive", func() {
-		var project *config.ComposeProject
+		var project config.ComposeProject
 
 		BeforeEach(func() {
-			ext.K8s = config.XMiniEnvK8s{}
-			project = &config.ComposeProject{Name: "test-project"}
+			k8sExt = config.XMiniEnvK8s{}
+			project = config.ComposeProject{Name: "test-project"}
 		})
 
 		// These return before any helm or kubernetes client is constructed, so
 		// they are safe to exercise without a cluster.
-		It("does nothing on Init", func() {
-			Expect(subject.Init(context.Background(), project)).To(Succeed())
+		It("returns error on Init", func() {
+			Expect(subject.Init(context.Background(), project)).NotTo(Succeed())
 		})
 
-		It("does nothing on Deploy", func() {
-			Expect(subject.Deploy(context.Background())).To(Succeed())
+		It("returns error on Deploy", func() {
+			Expect(subject.Deploy(context.Background())).NotTo(Succeed())
 		})
 
-		It("does nothing on Destroy", func() {
-			Expect(subject.Destroy(context.Background())).To(Succeed())
+		It("returns error on Destroy", func() {
+			Expect(subject.Destroy(context.Background())).NotTo(Succeed())
 		})
 	})
 
 	Describe("buildAndPushServiceImages", func() {
-		var project *config.ComposeProject
+		var project config.ComposeProject
 
 		// A service the build pass should pick up: it has a build block, an
 		// image the extension can resolve, and no skip flag.
@@ -160,7 +133,7 @@ var _ = Describe("Helm", func() {
 		}
 
 		BeforeEach(func() {
-			project = &config.ComposeProject{Name: "test-project"}
+			project = config.ComposeProject{Name: "test-project"}
 		})
 
 		It("translates a buildable service into image properties", func() {
@@ -270,14 +243,13 @@ var _ = Describe("Helm", func() {
 		})
 	})
 
-	// The half of Init that runs before a cluster is touched. Everything
-	// downstream reads the map it builds, so a service that cannot be resolved
-	// has to fail here rather than midway through a deployment.
+	// The half of Init that runs before a cluster is touched, so a service that
+	// cannot be resolved fails here rather than midway through a deployment.
 	Describe("initProject", func() {
-		var project *config.ComposeProject
+		var project config.ComposeProject
 
 		BeforeEach(func() {
-			project = &config.ComposeProject{Name: "test-project"}
+			project = config.ComposeProject{Name: "test-project"}
 		})
 
 		It("returns a config error when a service cannot be resolved", func() {
@@ -347,11 +319,11 @@ var _ = Describe("Helm", func() {
 	})
 
 	Describe("PublishedServiceUrls", func() {
-		var project *config.ComposeProject
+		var project config.ComposeProject
 
 		BeforeEach(func() {
 			ngrokToken = "fake-token-for-tests"
-			project = &config.ComposeProject{
+			project = config.ComposeProject{
 				Name: "test-project",
 				Services: types.Services{
 					"beta":  exposedService("beta", 3001),
@@ -426,13 +398,13 @@ var _ = Describe("Helm", func() {
 	})
 
 	Describe("the endpoints it resolves to publish", func() {
-		var project *config.ComposeProject
+		var project config.ComposeProject
 
 		BeforeEach(func() {
 			ngrokToken = "fake-token-for-tests"
 			// Out of order and in a map, so any ordering in the result has to
 			// come from initProject's own sort.
-			project = &config.ComposeProject{
+			project = config.ComposeProject{
 				Name: "test-project",
 				Services: types.Services{
 					"beta":  exposedService("beta", 3001),
@@ -448,13 +420,13 @@ var _ = Describe("Helm", func() {
 			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 
 			Expect(subject.ServicesToPublish()).To(HaveExactElements(
-				helm.NgrokConfig{
+				config.NgrokEndpointConfig{
 					Namespace:    "namespace",
 					EndpointName: "namespace-alpha",
 					ServiceName:  "alpha",
 					Port:         3000,
 				},
-				helm.NgrokConfig{
+				config.NgrokEndpointConfig{
 					Namespace:    "namespace",
 					EndpointName: "namespace-beta",
 					ServiceName:  "beta",
@@ -495,7 +467,7 @@ var _ = Describe("Helm", func() {
 
 		Context("resolved for a different namespace", func() {
 			BeforeEach(func() {
-				ext.K8s.Namespace = "other-namespace"
+				k8sExt.Namespace = "other-namespace"
 			})
 
 			It("names each endpoint after that namespace", func() {

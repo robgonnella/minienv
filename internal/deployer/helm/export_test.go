@@ -12,7 +12,7 @@ import (
 // read — in a test binary.
 func (h *Helm) InitProject(
 	ctx context.Context,
-	project *config.ComposeProject,
+	project config.ComposeProject,
 ) error {
 	return h.initProject(ctx, project)
 }
@@ -21,7 +21,7 @@ func (h *Helm) InitProject(
 // walk only reads h.project, and its fixtures are bare services carrying nothing
 // but a name and depends_on — deliberately unresolvable — so those specs need
 // this rather than InitProject.
-func (h *Helm) SetProject(project *config.ComposeProject) {
+func (h *Helm) SetProject(project config.ComposeProject) {
 	h.project = project
 }
 
@@ -29,7 +29,7 @@ func (h *Helm) SetProject(project *config.ComposeProject) {
 // project. Which services earn one — and in what order — is a decision made
 // here, not in the chart, so specs assert on it directly rather than digging it
 // back out of rendered ngrok values.
-func (h *Helm) ServicesToPublish() []NgrokConfig {
+func (h *Helm) ServicesToPublish() []config.NgrokEndpointConfig {
 	return h.servicesToPublish
 }
 
