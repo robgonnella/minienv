@@ -1,0 +1,13 @@
+x-minienv:
+  k8s:
+    context: test-context
+    namespace: test-namespace
+  docker:
+    namespace: test-namespace
+    ssh:
+      host: example.com
+      identity: /tmp/id_ed25519
+
+services:
+  hello:
+    image: reg/hello:v1

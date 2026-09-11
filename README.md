@@ -39,8 +39,19 @@ minienv deploy     # bring it up
 minienv destroy    # tear it down
 ```
 
-Add `--dry-run` to either to preview without pushing images or touching the
-cluster.
+Or target a remote docker host instead of a cluster:
+
+```yaml
+x-minienv:
+  docker:
+    namespace: my-feature-branch
+    ssh:
+      host: dev-box.example.com
+      identity: ~/.ssh/id_ed25519
+```
+
+Add `--dry-run` to either command to preview without pushing images or changing
+the target.
 
 ## Documentation
 
@@ -56,4 +67,11 @@ just docs-serve
 
 ## Deployers
 
-Kubernetes is currently the only supported deployment target. More are planned.
+Deploy targets are configured under `x-minienv`:
+
+- **`k8s`** — deploys each compose service as its own Helm release, using a
+  chart minienv generates internally. No chart to maintain, no `helm` binary.
+- **`docker`** — deploys the whole project to a single remote host over SSH, as
+  one `docker compose` project under `~/.minienv/<namespace>`.
+
+Exactly one may be configured. See [Deployers](./docs/src/deployers.md).

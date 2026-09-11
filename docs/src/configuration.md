@@ -1,16 +1,25 @@
 # Configuration
 
-minienv adds exactly two fields to your compose file.
+minienv adds one top-level field to your compose file, plus a per-service field
+for whichever deployment target you picked.
 
-| Field                   | Where           | Purpose                                      |
-| ----------------------- | --------------- | -------------------------------------------- |
-| `x-minienv`             | top level       | Chooses and configures the deployment target |
-| `x-minienv-k8s-service` | under a service | Per-service overrides                        |
+| Field                      | Where           | Purpose                                      |
+| -------------------------- | --------------- | -------------------------------------------- |
+| `x-minienv`                | top level       | Chooses and configures the deployment target |
+| `x-minienv-k8s-service`    | under a service | Per-service overrides, Kubernetes target     |
+| `x-minienv-docker-service` | under a service | Per-service overrides, Docker target         |
 
-Both are standard compose extension fields, so `docker compose` ignores them.
+All are standard compose extension fields, so `docker compose` ignores them.
 The same file keeps working locally.
 
+Use the service extension matching your active deployer. The other one is not an
+error — it is simply ignored, which is worth remembering when a setting seems to
+have no effect.
+
 ## `x-minienv`
+
+Configure exactly one target. Configuring both is an error; configuring neither
+means minienv has no target and refuses to run.
 
 ```yaml
 x-minienv:
@@ -18,13 +27,25 @@ x-minienv:
     context: minikube # required
     namespace: my-branch # required
     deploymentTimeout: 60s # optional, default 60s
-  ngrok:
-    trafficPolicy: "" # optional, applies to all services
+    ngrok:
+      trafficPolicy: "" # optional, applies to all services
 ```
 
-`k8s.context` and `k8s.namespace` are required — supplying them is what
-activates the Kubernetes deployer. Without them minienv has no target and
-refuses to run.
+```yaml
+x-minienv:
+  docker:
+    namespace: my-branch # required
+    ssh: # exactly one transport is required
+      host: dev-box.example.com # required
+      identity: ~/.ssh/id_ed25519 # required
+      user: me # optional, defaults to the local user
+      port: 22 # optional, default 22
+    ngrok:
+      trafficPolicy: "" # optional, applies to all services
+```
+
+For `k8s`, `context` and `namespace` are both required. For `docker`,
+`namespace` is required along with exactly one transport block.
 
 ## `x-minienv-k8s-service`
 

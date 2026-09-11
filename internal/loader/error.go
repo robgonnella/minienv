@@ -7,10 +7,12 @@ import "github.com/robgonnella/minienv/internal/errs"
 // Failure modes raised by this package. Values are namespaced because errs.Kind
 // is one shared type — see internal/errs.
 const (
-	ErrProjectOptions    errs.Kind = "loader.project_options"
-	ErrProjectLoad       errs.Kind = "loader.project_load"
-	ErrNoExtension       errs.Kind = "loader.no_extension"
-	ErrExtensionDecode   errs.Kind = "loader.extension_decode"
-	ErrMultipleDeployers errs.Kind = "loader.multiple_deployers"
-	ErrNoActiveDeployer  errs.Kind = "loader.no_active_deployer"
+	ErrProjectOptions           errs.Kind = "loader.project_options"
+	ErrProjectLoad              errs.Kind = "loader.project_load"
+	ErrNoExtension              errs.Kind = "loader.no_extension"
+	ErrExtensionDecode          errs.Kind = "loader.extension_decode"
+	ErrMultipleDeployers        errs.Kind = "loader.multiple_deployers"
+	ErrNoActiveDeployer         errs.Kind = "loader.no_active_deployer"
+	ErrMultipleDockerTransports errs.Kind = "loader.multiple_docker_transports"
+	ErrNoActiveDockerTransport  errs.Kind = "loader.no_active_docker_transport"
 )

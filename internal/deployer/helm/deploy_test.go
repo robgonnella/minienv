@@ -80,18 +80,16 @@ func (r *recorder) succeeded() []string {
 
 var _ = Describe("Helm", func() {
 	var (
-		ext       *config.XMiniEnv
+		k8sExt    config.XMiniEnvK8s
 		mockImage *imagemocks.MockClient
 		mockGit   *gitmocks.MockClient
 		subject   *helm.Helm
 	)
 
 	BeforeEach(func() {
-		ext = &config.XMiniEnv{
-			K8s: config.XMiniEnvK8s{
-				Context:   "context",
-				Namespace: "namespace",
-			},
+		k8sExt = config.XMiniEnvK8s{
+			Context:   "context",
+			Namespace: "namespace",
 		}
 		mockImage = imagemocks.NewMockClient(GinkgoT())
 		mockGit = gitmocks.NewMockClient(GinkgoT())
@@ -99,7 +97,7 @@ var _ = Describe("Helm", func() {
 
 	JustBeforeEach(func() {
 		subject = helm.New(helm.Options{
-			Ext:            ext,
+			K8sExt:         k8sExt,
 			ImageClient:    mockImage,
 			GitClient:      mockGit,
 			NgrokAuthToken: "",
@@ -109,13 +107,13 @@ var _ = Describe("Helm", func() {
 
 	Describe("deployInDependencyOrder", func() {
 		var (
-			project *config.ComposeProject
+			project config.ComposeProject
 			rec     *recorder
 		)
 
 		BeforeEach(func() {
 			_, cancel := context.WithCancel(context.Background())
-			project = &config.ComposeProject{Name: "test-project"}
+			project = config.ComposeProject{Name: "test-project"}
 			rec = newRecorder(cancel)
 		})
 
@@ -277,14 +275,14 @@ var _ = Describe("Helm", func() {
 
 	Describe("destroyInReverseDependencyOrder", func() {
 		var (
-			project *config.ComposeProject
+			project config.ComposeProject
 			rec     *recorder
 		)
 
 		BeforeEach(func() {
 			_, cancel := context.WithCancel(context.Background())
 			rec = newRecorder(cancel)
-			project = &config.ComposeProject{
+			project = config.ComposeProject{
 				Name: "test-project",
 				Services: types.Services{
 					"api":   dependent("api", "cache"),
@@ -336,7 +334,7 @@ var _ = Describe("Helm", func() {
 				config.K8sServiceExtension: map[string]any{"skip": true},
 			}
 
-			Expect(subject.InitProject(context.Background(), &config.ComposeProject{
+			Expect(subject.InitProject(context.Background(), config.ComposeProject{
 				Name:     "test-project",
 				Services: types.Services{"hello": svc},
 			})).To(Succeed())
@@ -354,7 +352,7 @@ var _ = Describe("Helm", func() {
 		It("errors for a service that was never resolved by Init", func() {
 			ctx := context.Background()
 
-			Expect(subject.InitProject(context.Background(), &config.ComposeProject{
+			Expect(subject.InitProject(context.Background(), config.ComposeProject{
 				Name: "test-project",
 			})).To(Succeed())
 

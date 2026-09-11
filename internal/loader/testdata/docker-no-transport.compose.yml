@@ -1,0 +1,7 @@
+x-minienv:
+  docker:
+    namespace: test-namespace
+
+services:
+  hello:
+    image: reg/hello:v1

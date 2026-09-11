@@ -10,6 +10,7 @@ import (
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
 	"github.com/robgonnella/minienv/internal/loader"
+	"github.com/robgonnella/minienv/internal/transport"
 )
 
 const testdataDir = "testdata"
@@ -74,6 +75,43 @@ var _ = Describe("Loader", func() {
 			).LoadCore(context.Background())
 
 			Expect(err).To(MatchError(loader.ErrExtensionDecode))
+		})
+
+		It("builds a core from a docker extension with an ssh transport", func() {
+			core, err := newLoader(
+				fixture("docker-ssh.compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(core).ToNot(BeNil())
+		})
+
+		// Counting configured targets before building any of them keeps this
+		// ahead of whatever a half-configured deployer would complain about.
+		It("errors when both deploy targets are configured", func() {
+			_, err := newLoader(
+				fixture("multiple-deployers.compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).To(MatchError(loader.ErrMultipleDeployers))
+		})
+
+		It("errors when docker configures no transport", func() {
+			_, err := newLoader(
+				fixture("docker-no-transport.compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).To(MatchError(loader.ErrNoActiveDockerTransport))
+		})
+
+		// The transport validates itself as it is built, so a half-configured
+		// ssh block fails the load rather than the deploy.
+		It("surfaces an ssh block missing its required fields", func() {
+			_, err := newLoader(
+				fixture("docker-bad-ssh.compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).To(MatchError(transport.ErrInvalidExtension))
 		})
 	})
 

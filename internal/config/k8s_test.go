@@ -3,8 +3,9 @@ package config_test
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/mock"
 	"time"
+
+	"github.com/stretchr/testify/mock"
 
 	"github.com/compose-spec/compose-go/v2/types"
 	. "github.com/onsi/ginkgo/v2"
@@ -18,12 +19,10 @@ func duration(d time.Duration) *types.Duration {
 	return &converted
 }
 
-func k8sExt() *config.XMiniEnv {
-	return &config.XMiniEnv{
-		K8s: config.XMiniEnvK8s{
-			Context:   "context",
-			Namespace: "namespace",
-		},
+func makeK8sExt() config.XMiniEnvK8s {
+	return config.XMiniEnvK8s{
+		Context:   "context",
+		Namespace: "namespace",
 	}
 }
 
@@ -33,20 +32,20 @@ var errNotARepo = errors.New("not a repo")
 
 var _ = Describe("XMiniEnvK8sService", func() {
 	var (
-		mainExt      *config.XMiniEnv
+		k8sExt       config.XMiniEnvK8s
 		svc          config.ComposeService
 		mockGit      *gitmocks.MockClient
 		ngrokEnabled bool
 	)
 
 	// Options are assembled lazily rather than in BeforeEach because specs
-	// mutate mainExt, svc and ngrokEnabled in their own bodies before
+	// mutate k8sExt, svc and ngrokEnabled in their own bodies before
 	// resolving.
 	newSvcExt := func() (*config.XMiniEnvK8sService, error) {
 		return config.NewXMiniEnvK8sService(
 			context.Background(),
 			config.XMiniEnvK8sServiceOptions{
-				MainExt:      mainExt,
+				K8sExt:       k8sExt,
 				Service:      svc,
 				GitClient:    mockGit,
 				NgrokEnabled: ngrokEnabled,
@@ -54,7 +53,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 	}
 
 	BeforeEach(func() {
-		mainExt = k8sExt()
+		k8sExt = makeK8sExt()
 		mockGit = gitmocks.NewMockClient(GinkgoT())
 		ngrokEnabled = false
 		svc = config.ComposeService{
@@ -65,7 +64,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 	Describe("required configuration", func() {
 		It("returns a config error if k8s is not configured", func() {
-			mainExt = &config.XMiniEnv{}
+			k8sExt = config.XMiniEnvK8s{}
 			svc = config.ComposeService{Name: "test-service"}
 
 			_, err := newSvcExt()
@@ -444,7 +443,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		})
 
 		It("prefers the top-level timeout over the default", func() {
-			mainExt.K8s.DeploymentTimeout = "5m"
+			k8sExt.DeploymentTimeout = "5m"
 
 			result, err := newSvcExt()
 
@@ -453,7 +452,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		})
 
 		It("prefers the service timeout over the top-level timeout", func() {
-			mainExt.K8s.DeploymentTimeout = "5m"
+			k8sExt.DeploymentTimeout = "5m"
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
 					"deploymentTimeout": "90s",
@@ -476,7 +475,9 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("inherits the top-level traffic policy", func() {
 			ngrokEnabled = true
-			mainExt.Ngrok.TrafficPolicy = "top-level-policy"
+			k8sExt.Ngrok = &config.NgrokTopLevel{
+				TrafficPolicy: "top-level-policy",
+			}
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{"port": 3000},
@@ -491,7 +492,9 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 		It("lets the service traffic policy win", func() {
 			ngrokEnabled = true
-			mainExt.Ngrok.TrafficPolicy = "top-level-policy"
+			k8sExt.Ngrok = &config.NgrokTopLevel{
+				TrafficPolicy: "top-level-policy",
+			}
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{
@@ -524,7 +527,9 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		})
 
 		It("clears all ngrok config when no auth token is available", func() {
-			mainExt.Ngrok.TrafficPolicy = "top-level-policy"
+			k8sExt.Ngrok = &config.NgrokTopLevel{
+				TrafficPolicy: "top-level-policy",
+			}
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{
@@ -537,10 +542,8 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			result, err := newSvcExt()
 
-			// Downstream code treats a zero Ngrok.Port as "ngrok is off", so
-			// nothing may survive resolution when there is no token to use.
 			Expect(err).ShouldNot(HaveOccurred())
-			Expect(result.Ngrok).To(Equal(config.Ngrok{}))
+			Expect(result.Ngrok).To(Equal(config.NgrokServiceLevel{}))
 		})
 
 		Context("with an auth token set", func() {

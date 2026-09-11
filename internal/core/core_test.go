@@ -3,8 +3,9 @@ package core_test
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/mock"
 	"net/url"
+
+	"github.com/stretchr/testify/mock"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -20,8 +21,8 @@ var errBoom = errors.New("boom")
 var _ = Describe("Core", func() {
 	var (
 		mockDeployer     *deployermocks.MockDeployer
-		project          *config.ComposeProject
-		ext              *config.XMiniEnv
+		project          config.ComposeProject
+		ext              config.XMiniEnv
 		subject          *core.Core
 		testPublishedURL *url.URL
 	)
@@ -33,9 +34,9 @@ var _ = Describe("Core", func() {
 		testPublishedURL = publishedURL
 
 		mockDeployer = deployermocks.NewMockDeployer(GinkgoT())
-		project = &config.ComposeProject{Name: "test-project"}
-		ext = &config.XMiniEnv{
-			K8s: config.XMiniEnvK8s{
+		project = config.ComposeProject{Name: "test-project"}
+		ext = config.XMiniEnv{
+			K8s: &config.XMiniEnvK8s{
 				Context:   "context",
 				Namespace: "namespace",
 			},

@@ -10,6 +10,7 @@ const (
 	ErrValuesDecode           errs.Kind = "config.values_decode"
 	ErrImageRepositoryMissing errs.Kind = "config.image_repository_missing"
 	ErrImageTagMissing        errs.Kind = "config.image_tag_missing"
+	ErrImageDigestUnsupported errs.Kind = "config.image_digest_unsupported"
 	ErrGitShortSha            errs.Kind = "config.git_short_sha"
 	ErrInvalidPort            errs.Kind = "config.invalid_port"
 	ErrInvalidPublishedPort   errs.Kind = "config.invalid_published_port"
