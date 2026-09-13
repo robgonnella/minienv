@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -37,6 +38,55 @@ var _ = Describe("GitClient", func() {
 			// trailing newline would travel into the rendered chart values.
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(sha).To(Equal(strings.TrimSpace(sha)))
+		})
+
+		It("resolves a single sha across concurrent callers", func() {
+			const callers = 8
+
+			results := make(chan string, callers)
+
+			var wg sync.WaitGroup
+
+			for range callers {
+				wg.Add(1)
+
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+
+					sha, err := subject.ShortSha(context.Background())
+
+					Expect(err).ShouldNot(HaveOccurred())
+
+					results <- sha
+				}()
+			}
+
+			wg.Wait()
+			close(results)
+
+			shas := map[string]struct{}{}
+			for sha := range results {
+				shas[sha] = struct{}{}
+			}
+
+			Expect(shas).To(HaveLen(1))
+		})
+
+		Context("when a sha has already been resolved", func() {
+			It("returns it without running git", func() {
+				// The directory is outside any repository, so git could only
+				// fail here: a sha coming back proves it never ran.
+				cached := git.NewGitClientWithCachedSha(
+					GinkgoT().TempDir(),
+					"cafe123",
+				)
+
+				sha, err := cached.ShortSha(context.Background())
+
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(sha).To(Equal("cafe123"))
+			})
 		})
 
 		Context("outside a git repository", func() {

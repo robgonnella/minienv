@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/robgonnella/minienv/internal/errs"
 )
@@ -15,6 +16,11 @@ type GitClient struct {
 	// process's own directory, which is what production always uses; specs set
 	// it to reach ShortSha's error branch without os.Chdir.
 	dir string
+
+	mu sync.Mutex
+	// A client resolves one sha and reuses it, so a run embeds the same sha in
+	// every image tag off a single git process rather than one per service.
+	cachedSha string
 }
 
 func NewGitClient() *GitClient {
@@ -24,6 +30,13 @@ func NewGitClient() *GitClient {
 // ShortSha returns the abbreviated commit hash of HEAD. The trailing newline
 // git writes is stripped here so callers can embed the value directly.
 func (c *GitClient) ShortSha(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cachedSha != "" {
+		return c.cachedSha, nil
+	}
+
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
 	cmd.Dir = c.dir
 
@@ -45,5 +58,7 @@ func (c *GitClient) ShortSha(ctx context.Context) (string, error) {
 		return "", errs.Errorf(ErrShortSha, "git rev-parse failed: %w", err)
 	}
 
-	return strings.TrimSpace(string(data)), nil
+	c.cachedSha = strings.TrimSpace(string(data))
+
+	return c.cachedSha, nil
 }
