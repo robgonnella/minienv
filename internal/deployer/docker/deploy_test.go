@@ -353,7 +353,6 @@ services:
 				BuildAndPush(mock.Anything, mock.Anything).
 				Return(errBake).
 				Once()
-			mockTransport.EXPECT().Close().Return(nil).Once()
 
 			Expect(subject.Deploy(context.Background())).To(MatchError(errBake))
 		})
@@ -475,8 +474,6 @@ services:
 			})
 
 			It("writes nothing and opens no session", func() {
-				mockTransport.EXPECT().Close().Return(nil).Once()
-
 				Expect(subject.Deploy(context.Background())).To(Succeed())
 			})
 		})

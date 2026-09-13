@@ -2,9 +2,9 @@
 
 ## Run-to-completion jobs
 
-Set `deploymentType: job` to deploy a service as a Kubernetes Job instead of a
-long-running Deployment. This is for work that finishes: migrations, seed data,
-fixtures, smoke tests.
+On Kubernetes, set `deploymentType: job` to deploy a service as a Job instead of
+a long-running Deployment. This is for work that finishes: migrations, seed
+data, fixtures, smoke tests.
 
 ```yaml
 services:
@@ -26,20 +26,16 @@ A job accepts the full extension schema, but several keys have no effect on one:
 `replicas`, `service.create`, `service.type`, `volumes`, `volumeMounts`,
 `tolerations`, the three probes, and `ngrok`.
 
-Ports are still read — they define the container's declared ports — but no
-Kubernetes Service is created for a job. That is also why `ngrok` is ignored:
-an endpoint's upstream is a Service, and a job has none. minienv logs a warning
-and publishes nothing rather than creating a URL that cannot route.
-
-The Job resource itself is named with a random suffix, because a Job's
-`spec.template` and `spec.selector` are immutable and an upgrade cannot patch
-one in place — every deploy renders a new Job. The helm release is named after
-the service, so `minienv down` finds and removes it.
+No Kubernetes Service is created for a job, which is why `ngrok` is ignored —
+there is nothing for an endpoint to route to. minienv logs a warning and
+publishes nothing rather than creating a URL that cannot resolve.
 
 ## Ordering with `depends_on`
 
-minienv deploys services in `depends_on` order and destroys them in reverse.
-Independent services deploy in parallel, up to five at a time.
+On Kubernetes, minienv deploys services in `depends_on` order and destroys them
+in reverse, with independent services going up in parallel. On Docker your
+`depends_on` block reaches the remote host as written, and compose orders the
+project there.
 
 ```yaml
 services:
@@ -75,22 +71,18 @@ deploys `api`.
 
 ### How the conditions are treated
 
-minienv uses the dependency **edges** to build a deploy order. It does not
-interpret the `condition:` values themselves.
-
-In practice each service still waits for the one before it, because every
-release is deployed with Helm waiting for pods to become ready and for jobs to
-complete before moving on. The practical consequence is that
-`condition: service_started` behaves the same as `condition: service_healthy` —
-both simply create an edge.
+On Kubernetes only the dependency **edges** are used, not the `condition:`
+values — so `service_started` and `service_healthy` behave identically. Each
+service still waits for the one before it to be ready, so the ordering above
+holds either way.
 
 Cycles, and a `depends_on` naming a service that does not exist, are caught
 before anything is deployed.
 
 ## Timeouts
 
-Each service gets 60 seconds to become ready by default. Slow migrations and
-databases that take a while to initialize will hit that limit.
+On Kubernetes, each service gets 60 seconds to become ready by default. Slow
+migrations and databases that take a while to initialize will hit that limit.
 
 Raise it for everything:
 

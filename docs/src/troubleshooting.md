@@ -34,8 +34,7 @@ token — replaces the agent, which reassigns every unreserved URL at once.
 
 Pin the ones that matter with `ngrok.url`. A randomly assigned URL cannot be
 re-claimed, so a reserved domain is the only way to hold an address. See
-[Exposing Services](./exposing-services.md#how-it-is-deployed) for what replaces
-the agent on your deployer.
+[Exposing Services](./exposing-services.md#a-stable-url).
 
 ## A new service is not published, or a removed one still is
 
@@ -55,9 +54,7 @@ On Docker:
 ssh <host> 'cd ~/.minienv/<namespace> && docker compose ps ngrok'
 ```
 
-The agent reads its config once, at startup, so something has to carry the
-change into the thing the platform watches. See
-[Exposing Services](./exposing-services.md#how-it-is-deployed).
+See [Exposing Services](./exposing-services.md#what-gets-published).
 
 ## The ngrok agent will not start
 
@@ -65,8 +62,7 @@ Check whether `ngrok.url` names a domain your account actually holds. The agent
 refuses a domain that is not reserved, and names the one it could not claim in
 its own logs.
 
-On Kubernetes the release installs with `--atomic`, so the whole deploy fails at
-its last step:
+On Kubernetes the whole deploy fails at its last step, and rolls back:
 
 ```sh
 kubectl logs -n <namespace> -l app.kubernetes.io/name=ngrok
@@ -93,17 +89,12 @@ url: https://${MINIENV_NAMESPACE}-api.example.ngrok.app
 
 ## A redeploy did not pick up my rebuilt image
 
-The image tag did not change, so nothing saw a reason to replace the container.
-Use a tag that moves — `+git` appends the current short sha. See
+The image tag did not change, so neither target saw a reason to replace the
+container. Use a tag that moves — `+git` appends the current short sha. See
 [Images and Builds](./images-and-builds.md#tagging-per-commit-with-git).
 
-On Kubernetes, Helm restarts pods only when something in the release actually
-changed, so a fixed tag leaves the old pods running. `recreate: true` on the
-service forces a replacement on every deploy; see
-[Configuration Reference](./configuration-reference.md#notes).
-
-On Docker, compose replaces a container only when its service definition
-changes, and a rebuilt image behind the same tag does not change it.
+On Kubernetes you can instead force a replacement on every deploy with
+`recreate: true` on the service.
 
 ## A code change does not show up at all
 
@@ -134,9 +125,11 @@ Each extension's accepted fields are listed in
 
 ## A compose setting has no effect
 
-minienv reads a subset of compose. `entrypoint`, `volumes`, `networks`,
-`restart`, `user` and others are ignored — see
-[what minienv ignores](./configuration.md#what-minienv-ignores).
+On Kubernetes, minienv reads a subset of compose: `entrypoint`, `volumes`,
+`networks`, `restart`, `user` and others are ignored. On Docker, check whether
+it is a bind mount or a `file:`-based secret, which cannot follow the project to
+another host. Both are covered in
+[what to change in your compose file](./configuration.md#what-to-change-in-your-compose-file).
 
 ## A health check never runs
 

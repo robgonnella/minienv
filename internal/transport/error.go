@@ -8,6 +8,7 @@ import "github.com/robgonnella/minienv/internal/errs"
 // is one shared type — see internal/errs.
 const (
 	ErrInvalidExtension    errs.Kind = "transport.invalid_extension"
+	ErrUserHomeDir         errs.Kind = "transport.user_home_dir"
 	ErrSSHTransportUser    errs.Kind = "transport.ssh_transport_user"
 	ErrSSHIdentityResolve  errs.Kind = "transport.ssh_identity_resolve"
 	ErrSSHIdentityRead     errs.Kind = "transport.ssh_identity_read"
@@ -16,7 +17,6 @@ const (
 	ErrSSHClientClose      errs.Kind = "transport.ssh_client_close"
 	ErrSSHSessionCreate    errs.Kind = "transport.ssh_session_create"
 	ErrSSHCommandRun       errs.Kind = "transport.ssh_command_run"
-	ErrSSHUserHomeDir      errs.Kind = "transport.ssh_user_home_dir"
 	ErrSSHHostKeyCallback  errs.Kind = "transport.ssh_hostkey_callback"
 	ErrSSHHeredocDelimiter errs.Kind = "transport.ssh_heredoc_delimiter"
 )

@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path"
 	"path/filepath"
+	"time"
 
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/errs"
@@ -18,7 +19,13 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-const heredocNonceBytes = 8
+const (
+	heredocNonceBytes = 8
+	// An unset Timeout means the dial has no deadline at all, and ssh.Dial
+	// takes no context, so a black-holing host would hang with nothing to
+	// cancel it.
+	sshDialTimeout = 30 * time.Second
+)
 
 // Masks cmd before reporting it because a command body can carry a credential,
 // and this error is logged in full further up.
@@ -171,7 +178,12 @@ func (s *SSHTransport) connect() (*ssh.Client, error) {
 }
 
 func (s *SSHTransport) identitySigner() (ssh.Signer, error) {
-	privKeyPath, err := filepath.Abs(s.config.Identity)
+	identity, err := expandHome(s.config.Identity)
+	if err != nil {
+		return nil, err
+	}
+
+	privKeyPath, err := filepath.Abs(identity)
 	if err != nil {
 		return nil, errs.Errorf(
 			ErrSSHIdentityResolve,
@@ -232,6 +244,7 @@ func (s *SSHTransport) createClient() (*ssh.Client, error) {
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: hostKeyCallback,
+		Timeout:         sshDialTimeout,
 	}
 
 	addr := fmt.Sprintf("%s:%d", s.config.Host, port)
@@ -267,16 +280,10 @@ func (s *SSHTransport) username() (string, error) {
 }
 
 func (s *SSHTransport) knownHostkeyCallback() (ssh.HostKeyCallback, error) {
-	home, err := os.UserHomeDir()
+	knownHostsPath, err := expandHome("~/.ssh/known_hosts")
 	if err != nil {
-		return nil, errs.Errorf(
-			ErrSSHUserHomeDir,
-			"failed to get the user's home directory: %w",
-			err,
-		)
+		return nil, err
 	}
-
-	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
 
 	// Create the callback helper
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)

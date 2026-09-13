@@ -31,6 +31,12 @@ type remotePaths struct {
 	ngrokConfig string
 }
 
+type remoteContent struct {
+	compose []byte
+	ngrok   []byte
+	dotEnv  []byte
+}
+
 type serviceTuple struct {
 	compose   config.ComposeService
 	extension config.XMiniEnvDockerService
@@ -56,6 +62,7 @@ type Docker struct {
 	gitClient         git.Client
 	publishClient     publishing.Client
 	ngrokAuthToken    string
+	remotePaths       remotePaths
 	dryRun            bool
 }
 
@@ -66,6 +73,11 @@ func New(opts Options) *Docker {
 		opts.DockerExt.Namespace,
 	)
 
+	remoteFolder := "~/.minienv/" + opts.DockerExt.Namespace
+	composeFile := remoteFolder + "/compose.yml"
+	dotEnvFile := remoteFolder + "/.env"
+	ngrokConfig := remoteFolder + "/ngrok.yml"
+
 	return &Docker{
 		dockerExt:      opts.DockerExt,
 		transport:      opts.Transport,
@@ -73,7 +85,13 @@ func New(opts Options) *Docker {
 		gitClient:      opts.GitClient,
 		publishClient:  opts.PublishClient,
 		ngrokAuthToken: opts.NgrokAuthToken,
-		dryRun:         opts.DryRun,
+		remotePaths: remotePaths{
+			dir:         remoteFolder,
+			dotEnvFile:  dotEnvFile,
+			composeFile: composeFile,
+			ngrokConfig: ngrokConfig,
+		},
+		dryRun: opts.DryRun,
 	}
 }
 
@@ -152,42 +170,24 @@ func (d *Docker) Deploy(ctx context.Context) error {
 		return err
 	}
 
-	defer d.closeTransport()
-
 	if err := d.buildAndPushServiceImages(ctx); err != nil {
 		return err
 	}
 
-	remote := d.remotePaths()
-
-	// Rendered before the rewrite: the injected service labels these bytes.
-	var ngrokConfigContent []byte
-
-	var err error
-
-	if len(d.servicesToPublish) > 0 {
-		ngrokConfigContent, err = d.ngrokConfigContent()
-		if err != nil {
-			return err
-		}
-	}
-
-	newComposeContent, err := d.modifyComposeContent(ctx, ngrokConfigContent)
+	remoteContent, err := d.remoteContent(ctx)
 	if err != nil {
 		return err
 	}
 
 	if d.dryRun {
-		d.logRemoteContentDryRun(remote, newComposeContent, ngrokConfigContent)
+		d.logRemoteFilesDryRun()
 
 		return nil
 	}
 
-	if err := d.writeRemoteFiles(
-		remote,
-		newComposeContent,
-		ngrokConfigContent,
-	); err != nil {
+	defer d.closeTransport()
+
+	if err := d.writeRemoteFiles(remoteContent); err != nil {
 		return err
 	}
 
@@ -196,7 +196,7 @@ func (d *Docker) Deploy(ctx context.Context) error {
 	return d.transport.RunCommand(
 		fmt.Sprintf(
 			"cd %s && docker compose up -d --remove-orphans",
-			remote.dir,
+			d.remotePaths.dir,
 		),
 	)
 }
@@ -218,19 +218,16 @@ func (d *Docker) Destroy(_ context.Context) error {
 
 	defer d.closeTransport()
 
-	remote := d.remotePaths()
-
 	// The directory holds the .env carrying the auth token, so removal is
 	// sequenced rather than chained on down succeeding. Its status is kept.
 	return d.transport.RunCommand(
 		fmt.Sprintf(
-			"cd %s 2>/dev/null || exit 0; "+
+			"cd %[1]s 2>/dev/null || exit 0; "+
 				"docker compose down --volumes --remove-orphans; "+
 				"status=$?; "+
-				"rm -rf %s; "+
+				"rm -rf %[1]s; "+
 				"exit $status",
-			remote.dir,
-			remote.dir,
+			d.remotePaths.dir,
 		),
 	)
 }
@@ -308,14 +305,10 @@ func (d *Docker) buildAndPushServiceImages(ctx context.Context) error {
 	return nil
 }
 
-func (d *Docker) writeRemoteFiles(
-	remote remotePaths,
-	composeContent []byte,
-	ngrokConfigContent []byte,
-) error {
+func (d *Docker) writeRemoteFiles(content *remoteContent) error {
 	if err := d.transport.CreateFile(
-		remote.composeFile,
-		composeContent,
+		d.remotePaths.composeFile,
+		content.compose,
 	); err != nil {
 		return err
 	}
@@ -326,35 +319,29 @@ func (d *Docker) writeRemoteFiles(
 		return d.transport.RunCommand(
 			fmt.Sprintf(
 				"rm -f %s %s",
-				remote.dotEnvFile,
-				remote.ngrokConfig,
+				d.remotePaths.dotEnvFile,
+				d.remotePaths.ngrokConfig,
 			),
 		)
 	}
 
 	if err := d.transport.CreateFile(
-		remote.dotEnvFile,
-		d.remoteDotEnvContent(),
+		d.remotePaths.dotEnvFile,
+		content.dotEnv,
 	); err != nil {
 		return err
 	}
 
-	return d.transport.CreateFile(remote.ngrokConfig, ngrokConfigContent)
+	return d.transport.CreateFile(d.remotePaths.ngrokConfig, content.ngrok)
 }
 
-func (d *Docker) logRemoteContentDryRun(
-	remote remotePaths,
-	composeContent []byte,
-	ngrokConfigContent []byte,
-) {
+// Paths only: the rendered compose file is fully interpolated by this point, so
+// its body carries whatever the project's own ${VAR}s resolved to.
+func (d *Docker) logRemoteFilesDryRun() {
 	log.Warn().Msg("dry-run mode: skipping deploy")
 	log.
 		Warn().
-		Msgf(
-			"would have created compose config: %s : %s",
-			remote.composeFile,
-			composeContent,
-		)
+		Msgf("would have created compose config: %s", d.remotePaths.composeFile)
 
 	if len(d.servicesToPublish) == 0 {
 		return
@@ -362,11 +349,35 @@ func (d *Docker) logRemoteContentDryRun(
 
 	log.
 		Warn().
-		Msgf(
-			"would have created ngrok config: %s : %s",
-			remote.ngrokConfig,
-			ngrokConfigContent,
-		)
+		Msgf("would have created ngrok config: %s", d.remotePaths.ngrokConfig)
+	log.
+		Warn().
+		Msgf("would have created env file: %s", d.remotePaths.dotEnvFile)
+}
+
+func (d *Docker) remoteContent(ctx context.Context) (*remoteContent, error) {
+	// Rendered before the rewrite: the injected service labels these bytes.
+	var ngrokConfigContent []byte
+
+	var err error
+
+	if len(d.servicesToPublish) > 0 {
+		ngrokConfigContent, err = d.ngrokConfigContent()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	newComposeContent, err := d.modifyComposeContent(ctx, ngrokConfigContent)
+	if err != nil {
+		return nil, err
+	}
+
+	return &remoteContent{
+		compose: newComposeContent,
+		ngrok:   ngrokConfigContent,
+		dotEnv:  d.remoteDotEnvContent(),
+	}, nil
 }
 
 func (d *Docker) skippedServices() []string {
@@ -381,26 +392,10 @@ func (d *Docker) skippedServices() []string {
 	return names
 }
 
-func (d *Docker) remotePaths() remotePaths {
-	remoteFolder := "~/.minienv/" + d.dockerExt.Namespace
-	composeFile := remoteFolder + "/compose.yml"
-	dotEnvFile := remoteFolder + "/.env"
-	ngrokConfig := remoteFolder + "/ngrok.yml"
-
-	return remotePaths{
-		dir:         remoteFolder,
-		composeFile: composeFile,
-		dotEnvFile:  dotEnvFile,
-		ngrokConfig: ngrokConfig,
-	}
-}
-
 func (d *Docker) modifyComposeContent(
 	ctx context.Context,
 	ngrokConfigContent []byte,
 ) ([]byte, error) {
-	remote := d.remotePaths()
-
 	project, err := compose.ReloadWithNewName(
 		ctx,
 		d.project,
@@ -421,7 +416,7 @@ func (d *Docker) modifyComposeContent(
 	if len(d.servicesToPublish) > 0 {
 		compose.InjectNgrokService(
 			project,
-			remote.ngrokConfig,
+			d.remotePaths.ngrokConfig,
 			ngrokConfigChecksum(ngrokConfigContent, d.ngrokAuthToken),
 		)
 	}

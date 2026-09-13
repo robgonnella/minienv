@@ -55,7 +55,7 @@ func (l *Loader) LoadCore(ctx context.Context) (*core.Core, error) {
 		return nil, err
 	}
 
-	return core.New(*ext, *project, deployer, l.opts.DryRun), nil
+	return core.New(*project, deployer), nil
 }
 
 func (l *Loader) loadComposeProject(

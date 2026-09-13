@@ -42,51 +42,22 @@ URL.
 > the former. See [Which port number to use](#which-port-number-to-use) for the
 > port value.
 
-## How it is deployed
+## What gets published
 
-Every service with an `ngrok` block is published by **one ngrok agent per
-namespace**, holding a single config that lists every published service at once.
+One ngrok agent serves every published service in a namespace, and runs
+alongside your containers without changing them.
 
-Each endpoint is named `<namespace>-<service>`. The ngrok API reports every
-endpoint on the whole account, so the namespace prefix is what keeps one
-developer's environment from resolving another's URL. It is also the name shown
-in the URL table and in the ngrok dashboard.
+Each endpoint is named `<namespace>-<service>`. That is the name shown in the
+URL table and in the ngrok dashboard, and the namespace prefix is what keeps one
+developer's environment from resolving another's URL on a shared account.
 
-### Kubernetes
+The agent is replaced only when the published set or the auth token changes,
+which is what decides whether a URL survives:
 
-The agent is installed as its own helm release named `ngrok`, after all your
-service releases have landed. Its config is a ConfigMap, and each endpoint
-routes to that service's k8s Service. The agent runs in its own pod, alongside
-your service pods.
-
-It reads that config once, at startup, so a `checksum/config` pod annotation is
-what rolls the pod when the published set or the auth token changes.
-
-### Docker
-
-The agent is injected into the rewritten compose project as a service named
-`ngrok`, depending on every other service so it starts last. Its config is
-written to `~/.minienv/<namespace>/ngrok.yml` and bind-mounted in, and each
-endpoint dials the container directly over the compose network. The auth token
-reaches it through a `.env` written alongside — the compose file itself only
-names the variable, never its value.
-
-It reads that config once, at startup. compose replaces a container only when
-its own definition changes, which a bind-mounted file is no part of, so a
-`minienv.ngrok/config-checksum` label on the injected service is what carries a
-config change into that definition.
-
-### What this means day to day
-
-- Your own containers are unchanged — one process each, with the agent running
-  beside them.
-- The agent is only replaced when the set of published endpoints, or the auth
-  token, actually changes. A deploy that changes neither leaves it running, so
-  URLs without a reserved domain survive redeploys.
-- Adding or removing an `ngrok` block _does_ replace the agent, so every URL
-  without a reserved domain is reassigned at that point.
-- Removing the last `ngrok` block removes the agent, and `minienv down` removes
-  it along with everything else.
+- A deploy that changes neither leaves URLs without a reserved domain alone.
+- Adding or removing any `ngrok` block reassigns every unreserved URL at once.
+- Removing the last `ngrok` block removes the agent, and `minienv destroy`
+  removes it along with everything else.
 
 ## Which port number to use
 
@@ -118,10 +89,6 @@ x-minienv-docker-service:
   ngrok:
     port: 3000
 ```
-
-Every `ports:` mapping is cleared before the project reaches the remote host, so
-nothing is published to that host's network and the agent does not need it to
-be.
 
 ### When it does not match
 
@@ -214,13 +181,7 @@ There is a second, optional credential alongside the auth token:
 export NGROK_API_KEY=your_api_key_here
 ```
 
-minienv uses it to look up the URL each endpoint is serving on, so it can print
-the table below. That is all it does — publishing does not need it.
-
-> **`NGROK_API_KEY` is optional.** Without it a deploy that publishes still
-> succeeds and everything is still reachable; you get a warning instead of the
-> URL table. `minienv down` never needs it either — teardown does not look
-> anything up.
+minienv uses it to print the URL table after a deploy. That is all it does:
 
 ```
 ====== Published Service URLs ======
@@ -230,21 +191,15 @@ api            https://quiet-mesa-1234.ngrok.app
 web            https://my-branch.example.ngrok.app
 ```
 
-Two separate credentials, doing two different jobs — only one is required:
+Two credentials, two jobs — only one is required:
 
 | Variable          | What it does                                                        |
 | ----------------- | ------------------------------------------------------------------- |
 | `NGROK_AUTHTOKEN` | **Publishes.** Without it every `ngrok` block is silently discarded |
 | `NGROK_API_KEY`   | **Prints the URL table.** Optional; without it the table is skipped |
 
-Once the deploy itself has succeeded, a failure printing the table is only a
-warning — the environment is already up by then, so it is never failed over the
-report at the end.
-
-> The lookup matches ngrok endpoints by name against your service names, and the
-> ngrok API lists every endpoint on the **account**. If two people share one
-> ngrok account and both have a service called `api`, the table can show the
-> other environment's URL.
+Without the API key a publishing deploy still succeeds and everything is still
+reachable — you get a warning instead of the table. Teardown never needs it.
 
 ## Things to expect
 

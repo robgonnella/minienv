@@ -22,7 +22,6 @@ var _ = Describe("Core", func() {
 	var (
 		mockDeployer     *deployermocks.MockDeployer
 		project          config.ComposeProject
-		ext              config.XMiniEnv
 		subject          *core.Core
 		testPublishedURL *url.URL
 	)
@@ -35,13 +34,7 @@ var _ = Describe("Core", func() {
 
 		mockDeployer = deployermocks.NewMockDeployer(GinkgoT())
 		project = config.ComposeProject{Name: "test-project"}
-		ext = config.XMiniEnv{
-			K8s: &config.XMiniEnvK8s{
-				Context:   "context",
-				Namespace: "namespace",
-			},
-		}
-		subject = core.New(ext, project, mockDeployer, false)
+		subject = core.New(project, mockDeployer)
 
 		// Every Deploy/Destroy path logs the deployer name at least once.
 		mockDeployer.EXPECT().String().Return("MockDeployer").Maybe()

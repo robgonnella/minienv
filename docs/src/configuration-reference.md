@@ -153,7 +153,7 @@ minienv passes them through untouched.
 > **`ngrok.port` is the container side of a compose mapping.** The agent shares
 > the compose network and dials the container directly, so for
 > `ports: ["8080:3000"]` the value is `3000`. See
-> [Exposing Services](./exposing-services.md#docker-1).
+> [Exposing Services](./exposing-services.md#docker).
 
 **`ngrok.*`** requires `NGROK_AUTHTOKEN`; without it the whole block is ignored.
 Ignored for a service marked `skip`, since it is never deployed.

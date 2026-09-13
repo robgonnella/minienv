@@ -46,8 +46,7 @@ var _ = Describe("SSHTransport", func() {
 		})
 	})
 
-	// Deploy and Destroy defer Close even on the dry-run path, which never dials.
-	It("closes cleanly when nothing was ever dialled", func() {
+	It("closes cleanly when nothing was ever dialed", func() {
 		client, err := transport.NewSSHTransport(transport.SSHTransportOptions{
 			Config: config.XMiniEnvSSH{Host: "example.com", Identity: "/key"},
 		})
@@ -246,11 +245,14 @@ var _ = Describe("SSHTransport", func() {
 	})
 
 	Describe("resolving the identity", func() {
-		var srv *testServer
+		var (
+			srv  *testServer
+			home string
+		)
 
 		BeforeEach(func() {
 			srv = newTestServer()
-			trustHost(srv)
+			home = trustHost(srv)
 		})
 
 		connectWith := func(identity string) error {
@@ -278,6 +280,13 @@ var _ = Describe("SSHTransport", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(connectWith(rel)).To(Succeed())
+		})
+
+		// Every documented example writes the identity this way.
+		It("expands a leading ~ against the home directory", func() {
+			writeIdentity(filepath.Join(home, ".ssh"))
+
+			Expect(connectWith("~/.ssh/id_ed25519")).To(Succeed())
 		})
 
 		It("reports a missing identity file", func() {
@@ -367,7 +376,7 @@ var _ = Describe("SSHTransport", func() {
 			DeferCleanup(func() { _ = client.Close() })
 
 			Expect(client.RunCommand("true")).
-				To(MatchError(transport.ErrSSHUserHomeDir))
+				To(MatchError(transport.ErrUserHomeDir))
 		})
 	})
 })

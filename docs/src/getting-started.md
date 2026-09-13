@@ -82,8 +82,8 @@ API discovery, and reading existing release state. Nothing is applied.
 > **A `k8s` dry run needs a reachable cluster.** It changes nothing, but it is
 > not a way to check a config without one.
 
-**Docker.** Nothing remote happens at all. minienv renders the files it would
-write and opens no SSH session.
+**Docker.** Nothing remote happens at all. minienv logs the paths it would write
+and opens no SSH session.
 
 ## File discovery
 

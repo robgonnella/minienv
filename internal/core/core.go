@@ -22,22 +22,16 @@ const tablePadding = 3
 
 type Core struct {
 	project  config.ComposeProject
-	ext      config.XMiniEnv
 	deployer deployer.Deployer
-	dryRun   bool
 }
 
 func New(
-	ext config.XMiniEnv,
 	project config.ComposeProject,
 	deployer deployer.Deployer,
-	dryRun bool,
 ) *Core {
 	return &Core{
-		project,
-		ext,
-		deployer,
-		dryRun,
+		project:  project,
+		deployer: deployer,
 	}
 }
 
