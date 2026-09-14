@@ -19,11 +19,8 @@ type declaredKind struct {
 	value string // string value, e.g. "config.invalid_port"
 }
 
-// parseDeclaredKinds reads every error.go under internal and returns the Kind
-// constants it declares. Reading source rather than importing the packages is
-// what makes this catch a kind added later: Go cannot enumerate package-level
-// constants at runtime, so an import-based check would only ever assert on the
-// list someone remembered to update.
+// Reading source rather than importing is what catches a kind added later: Go
+// cannot enumerate package-level constants at runtime.
 func parseDeclaredKinds() []declaredKind {
 	var files []string
 
@@ -86,10 +83,8 @@ func parseDeclaredKinds() []declaredKind {
 	return kinds
 }
 
-// errs.Kind is one shared type, so the compiler no longer stops a loader kind
-// being compared against a config error the way per-package Kind types did.
-// These specs are what replaces that: they hold the namespacing convention
-// that keeps the values distinguishable.
+// errs.Kind is one shared type, so the compiler cannot stop a loader kind
+// being compared against a config error. These specs hold that line instead.
 var _ = Describe("declared kinds", func() {
 	var kinds []declaredKind
 

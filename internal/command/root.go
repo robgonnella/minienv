@@ -42,9 +42,8 @@ make those environments accessible for review and testing.`,
 	return cmd
 }
 
-// Execute runs the CLI. Nothing cancels the context it creates yet; it is
-// threaded from here so a signal handler can be added without touching every
-// layer below.
+// Execute runs the CLI. Every layer below takes its context from the one
+// created here, so cancellation has a single origin.
 func Execute() {
 	if err := newRootCmd().ExecuteContext(context.Background()); err != nil {
 		log.Fatal().Err(err).Msg("command failed")

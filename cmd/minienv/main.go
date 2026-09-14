@@ -11,8 +11,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Called explicitly from main rather than from init so the ordering is visible
-// and a test binary importing this package gets no global side effect.
+// Called from main rather than init so importing this package from a test
+// binary installs no global logger.
 func setupLogging() {
 	log.Logger = zerolog.New(os.Stdout).Output(zerolog.ConsoleWriter{
 		Out:             os.Stderr,
@@ -29,11 +29,8 @@ func setupLogging() {
 				return formatWithColor(zerolog.LevelColors[zerolog.DebugLevel])
 			}
 
-			// Levels are intentionally remapped so minienv gets its own color
-			// scheme rather than zerolog's defaults:
-			//   trace borrows debug's color
-			//   debug borrows info's color
-			//   info borrows trace's color
+			// Remapped so minienv gets its own color scheme rather than
+			// zerolog's defaults.
 			switch strings.ToLower(levelStr) {
 			case strings.ToLower(zerolog.TraceLevel.String()):
 				level = zerolog.DebugLevel

@@ -124,8 +124,7 @@ func (d *Docker) Init(
 
 		services[svc.Name] = serviceTuple{compose: svc, extension: *svcExt}
 
-		// resolveNgrok clears Ngrok without an auth token, so a non-zero port
-		// means ngrok is configured and usable.
+		// Port is zero unless ngrok is configured and usable.
 		if svcExt.Ngrok.Port != 0 {
 			// A skipped service is absent from the remote project, so there is
 			// nothing for the endpoint's upstream to route to.
@@ -201,7 +200,7 @@ func (d *Docker) Deploy(ctx context.Context) error {
 	)
 }
 
-// Destroy takes no ctx until transport.Client honours cancellation.
+// Destroy takes no ctx: transport.Client honours no cancellation to thread.
 func (d *Docker) Destroy(_ context.Context) error {
 	if err := d.validateExtension(); err != nil {
 		return err

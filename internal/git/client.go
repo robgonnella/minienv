@@ -12,9 +12,8 @@ import (
 )
 
 type GitClient struct {
-	// dir is the working directory git runs in. Empty means the calling
-	// process's own directory, which is what production always uses; specs set
-	// it to reach ShortSha's error branch without os.Chdir.
+	// Empty means the calling process's own directory. Specs set it to reach
+	// ShortSha's error branch without os.Chdir.
 	dir string
 
 	mu sync.Mutex

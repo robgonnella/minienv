@@ -393,6 +393,13 @@
         "deploymentTimeout": {
           "type": "string",
           "description": "Controls the Helm timeout for deploying the targeted service"
+        },
+        "manifests": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Paths to Kubernetes manifest files, relative to the project directory, rendered as part of this service's chart"
         }
       },
       "additionalProperties": false,

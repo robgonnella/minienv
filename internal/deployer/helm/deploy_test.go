@@ -17,14 +17,11 @@ import (
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
 )
 
-// The per-service failure the injected step returns, asserted by identity for
-// the same reason.
+// Asserted by identity: the walk must pass the step's error through untouched.
 var errStep = errors.New("step blew up")
 
-// dependent builds a bare service that depends_on each named service. Only the
-// name and depends_on reach the dependency walk. Required matters: compose-go
-// silently drops a dependency that is both unknown and not required, so an
-// optional one would not exercise the unknown-dependency branch.
+// Required matters: compose-go silently drops a dependency that is both
+// unknown and not required, so an optional one would never reach that branch.
 func dependent(name string, deps ...string) config.ComposeService {
 	dependsOn := types.DependsOnConfig{}
 
@@ -230,10 +227,9 @@ var _ = Describe("Helm", func() {
 
 			err := subject.DeployInDependencyOrder(context.Background(), rec.visit)
 
-			// Only the propagation is asserted. Whether api is dispatched before
-			// the group's context cancellation lands is a race inside compose-go's
-			// traversal, so asserting api was skipped would be asserting a
-			// guarantee the walk does not make.
+			// Whether api is dispatched before the group's cancellation lands
+			// is a race inside compose-go, so asserting it was skipped would
+			// assert a guarantee the walk does not make.
 			Expect(err).To(MatchError(errStep))
 			Expect(rec.succeeded()).NotTo(ContainElement("db"))
 		})
@@ -346,9 +342,7 @@ var _ = Describe("Helm", func() {
 		})
 
 		// The step reads the map initProject builds rather than resolving the
-		// extension itself, so a service the map does not know about is the one
-		// failure it still owns — and it means Init was skipped, or the project
-		// changed underneath it.
+		// extension itself, so an unknown service is the one failure it owns.
 		It("errors for a service that was never resolved by Init", func() {
 			ctx := context.Background()
 

@@ -58,6 +58,7 @@ Under `services.<name>`. All fields are optional, listed in path order.
 | `image.tag`                  | string                  | from compose `image`         | Image tag. `+git` expands to the short commit SHA                                            |
 | `imagePullSecrets[].name`    | string                  | —                            | Name of an existing pull secret in the namespace                                             |
 | `livenessProbe`              | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                         |
+| `manifests`                  | list of strings         | —                            | Paths to extra manifests rendered into this service's release                                |
 | `ngrok.port`                 | integer                 | —                            | Container port to expose publicly. Use the **container** side of a compose mapping           |
 | `ngrok.trafficPolicy`        | string                  | inherits top level           | ngrok `on_http_request` policy                                                               |
 | `ngrok.url`                  | string                  | random                       | Reserved domain for a stable endpoint                                                        |
@@ -110,6 +111,49 @@ derived from compose take the container side of the mapping, are named
 > `ports: ["8080:3000"]` the value is `3000`. See
 > [Exposing Services](./exposing-services.md#which-port-number-to-use).
 
+**`manifests`** names files, relative to the directory holding the compose
+file, that are deployed as part of the service's release. This is how a service
+gets a resource minienv does not generate — a ConfigMap or Secret behind a
+`volumes` entry, an Ingress, a PVC, or a custom resource such as a Traefik
+`IngressRoute`:
+
+```yaml
+services:
+  api:
+    image: myorg/api:latest
+    x-minienv-k8s-service:
+      manifests:
+        - k8s/configmap.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: api-config
+      volumeMounts:
+        - name: config
+          mountPath: /etc/api
+```
+
+Each file is a Helm template, with `.Values`, `.Release` and `.Chart` in scope
+alongside the chart's own `generated.name`, `generated.fullname` and
+`generated.labels` helpers, so a manifest can name itself after the release it
+belongs to:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "generated.fullname" . }}-config
+  labels:
+    {{- include "generated.labels" . | nindent 4 }}
+data:
+  LOG_LEVEL: debug
+```
+
+A manifest belongs to its service's release: it is created alongside the
+Deployment or Job and removed when that service is torn down. Two services must
+not declare manifests that produce the same object — the second release to
+reach it fails on ownership, and the order between them is not fixed.
+
 **`ngrok.*`** requires `NGROK_AUTHTOKEN`; without it the whole block is ignored.
 `NGROK_API_KEY` is optional and only used to print the URL table. Ignored for
 `deploymentType: job` and for a service marked `skip`, since neither has a k8s
@@ -130,7 +174,9 @@ services:
 ```
 
 The alternative is to make the tag change instead, with `+git` — see
-[Images and Builds](./images-and-builds.md).
+[Images and Builds](./images-and-builds.md). Note that it applies to the whole
+release rather than to the pods alone: any resource whose update cannot be
+patched in place is replaced, including one named in `manifests`.
 
 ## `x-minienv-docker-service`
 
@@ -199,9 +245,11 @@ And once per namespace, not per service:
 
 The target namespace is created on deploy if it does not already exist.
 
-No Ingress, PersistentVolumeClaim, HorizontalPodAutoscaler, or
-PodDisruptionBudget is ever generated, and compose `environment` values are
-rendered inline rather than into a ConfigMap or Secret.
+Nothing else is generated from the compose file: no Ingress,
+PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget is
+derived from it, and compose `environment` values are rendered inline rather
+than into a ConfigMap or Secret. Any other resource a service needs is declared
+explicitly, with `manifests`.
 
 ## Machine-readable schema
 
