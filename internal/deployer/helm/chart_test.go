@@ -295,10 +295,10 @@ var _ = Describe("ChartBuilder", func() {
 				Expect(deployment).To(ContainSubstring("containerPort: 8080"))
 			})
 
-			It("renders the resolved service port", func() {
+			It("renders the resolved container port", func() {
 				service := templateNamed(rendered, "service.yaml")
 
-				Expect(service).To(ContainSubstring("port: 3000"))
+				Expect(service).To(ContainSubstring("port: 8080"))
 				Expect(service).To(ContainSubstring("targetPort: p8080"))
 			})
 

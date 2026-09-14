@@ -320,8 +320,8 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     {{- range .Values.service.ports }}
-    - name: {{ .servicePortName }}
-      port: {{ .servicePort }}
+    - name: {{ .containerPortName }}
+      port: {{ .containerPort }}
       targetPort: {{ .containerPortName }}
       protocol: {{ .protocol }}
     {{- end }}

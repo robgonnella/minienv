@@ -139,8 +139,8 @@ port.
 
 ## A service has no Kubernetes Service
 
-A service with no ports gets no Service and no ServiceAccount. Add a
-`host:container` port mapping if you expected one.
+A service with no ports gets no Service and no ServiceAccount. Add a port
+mapping to compose `ports:` if you expected one.
 
 ## minienv cannot reach the remote host
 

@@ -26,18 +26,18 @@ var errBake = errors.New("bake blew up")
 // Asserted by identity, so the spec proves the error passes through untouched.
 var errBoom = errors.New("boom")
 
-// The ngrok port matches the published side of the compose mapping, which is
+// The ngrok port matches the container side of the compose mapping, which is
 // what resolveNgrok requires.
-func exposedService(name string, servicePort int) config.ComposeService {
+func exposedService(name string, port int) config.ComposeService {
 	return config.ComposeService{
 		Name:  name,
 		Image: "reg/" + name + ":v1",
 		Ports: []types.ServicePortConfig{
-			{Target: 8080, Published: strconv.Itoa(servicePort)},
+			{Target: uint32(port), Published: strconv.Itoa(port)},
 		},
 		Extensions: types.Extensions{
 			config.K8sServiceExtension: map[string]any{
-				"ngrok": map[string]any{"port": servicePort},
+				"ngrok": map[string]any{"port": port},
 			},
 		},
 	}

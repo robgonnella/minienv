@@ -56,14 +56,10 @@ type ChartServiceAccount struct {
 // ChartServicePort is the port configuration used by both the service and the
 // deployment pod container.
 type ChartServicePort struct {
-	// Name of the container port
+	// Name of the port, used by both the service and the container
 	ContainerPortName string `json:"containerPortName" mapstructure:"containerPortName"`
-	// Container port to expose to service
+	// Container port to expose, which the service exposes under the same number
 	ContainerPort uint16 `json:"containerPort" mapstructure:"containerPort"`
-	// Name of the service port
-	ServicePortName string `json:"servicePortName" mapstructure:"servicePortName"`
-	// Service port to map to the container port
-	ServicePort uint16 `json:"servicePort" mapstructure:"servicePort"`
 	// Protocol to use for these ports
 	Protocol string `json:"protocol" mapstructure:"protocol"`
 }
@@ -225,8 +221,6 @@ func (s *XMiniEnvK8sService) ToChartValuesMap() (map[string]any, error) {
 	servicePorts := []map[string]any{}
 	for _, p := range s.Service.Ports {
 		servicePorts = append(servicePorts, map[string]any{
-			"servicePort":       p.ServicePort,
-			"servicePortName":   p.ServicePortName,
 			"containerPort":     p.ContainerPort,
 			"containerPortName": p.ContainerPortName,
 			"protocol":          p.Protocol,
@@ -538,12 +532,12 @@ func (s *XMiniEnvK8sService) resolveNgrok(
 	k8sExt XMiniEnvK8s,
 	ngrokEnabled bool,
 ) error {
-	servicePorts := make([]uint16, 0, len(s.Service.Ports))
+	containerPorts := make([]uint16, 0, len(s.Service.Ports))
 	for _, p := range s.Service.Ports {
-		servicePorts = append(servicePorts, p.ServicePort)
+		containerPorts = append(containerPorts, p.ContainerPort)
 	}
 
-	return resolveNgrok(k8sExt.Ngrok, &s.Ngrok, servicePorts, ngrokEnabled)
+	return resolveNgrok(k8sExt.Ngrok, &s.Ngrok, containerPorts, ngrokEnabled)
 }
 
 func (s *XMiniEnvK8sService) resolveServiceImage(
@@ -569,9 +563,9 @@ func (s *XMiniEnvK8sService) resolveServiceImage(
 }
 
 func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
-	extensionHasPort := func(ctrPrt, svcPrt uint16) bool {
+	extensionHasPort := func(ctrPrt uint16) bool {
 		return slices.ContainsFunc(s.Service.Ports, func(p ChartServicePort) bool {
-			return p.ContainerPort == ctrPrt && p.ServicePort == svcPrt
+			return p.ContainerPort == ctrPrt
 		})
 	}
 
@@ -584,19 +578,6 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 			)
 		}
 
-		published, err := strconv.ParseUint(p.Published, 10, 16)
-		if err != nil {
-			return errs.Errorf(
-				ErrInvalidPublishedPort,
-				"invalid published port %q for container port %d: %w",
-				p.Published,
-				p.Target,
-				err,
-			)
-		}
-
-		published16 := uint16(published)
-
 		protocol := defaultPortProtocol
 		if p.Protocol != "" {
 			protocol = strings.ToUpper(p.Protocol)
@@ -605,14 +586,11 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 		var containerPort = uint16(p.Target)
 
 		containerPortName := fmt.Sprintf("p%d", containerPort)
-		servicePortName := fmt.Sprintf("p%d", published16)
 
-		if !extensionHasPort(containerPort, published16) {
+		if !extensionHasPort(containerPort) {
 			s.Service.Ports = append(s.Service.Ports, ChartServicePort{
 				ContainerPortName: containerPortName,
 				ContainerPort:     containerPort,
-				ServicePort:       published16,
-				ServicePortName:   servicePortName,
 				Protocol:          protocol,
 			})
 		}

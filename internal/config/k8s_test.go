@@ -163,8 +163,6 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				{
 					ContainerPortName: "p8080",
 					ContainerPort:     8080,
-					ServicePortName:   "p3000",
-					ServicePort:       3000,
 					Protocol:          "TCP",
 				},
 			}))
@@ -190,7 +188,6 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(result.Service.Ports[0].ContainerPort).To(BeEquivalentTo(40000))
-			Expect(result.Service.Ports[0].ServicePort).To(BeEquivalentTo(65535))
 		})
 
 		It("rejects a container port beyond the 16-bit range", func() {
@@ -203,12 +200,14 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			Expect(err).To(MatchError(config.ErrInvalidPort))
 		})
 
-		It("returns a config error for a mapping with no published port", func() {
+		It("uses container port for a mapping with no published port", func() {
 			svc.Ports = []types.ServicePortConfig{{Target: 8080}}
 
-			_, err := newSvcExt()
+			result, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrInvalidPublishedPort))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Service.Ports).To(HaveLen(1))
+			Expect(result.Service.Ports[0].ContainerPort).To(Equal(uint16(8080)))
 		})
 
 		It("does not duplicate a port already declared in the extension", func() {
@@ -222,8 +221,6 @@ var _ = Describe("XMiniEnvK8sService", func() {
 							map[string]any{
 								"containerPortName": "http",
 								"containerPort":     8080,
-								"servicePortName":   "http",
-								"servicePort":       3000,
 								"protocol":          "TCP",
 							},
 						},
@@ -480,7 +477,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			}
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
-					"ngrok": map[string]any{"port": 3000},
+					"ngrok": map[string]any{"port": 8080},
 				},
 			}
 
@@ -498,7 +495,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{
-						"port":          3000,
+						"port":          8080,
 						"trafficPolicy": "service-policy",
 					},
 				},
@@ -513,7 +510,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		It("wires nothing when no auth token is set", func() {
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
-					"ngrok": map[string]any{"port": 3000},
+					"ngrok": map[string]any{"port": 8080},
 				},
 			}
 
@@ -533,7 +530,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
 					"ngrok": map[string]any{
-						"port":          3000,
+						"port":          8080,
 						"url":           "https://example.ngrok.app",
 						"trafficPolicy": "service-policy",
 					},
@@ -551,11 +548,11 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				ngrokEnabled = true
 			})
 
-			// The endpoint's upstream targets a service port, so a port
+			// The endpoint's upstream targets a container port, so a port
 			// matching none of them publishes a URL that cannot route. Raised
 			// while the extension resolves, which the deployer does for every
 			// service up front, so it fails before a release is touched.
-			It("errors when the ngrok port matches no service port", func() {
+			It("errors when the ngrok port matches no container port", func() {
 				svc.Extensions = types.Extensions{
 					config.K8sServiceExtension: map[string]any{
 						"ngrok": map[string]any{"port": 9999},
@@ -567,26 +564,23 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
 			})
 
-			It("accepts a port matching a mapped service port", func() {
+			It("accepts a port matching a mapped container port", func() {
 				svc.Extensions = types.Extensions{
 					config.K8sServiceExtension: map[string]any{
-						"ngrok": map[string]any{"port": 3000},
+						"ngrok": map[string]any{"port": 8080},
 					},
 				}
 
 				result, err := newSvcExt()
 
 				Expect(err).ShouldNot(HaveOccurred())
-				Expect(result.Ngrok.Port).To(Equal(uint16(3000)))
+				Expect(result.Ngrok.Port).To(Equal(uint16(8080)))
 			})
 
-			// The container side of the mapping is not what the Service
-			// exposes, so accepting it would publish an endpoint that
-			// silently fails to route.
-			It("rejects the container side of a port mapping", func() {
+			It("rejects the host side of a port mapping", func() {
 				svc.Extensions = types.Extensions{
 					config.K8sServiceExtension: map[string]any{
-						"ngrok": map[string]any{"port": 8080},
+						"ngrok": map[string]any{"port": 3000},
 					},
 				}
 
@@ -688,8 +682,6 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				{
 					"containerPortName": "p8080",
 					"containerPort":     uint16(8080),
-					"servicePortName":   "p3000",
-					"servicePort":       uint16(3000),
 					"protocol":          "TCP",
 				},
 			}))

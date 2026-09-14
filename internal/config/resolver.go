@@ -117,7 +117,7 @@ func resolveServiceImage(
 func resolveNgrok(
 	topLevel *NgrokTopLevel,
 	serviceLevel *NgrokServiceLevel,
-	servicePorts []uint16,
+	containerPorts []uint16,
 	ngrokEnabled bool,
 ) error {
 	if serviceLevel == nil {
@@ -144,22 +144,19 @@ func resolveNgrok(
 		return nil
 	}
 
-	hasServicePort := slices.ContainsFunc(
-		servicePorts,
+	hasContainerPort := slices.ContainsFunc(
+		containerPorts,
 		func(p uint16) bool {
 			return p == serviceLevel.Port
 		},
 	)
 
-	// Which ports are on offer is target-specific, so naming a side here would
-	// be wrong for one of them. Listing them says the same thing and is more
-	// useful besides.
-	if !hasServicePort {
+	if !hasContainerPort {
 		return errs.Errorf(
 			ErrNgrokPortMismatch,
 			"ngrok port %d matches no port for this service: expected one of %v",
 			serviceLevel.Port,
-			servicePorts,
+			containerPorts,
 		)
 	}
 

@@ -39,8 +39,7 @@ URL.
 
 > Put the `ngrok` block under the service extension matching your deployer:
 > `x-minienv-k8s-service` or `x-minienv-docker-service`. The examples below use
-> the former. See [Which port number to use](#which-port-number-to-use) for the
-> port value.
+> the former.
 
 ## What gets published
 
@@ -61,31 +60,13 @@ which is what decides whether a URL survives:
 
 ## Which port number to use
 
-`ngrok.port` must match one of the service's resolved ports. Which number that
-is depends on the deployer you configured.
-
-### Kubernetes
-
-Use the **host** side of a compose mapping. The endpoint routes through a k8s
-Service, and the host side is what becomes the Service port.
+`ngrok.port` is the **container** side of a compose mapping — the port your
+process listens on. The host side plays no part in it.
 
 ```yaml
 ports:
   - "8080:3000" # host 8080, container 3000
-x-minienv-k8s-service:
-  ngrok:
-    port: 8080
-```
-
-### Docker
-
-Use the **container** side of a compose mapping. The agent shares the compose
-network and dials the container directly, so no published port is in the path.
-
-```yaml
-ports:
-  - "8080:3000" # host 8080, container 3000
-x-minienv-docker-service:
+x-minienv-k8s-service: # or x-minienv-docker-service
   ngrok:
     port: 3000
 ```

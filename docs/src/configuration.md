@@ -90,9 +90,6 @@ Most files deploy as written. These are the cases that need an edit.
 
 ### Kubernetes
 
-- **Write ports as `host:container`.** The bare `- "8080"` form is valid compose
-  but an error here: the container side becomes the pod's `containerPort` and
-  the host side the Service port, so both are needed.
 - **Move an `entrypoint` override into `command`.** `entrypoint` is not read.
 - **Declare storage in the extension** rather than in compose `volumes`:
 

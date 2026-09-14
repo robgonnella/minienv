@@ -33,8 +33,6 @@ services:
         ports:
           - containerPortName: hello
             containerPort: 8080
-            servicePortName: hello
-            servicePort: 8080
             protocol: TCP
       image:
         repository: rgonnella/demo-hello

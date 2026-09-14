@@ -58,7 +58,7 @@ Under `services.<name>`. All fields are optional, listed in path order.
 | `image.tag`                  | string                  | from compose `image`         | Image tag. `+git` expands to the short commit SHA                                            |
 | `imagePullSecrets[].name`    | string                  | —                            | Name of an existing pull secret in the namespace                                             |
 | `livenessProbe`              | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                         |
-| `ngrok.port`                 | integer                 | —                            | Service port to expose publicly. Use the **host** side of a compose mapping                  |
+| `ngrok.port`                 | integer                 | —                            | Container port to expose publicly. Use the **container** side of a compose mapping           |
 | `ngrok.trafficPolicy`        | string                  | inherits top level           | ngrok `on_http_request` policy                                                               |
 | `ngrok.url`                  | string                  | random                       | Reserved domain for a stable endpoint                                                        |
 | `nodeSelector`               | k8s schema              | —                            | Passed through to the pod spec                                                               |
@@ -94,18 +94,21 @@ reference for their shape. The three probes default to whatever a compose
 fails without them — but minienv derives both from a compose `image: repo:tag`
 when the extension omits them.
 
-**Each entry in `service.ports[]`** requires all five fields:
+**Each entry in `service.ports[]`** requires all three fields:
 
-| Field               | Type    | Description                   |
-| ------------------- | ------- | ----------------------------- |
-| `containerPortName` | string  | Name of the container port    |
-| `containerPort`     | integer | Port the container listens on |
-| `servicePortName`   | string  | Name of the service port      |
-| `servicePort`       | integer | Port the Service exposes      |
-| `protocol`          | string  | `TCP` or `UDP`                |
+| Field               | Type    | Description                                    |
+| ------------------- | ------- | ---------------------------------------------- |
+| `containerPortName` | string  | Name of the port, on the container and Service |
+| `containerPort`     | integer | Port the container listens on                  |
+| `protocol`          | string  | `TCP` or `UDP`                                 |
 
-Ports derived from compose are named `p<port>` — `p8080` for container port
-8080 — and default to protocol `TCP`.
+The Service exposes each entry on `containerPort` and targets it by name. Ports
+derived from compose take the container side of the mapping, are named
+`p<port>` — `p8080` for container port 8080 — and default to protocol `TCP`.
+
+> **`ngrok.port` is the container side of a compose mapping.** For
+> `ports: ["8080:3000"]` the value is `3000`. See
+> [Exposing Services](./exposing-services.md#which-port-number-to-use).
 
 **`ngrok.*`** requires `NGROK_AUTHTOKEN`; without it the whole block is ignored.
 `NGROK_API_KEY` is optional and only used to print the URL table. Ignored for
@@ -150,10 +153,9 @@ minienv passes them through untouched.
 
 ### Notes
 
-> **`ngrok.port` is the container side of a compose mapping.** The agent shares
-> the compose network and dials the container directly, so for
+> **`ngrok.port` is the container side of a compose mapping.** For
 > `ports: ["8080:3000"]` the value is `3000`. See
-> [Exposing Services](./exposing-services.md#docker).
+> [Exposing Services](./exposing-services.md#which-port-number-to-use).
 
 **`ngrok.*`** requires `NGROK_AUTHTOKEN`; without it the whole block is ignored.
 Ignored for a service marked `skip`, since it is never deployed.

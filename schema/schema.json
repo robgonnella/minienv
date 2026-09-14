@@ -101,19 +101,11 @@
       "properties": {
         "containerPortName": {
           "type": "string",
-          "description": "Name of the container port"
+          "description": "Name of the port, used by both the service and the container"
         },
         "containerPort": {
           "type": "integer",
-          "description": "Container port to expose to service"
-        },
-        "servicePortName": {
-          "type": "string",
-          "description": "Name of the service port"
-        },
-        "servicePort": {
-          "type": "integer",
-          "description": "Service port to map to the container port"
+          "description": "Container port to expose, which the service exposes under the same number"
         },
         "protocol": {
           "type": "string",
@@ -125,8 +117,6 @@
       "required": [
         "containerPortName",
         "containerPort",
-        "servicePortName",
-        "servicePort",
         "protocol"
       ],
       "description": "ChartServicePort is the port configuration used by both the service and the deployment pod container."
@@ -135,7 +125,7 @@
       "properties": {
         "port": {
           "type": "integer",
-          "description": "Exposes the specified service port publicly via ngrok. This port must match\none of the configured service ports. Which side of a docker-compose port\nmapping that is depends on the target: k8s routes through a Service and\nexpects the host side, docker reaches the container directly over the\ncompose network and expects the container side."
+          "description": "Exposes the specified container port publicly via ngrok. This port must\nmatch one of the container ports resolved for the service, which is the\ncontainer side of a docker-compose port mapping."
         },
         "url": {
           "type": "string",

@@ -32,11 +32,9 @@ type NgrokTopLevel struct {
 
 // NgrokServiceLevel is the configuration for exposing a service publicly.
 type NgrokServiceLevel struct {
-	// Exposes the specified service port publicly via ngrok. This port must match
-	// one of the configured service ports. Which side of a docker-compose port
-	// mapping that is depends on the target: k8s routes through a Service and
-	// expects the host side, docker reaches the container directly over the
-	// compose network and expects the container side.
+	// Exposes the specified container port publicly via ngrok. This port must
+	// match one of the container ports resolved for the service, which is the
+	// container side of a docker-compose port mapping.
 	Port uint16 `json:"port" mapstructure:"port"`
 	// Ngrok url configuration for the service endpoint
 	URL string `json:"url,omitempty" mapstructure:"url,omitempty"`
@@ -51,9 +49,7 @@ type NgrokEndpointConfig struct {
 	EndpointName string `mapstructure:"endpointName"`
 	ServiceName  string `mapstructure:"serviceName"`
 	URL          string `mapstructure:"url"`
-	// The port the ngrok upstream dials, which is not the same thing per
-	// target: the k8s Service port under helm, the container port under
-	// docker compose.
+	// The container port the ngrok upstream dials.
 	Port          uint16 `mapstructure:"port"`
 	TrafficPolicy string `mapstructure:"trafficPolicy"`
 }
