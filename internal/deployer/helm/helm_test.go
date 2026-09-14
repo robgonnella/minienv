@@ -243,8 +243,8 @@ var _ = Describe("Helm", func() {
 		})
 	})
 
-	// The half of Init that runs before a cluster is touched, so a service that
-	// cannot be resolved fails here rather than midway through a deployment.
+	// Needs no cluster, so an unresolvable service fails here rather than
+	// leaving a half-built map behind.
 	Describe("initProject", func() {
 		var project config.ComposeProject
 
@@ -315,6 +315,21 @@ var _ = Describe("Helm", func() {
 				Expect(subject.InitProject(context.Background(), project)).
 					To(MatchError(config.ErrNgrokPortMismatch))
 			})
+		})
+
+		// helm uninstalls from the manifest it stored at install time, so a
+		// file deleted since must not strand a namespace no one can remove.
+		It("resolves a service whose manifest is no longer on disk", func() {
+			svc := config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"manifests": []string{"does-not-exist.yaml"},
+				},
+			}
+			project.Services = types.Services{"hello": svc}
+
+			Expect(subject.InitProject(context.Background(), project)).
+				To(Succeed())
 		})
 	})
 
@@ -448,9 +463,8 @@ var _ = Describe("Helm", func() {
 			}
 		})
 
-		// An upstream is a hostname *and* a port, and the agent dials outbound.
-		// compose.yml keeps hello and hello2 both on 8080, and this spec is what
-		// says that is deliberate.
+		// An upstream is a hostname *and* a port, and the agent dials outbound,
+		// so a shared port is not a collision.
 		It("gives two services on the same port their own endpoints", func() {
 			project.Services = types.Services{
 				"beta":  exposedService("beta", 8080),
@@ -541,11 +555,8 @@ var _ = Describe("Helm", func() {
 			})
 		})
 
-		// An endpoint's assigned url is ephemeral, and ngrok can only bind a
-		// url that is a domain reserved on the account. Reading one back and
-		// writing it into the agent config produced a url the agent could not
-		// claim, which failed the install after every service release had
-		// landed. The only url that reaches the config is a configured one.
+		// ngrok binds only a domain reserved on the account, and an assigned
+		// url is ephemeral, so only a configured one may reach the config.
 		It("never adopts the url the api reports", func() {
 			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
 

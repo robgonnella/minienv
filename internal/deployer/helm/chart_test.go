@@ -20,8 +20,6 @@ import (
 	helmengine "helm.sh/helm/v3/pkg/engine"
 )
 
-// render runs the assembled chart through helm's template engine with the
-// given values, returning each rendered template keyed by its path.
 func render(
 	chart *helmchart.Chart,
 	values map[string]any,
@@ -46,7 +44,6 @@ func render(
 	return out
 }
 
-// templateNamed finds a rendered template by its file suffix.
 func templateNamed(rendered map[string]string, suffix string) string {
 	GinkgoHelper()
 
@@ -204,9 +201,9 @@ var _ = Describe("ChartBuilder", func() {
 	// The dispatch deployService relies on. It lives here rather than in
 	// deployService because that method runs straight on into a cluster call,
 	// which leaves the branch untestable anywhere else.
-	Describe("Chart", func() {
+	Describe("Build", func() {
 		It("builds a job chart for a job deployment type", func() {
-			chart, err := subject.Chart("hello", config.K8sJobDeploymentType)
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).To(ContainElement("templates/job.yaml"))
@@ -215,7 +212,7 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("builds a service chart for a service deployment type", func() {
-			chart, err := subject.Chart("hello", config.K8sServiceDeploymentType)
+			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).
@@ -226,7 +223,7 @@ var _ = Describe("ChartBuilder", func() {
 		// K8sDeploymentType is a string alias, so an unset extension arrives
 		// here as "" rather than as the service default.
 		It("falls back to a service chart for an unset deployment type", func() {
-			chart, err := subject.Chart("hello", "")
+			chart, err := subject.Build("hello", "", nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).
@@ -234,9 +231,9 @@ var _ = Describe("ChartBuilder", func() {
 		})
 	})
 
-	Describe("ServiceChart", func() {
+	Describe("a service chart", func() {
 		It("assembles every chart file in memory", func() {
-			chart, err := subject.ServiceChart("hello")
+			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Name()).To(Equal("hello"))
@@ -254,7 +251,7 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("produces a chart helm can validate", func() {
-			chart, err := subject.ServiceChart("hello")
+			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
@@ -277,7 +274,7 @@ var _ = Describe("ChartBuilder", func() {
 			})
 
 			JustBeforeEach(func() {
-				chart, err := subject.ServiceChart("hello")
+				chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
 				Expect(err).ShouldNot(HaveOccurred())
 
 				rendered = render(chart, resolvedValues(svc))
@@ -302,9 +299,7 @@ var _ = Describe("ChartBuilder", func() {
 				Expect(service).To(ContainSubstring("targetPort: p8080"))
 			})
 
-			// The end of the path resolveServicePorts starts: with no ports there
-			// is nothing to route to, so neither resource should exist. This is
-			// what the *bool on Create buys, and it only holds if the value
+			// With no ports there is nothing to route to. Holds only if Create
 			// reaches the template as a plain false rather than a pointer.
 			Context("with no ports declared", func() {
 				BeforeEach(func() {
@@ -353,11 +348,125 @@ var _ = Describe("ChartBuilder", func() {
 				})
 			})
 		})
+
+		Context("with a declared manifest", func() {
+			var (
+				svc      config.ComposeService
+				declared []string
+				built    *helmchart.Chart
+				rendered map[string]string
+			)
+
+			const configMap = "testdata/configmap.yaml"
+
+			BeforeEach(func() {
+				svc = config.ComposeService{
+					Name:  "hello",
+					Image: "reg/hello:v1",
+					Ports: []types.ServicePortConfig{
+						{Target: 8080, Published: "3000"},
+					},
+				}
+			})
+
+			BeforeEach(func() {
+				declared = []string{configMap}
+			})
+
+			JustBeforeEach(func() {
+				chart, err := subject.Build("hello", config.K8sServiceDeploymentType, declared)
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(chart.Validate()).To(Succeed())
+
+				built = chart
+				rendered = render(chart, resolvedValues(svc))
+			})
+
+			It("carries it alongside the generated templates", func() {
+				Expect(fileNames(built)).To(ContainElement(
+					"templates/manifests/testdata/configmap.yaml",
+				))
+			})
+
+			// Two files sharing a base name stay apart only because the whole
+			// relative path reaches the chart.
+			Context("with a nested manifest too", func() {
+				BeforeEach(func() {
+					declared = []string{
+						configMap,
+						"testdata/nested/configmap.yaml",
+					}
+				})
+
+				It("keeps each at its own path", func() {
+					Expect(fileNames(built)).To(ContainElements(
+						"templates/manifests/testdata/configmap.yaml",
+						"templates/manifests/testdata/nested/configmap.yaml",
+					))
+				})
+			})
+
+			It("renders it as a template against the release", func() {
+				var cm struct {
+					Metadata struct {
+						Name      string `yaml:"name"`
+						Namespace string `yaml:"namespace"`
+					} `yaml:"metadata"`
+					Data map[string]string `yaml:"data"`
+				}
+
+				body := templateNamed(
+					rendered,
+					"manifests/testdata/configmap.yaml",
+				)
+				Expect(yaml.Unmarshal([]byte(body), &cm)).To(Succeed())
+
+				Expect(cm.Metadata.Name).To(Equal("hello-extra"))
+				Expect(cm.Metadata.Namespace).To(Equal("namespace"))
+				Expect(cm.Data).
+					To(HaveKeyWithValue("UPSTREAM_IMAGE", "reg/hello"))
+			})
+
+			// One path names one file, so the repeat carries the same bytes
+			// under the same chart name and helm is left to keep either.
+			Context("listed twice", func() {
+				BeforeEach(func() {
+					declared = []string{configMap, configMap}
+				})
+
+				It("still renders once", func() {
+					Expect(rendered).To(HaveKey(
+						"hello/templates/manifests/testdata/configmap.yaml",
+					))
+				})
+			})
+		})
+
+		It("reports a declared manifest that is not on disk", func() {
+			_, err := subject.Build(
+				"hello",
+				config.K8sServiceDeploymentType,
+				[]string{"testdata/nope.yaml"},
+			)
+
+			Expect(err).To(MatchError(helm.ErrManifestRead))
+		})
 	})
 
-	Describe("JobChart", func() {
+	Describe("a job chart", func() {
+		It("carries a declared manifest too", func() {
+			chart, err := subject.Build("migrate", config.K8sJobDeploymentType, []string{
+				"testdata/configmap.yaml",
+			})
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(fileNames(chart)).To(ContainElement(
+				"templates/manifests/testdata/configmap.yaml",
+			))
+		})
+
 		It("assembles only the files a job needs", func() {
-			chart, err := subject.JobChart("hello")
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 
@@ -373,17 +482,17 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("produces a chart that validates", func() {
-			chart, err := subject.JobChart("hello")
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
 		})
 
 		It("names the chart after the service so destroy can find it", func() {
-			first, err := subject.JobChart("hello")
+			first, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			second, err := subject.JobChart("hello")
+			second, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
 			Expect(first.Name()).To(Equal("hello"))
@@ -393,7 +502,7 @@ var _ = Describe("ChartBuilder", func() {
 		// A Job's spec.template and spec.selector are immutable, so an upgrade
 		// cannot patch one in place.
 		It("renders a new job name on every render", func() {
-			chart, err := subject.JobChart("hello")
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
 			values := map[string]any{}
@@ -411,7 +520,7 @@ var _ = Describe("ChartBuilder", func() {
 		It("keeps a long service name within the job name limit", func() {
 			longName := strings.Repeat("a", 60)
 
-			chart, err := subject.JobChart(longName)
+			chart, err := subject.Build(longName, config.K8sJobDeploymentType, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
 			name := jobName(render(chart, map[string]any{}))
@@ -443,7 +552,7 @@ var _ = Describe("ChartBuilder", func() {
 			JustBeforeEach(func() {
 				var err error
 
-				chart, err = subject.JobChart("migrate")
+				chart, err = subject.Build("migrate", config.K8sJobDeploymentType, nil)
 				Expect(err).ShouldNot(HaveOccurred())
 
 				rendered = render(chart, resolvedValues(svc))
@@ -521,9 +630,9 @@ var _ = Describe("ChartBuilder", func() {
 		})
 	})
 
-	Describe("NgrokChart", func() {
+	Describe("BuildNgrok", func() {
 		It("assembles only the files the ngrok release needs", func() {
-			chart, err := subject.NgrokChart()
+			chart, err := subject.BuildNgrok()
 			Expect(err).ShouldNot(HaveOccurred())
 
 			// No service.yaml: the agent dials out.
@@ -539,21 +648,21 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("names the chart so destroy can find the release", func() {
-			chart, err := subject.NgrokChart()
+			chart, err := subject.BuildNgrok()
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Name()).To(Equal("ngrok"))
 		})
 
 		It("produces a chart helm can validate", func() {
-			chart, err := subject.NgrokChart()
+			chart, err := subject.BuildNgrok()
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
 		})
 
 		It("base64 encodes the ngrok auth token into the secret", func() {
-			chart, err := subject.NgrokChart()
+			chart, err := subject.BuildNgrok()
 			Expect(err).ShouldNot(HaveOccurred())
 
 			var secret string
@@ -582,7 +691,7 @@ var _ = Describe("ChartBuilder", func() {
 			) map[string]string {
 				GinkgoHelper()
 
-				chart, err := builder.NgrokChart()
+				chart, err := builder.BuildNgrok()
 				Expect(err).ShouldNot(HaveOccurred())
 
 				return render(chart, builder.NgrokValues(endpoints))
@@ -605,18 +714,12 @@ var _ = Describe("ChartBuilder", func() {
 				Expect(cfg.Version).To(Equal(3))
 				Expect(cfg.Endpoints).To(HaveLen(2))
 
-				// The endpoint name is namespaced so two environments cannot
-				// collide on the account, while the upstream stays the bare
-				// service name that k8s DNS resolves inside the namespace.
 				Expect(cfg.Endpoints[0].Name).To(Equal("namespace-alpha"))
 				Expect(cfg.Endpoints[0].Upstream.URL).To(Equal("alpha:3000"))
 				Expect(cfg.Endpoints[1].Name).To(Equal("namespace-beta"))
 				Expect(cfg.Endpoints[1].Upstream.URL).To(Equal("beta:3001"))
 			})
 
-			// An upstream is a hostname *and* a port, and the agent dials
-			// outbound. compose.yml keeps hello and hello2 both on 8080, and
-			// this spec is what says that is deliberate.
 			Context("with two endpoints on the same port", func() {
 				BeforeEach(func() {
 					toPublish = []config.NgrokEndpointConfig{

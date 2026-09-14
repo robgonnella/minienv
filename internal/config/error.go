@@ -2,8 +2,6 @@ package config
 
 import "github.com/robgonnella/minienv/internal/errs"
 
-// Failure modes raised by this package. Values are namespaced because errs.Kind
-// is one shared type — see internal/errs.
 const (
 	ErrK8sNotConfigured       errs.Kind = "config.k8s_not_configured"
 	ErrExtensionDecode        errs.Kind = "config.extension_decode"
@@ -15,4 +13,5 @@ const (
 	ErrInvalidPort            errs.Kind = "config.invalid_port"
 	ErrNgrokPortMismatch      errs.Kind = "config.ngrok_port_mismatch"
 	ErrInvalidDeploymentType  errs.Kind = "config.invalid_deployment_type"
+	ErrManifestPath           errs.Kind = "config.manifest_path"
 )

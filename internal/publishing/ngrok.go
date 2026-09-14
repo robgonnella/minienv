@@ -181,7 +181,6 @@ func (c *NgrokClient) getEndpoints(
 		)
 	}
 
-	// The API version header must be string "2"
 	req.Header.Add("Ngrok-Version", "2")
 	req.Header.Add("Authorization", "Bearer "+c.apiKey)
 

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -151,6 +152,8 @@ type XMiniEnvK8sService struct {
 	DeploymentType K8sDeploymentType `json:"deploymentType,omitempty" jsonschema:"enum=service,enum=job,default=service" mapstructure:"deploymentType,omitempty"`
 	// Controls the Helm timeout for deploying the targeted service
 	DeploymentTimeout string `json:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
+	// Paths to Kubernetes manifest files, relative to the project directory, rendered as part of this service's chart
+	Manifests []string `json:"manifests,omitempty" mapstructure:"manifests,omitempty"`
 }
 
 // XMiniEnvK8sServiceOptions carries the runtime inputs needed to properly
@@ -287,6 +290,10 @@ func (s *XMiniEnvK8sService) resolve(
 	}
 
 	if err := s.resolveDeploymentType(); err != nil {
+		return err
+	}
+
+	if err := s.resolveManifests(); err != nil {
 		return err
 	}
 
@@ -450,7 +457,7 @@ func addStartUpIntervals(p map[string]any, props healthCheckProps) {
 	}
 }
 
-func getProbes(cmd string, ports []ChartServicePort) k8sProbes {
+func getInitialProbes(cmd string, ports []ChartServicePort) k8sProbes {
 	probes := k8sProbes{
 		startup:   nil,
 		liveness:  nil,
@@ -466,8 +473,6 @@ func getProbes(cmd string, ports []ChartServicePort) k8sProbes {
 		return probes
 	}
 
-	// All three start from the same check; only the intervals the caller adds
-	// afterwards differ.
 	probes.startup = probe
 	probes.liveness = probeForCmd(cmd, ports)
 	probes.readiness = probeForCmd(cmd, ports)
@@ -648,6 +653,26 @@ func (s *XMiniEnvK8sService) resolveDeploymentType() error {
 	}
 }
 
+// A declared path names the chart file it becomes, so one climbing out of the
+// project has no name to take.
+func (s *XMiniEnvK8sService) resolveManifests() error {
+	for i, declared := range s.Manifests {
+		cleaned := filepath.Clean(declared)
+
+		if !filepath.IsLocal(cleaned) {
+			return errs.Errorf(
+				ErrManifestPath,
+				"manifest path must be a relative path inside the project: %s",
+				declared,
+			)
+		}
+
+		s.Manifests[i] = cleaned
+	}
+
+	return nil
+}
+
 func (s *XMiniEnvK8sService) resolveContainerCommand(svc ComposeService) {
 	if s.Command != nil {
 		return
@@ -693,7 +718,7 @@ func (s *XMiniEnvK8sService) resolveHealthCheck(svc ComposeService) {
 
 	hchkProps := healthCheckProperties(svc.HealthCheck)
 
-	s.applyProbes(getProbes(cmd, s.Service.Ports), hchkProps)
+	s.applyProbes(getInitialProbes(cmd, s.Service.Ports), hchkProps)
 }
 
 // An explicitly configured probe always wins; only the gaps are filled from

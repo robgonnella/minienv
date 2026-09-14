@@ -8,8 +8,7 @@ import (
 
 // InitProject exposes the half of Init that needs no cluster. Init itself
 // builds a helm action config against a live one, so this is the only way to
-// populate h.services — which buildAndPushServiceImages and deployService both
-// read — in a test binary.
+// populate h.services in a test binary.
 func (h *Helm) InitProject(
 	ctx context.Context,
 	project config.ComposeProject,
@@ -17,34 +16,27 @@ func (h *Helm) InitProject(
 	return h.initProject(ctx, project)
 }
 
-// SetProject caches the project without resolving any extension. The dependency
-// walk only reads h.project, and its fixtures are bare services carrying nothing
-// but a name and depends_on — deliberately unresolvable — so those specs need
-// this rather than InitProject.
+// SetProject caches the project without resolving any extension. The walk's
+// fixtures are deliberately unresolvable, so they cannot go through
+// InitProject.
 func (h *Helm) SetProject(project config.ComposeProject) {
 	h.project = project
 }
 
-// ServicesToPublish exposes the endpoints initProject derived from the compose
-// project. Which services earn one — and in what order — is a decision made
-// here, not in the chart, so specs assert on it directly rather than digging it
-// back out of rendered ngrok values.
+// ServicesToPublish exposes what initProject derived. Which services earn an
+// endpoint, and in what order, is decided here rather than in the chart.
 func (h *Helm) ServicesToPublish() []config.NgrokEndpointConfig {
 	return h.servicesToPublish
 }
 
-// BuildAndPushServiceImages exposes the image-build pass to the external test
-// package. Deploy only reaches it after Init has built a real action client
-// and a cluster connection, so this is the only way to assert on the
-// ComposeProject -> []image.ServiceProperties translation.
+// BuildAndPushServiceImages exposes the image-build pass. Deploy reaches it
+// only after Init has built a cluster connection.
 func (h *Helm) BuildAndPushServiceImages(ctx context.Context) error {
 	return h.buildAndPushServiceImages(ctx)
 }
 
-// DeployInDependencyOrder exposes the depends_on-ordered walk with the
-// per-service step injected. Deploy only reaches the real step after Init has
-// built a cluster connection, so this is the only way to assert on ordering,
-// concurrency and abort-on-first-error.
+// DeployInDependencyOrder exposes the walk with the per-service step injected.
+// Deploy reaches the real step only after Init has built a cluster connection.
 func (h *Helm) DeployInDependencyOrder(
 	ctx context.Context,
 	deploy func(ctx context.Context, svc config.ComposeService) error,

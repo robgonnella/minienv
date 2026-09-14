@@ -29,8 +29,7 @@ const maxDeployConcurrency = 5
 
 const ngrokDeploymentTimeout = time.Minute
 
-// deployFn acts on one service. Injected so the dependency-ordered walk is
-// drivable without a cluster.
+// Injected so the dependency-ordered walk is drivable without a cluster.
 type deployFn func(ctx context.Context, svc config.ComposeService) error
 
 type serviceTuple struct {
@@ -188,8 +187,9 @@ func (h *Helm) validateExtension() error {
 	return nil
 }
 
-// initProject is the half of Init that needs no cluster. Resolving every
-// extension up front fails a bad one before any release is touched.
+// initProject is the half of Init that needs no cluster. Every extension is
+// resolved before any is stored, so a bad one fails the whole project rather
+// than one service midway.
 func (h *Helm) initProject(
 	ctx context.Context,
 	project config.ComposeProject,
@@ -208,8 +208,7 @@ func (h *Helm) initProject(
 
 		services[svc.Name] = serviceTuple{compose: svc, extension: *svcExt}
 
-		// resolveNgrok clears Ngrok without an auth token, so a non-zero port
-		// means ngrok is configured and usable.
+		// Port is zero unless ngrok is configured and usable.
 		if svcExt.Ngrok.Port != 0 {
 			// Neither a skipped service nor a job has a k8s Service for the
 			// endpoint's upstream to route to.
@@ -302,9 +301,10 @@ func (h *Helm) deployService(
 		)
 	}
 
-	chart, err := h.chartBuilder.Chart(
+	chart, err := h.chartBuilder.Build(
 		svc.Name,
 		internalService.extension.DeploymentType,
+		internalService.extension.Manifests,
 	)
 	if err != nil {
 		return err
@@ -344,9 +344,6 @@ func (h *Helm) buildAndPushServiceImages(ctx context.Context) error {
 	return nil
 }
 
-// deployInDependencyOrder walks the project's depends_on graph, deploying a
-// service only once everything it depends on has been deployed. Services with
-// no unmet dependency are deployed concurrently.
 func (h *Helm) deployInDependencyOrder(
 	ctx context.Context,
 	deploy deployFn,
@@ -373,8 +370,6 @@ func (h *Helm) deployInDependencyOrder(
 	return nil
 }
 
-// destroyInReverseDependencyOrder mirrors deployInDependencyOrder: a service is
-// uninstalled only once everything depending on it is gone.
 func (h *Helm) destroyInReverseDependencyOrder(
 	ctx context.Context,
 	uninstall deployFn,
@@ -402,10 +397,6 @@ func (h *Helm) destroyInReverseDependencyOrder(
 	return nil
 }
 
-// Validated up front so an unusable depends_on graph — a cycle, or a required
-// dependency naming a service the project does not define — fails before a
-// single release is touched. It also keeps the traversal's own error return
-// carrying nothing but failures from the injected step.
 func (h *Helm) checkDependencyGraph() error {
 	if err := composegraph.CheckCycle(&h.project); err != nil {
 		return errs.Errorf(
@@ -608,7 +599,7 @@ func (h *Helm) installNgrokChart(ctx context.Context) error {
 		return h.uninstallNgrokChart(ctx)
 	}
 
-	chart, err := h.chartBuilder.NgrokChart()
+	chart, err := h.chartBuilder.BuildNgrok()
 	if err != nil {
 		return err
 	}

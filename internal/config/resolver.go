@@ -121,7 +121,6 @@ func resolveNgrok(
 	ngrokEnabled bool,
 ) error {
 	if serviceLevel == nil {
-		// A simple guard just in case caller passed in nil pointer
 		return nil
 	}
 

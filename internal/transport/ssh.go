@@ -46,7 +46,6 @@ func runRemoteCommand(client *ssh.Client, cmd string) error {
 		}
 	}()
 
-	// Redirect remote stdout/stderr to your local console for debugging
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 
@@ -285,7 +284,6 @@ func (s *SSHTransport) knownHostkeyCallback() (ssh.HostKeyCallback, error) {
 		return nil, err
 	}
 
-	// Create the callback helper
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
 		return nil, errs.Errorf(

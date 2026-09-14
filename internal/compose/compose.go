@@ -117,7 +117,7 @@ func ClearServiceVolumes(project *config.ComposeProject) {
 		vols := make([]types.ServiceVolumeConfig, 0, len(svc.Volumes))
 
 		for _, vol := range svc.Volumes {
-			// only clear out host-path "bind" volumes
+			// The host path behind a bind mount does not exist on the remote.
 			if vol.Type == "bind" {
 				continue
 			}
@@ -185,8 +185,7 @@ func InjectNgrokService(
 		Labels: types.Labels{
 			config.NgrokConfigChecksumLabel: configChecksum,
 		},
-		// Overrides the image's entrypoint so Command runs. Relies on being
-		// injected after ClearEmptyCommandsAndEntryPoints.
+		// Overrides the image's entrypoint so Command runs.
 		Entrypoint: []string{},
 		Environment: types.MappingWithEquals{
 			"NGROK_AUTHTOKEN": nil,

@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 
@@ -22,9 +25,14 @@ const ngrokReleaseName = "ngrok"
 const (
 	nameKey            = "name"
 	valuesFile         = "values.yaml"
+	templatesDir       = "templates"
 	serviceAccountFile = "templates/serviceaccount.yaml"
 	deploymentFile     = "templates/deployment.yaml"
 )
+
+// Manifests nest here so one named deployment.yaml cannot replace the
+// generated template.
+const manifestsDir = "manifests"
 
 // The agent reads ngrok.yml only at startup, and the pod template is otherwise
 // constant, so this is what makes helm replace the pod when the config changes.
@@ -73,10 +81,8 @@ func writeChecksumParts(sum hash.Hash, parts ...string) {
 	}
 }
 
-// ChartBuilder assembles the in-memory charts this package installs. It holds
-// the ngrok auth token because two of its outputs derive from it — the Secret
-// baked into the chart and the checksum annotation that rolls the pod when the
-// token rotates — and passing it twice let the pair disagree.
+// ChartBuilder holds the ngrok auth token so the Secret baked into the chart
+// and the checksum that rolls the pod cannot disagree on it.
 type ChartBuilder struct {
 	ngrokAuthToken string
 }
@@ -85,19 +91,19 @@ func NewChartBuilder(ngrokAuthToken string) *ChartBuilder {
 	return &ChartBuilder{ngrokAuthToken: ngrokAuthToken}
 }
 
-// Chart picks the chart shape a service's deploymentType calls for.
-func (b *ChartBuilder) Chart(
+func (b *ChartBuilder) Build(
 	svcName string,
 	deploymentType config.K8sDeploymentType,
+	manifests []string,
 ) (*helmchart.Chart, error) {
 	if deploymentType == config.K8sJobDeploymentType {
-		return b.JobChart(svcName)
+		return b.jobChart(svcName, manifests)
 	}
 
-	return b.ServiceChart(svcName)
+	return b.serviceChart(svcName, manifests)
 }
 
-func (b *ChartBuilder) NgrokChart() (*helmchart.Chart, error) {
+func (b *ChartBuilder) BuildNgrok() (*helmchart.Chart, error) {
 	files := b.ngrokFiles()
 
 	chart, err := helmloader.LoadFiles(files)
@@ -105,40 +111,6 @@ func (b *ChartBuilder) NgrokChart() (*helmchart.Chart, error) {
 		return nil, errs.Errorf(
 			ErrChartLoad,
 			"failed to load in-memory ngrok chart: %w",
-			err,
-		)
-	}
-
-	return chart, nil
-}
-
-func (b *ChartBuilder) ServiceChart(
-	svcName string,
-) (*helmchart.Chart, error) {
-	files := b.serviceFiles(svcName)
-
-	chart, err := helmloader.LoadFiles(files)
-	if err != nil {
-		return nil, errs.Errorf(
-			ErrChartLoad,
-			"failed to load in-memory chart for %s: %w",
-			svcName,
-			err,
-		)
-	}
-
-	return chart, nil
-}
-
-func (b *ChartBuilder) JobChart(svcName string) (*helmchart.Chart, error) {
-	files := b.jobFiles(svcName)
-
-	chart, err := helmloader.LoadFiles(files)
-	if err != nil {
-		return nil, errs.Errorf(
-			ErrChartLoad,
-			"failed to load in-memory chart for %s: %w",
-			svcName,
 			err,
 		)
 	}
@@ -199,6 +171,50 @@ func (b *ChartBuilder) NgrokValues(
 	return values
 }
 
+func (b *ChartBuilder) serviceChart(
+	svcName string,
+	manifests []string,
+) (*helmchart.Chart, error) {
+	files, err := b.serviceFiles(svcName, manifests)
+	if err != nil {
+		return nil, err
+	}
+
+	chart, err := helmloader.LoadFiles(files)
+	if err != nil {
+		return nil, errs.Errorf(
+			ErrChartLoad,
+			"failed to load in-memory chart for %s: %w",
+			svcName,
+			err,
+		)
+	}
+
+	return chart, nil
+}
+
+func (b *ChartBuilder) jobChart(
+	svcName string,
+	manifests []string,
+) (*helmchart.Chart, error) {
+	files, err := b.jobFiles(svcName, manifests)
+	if err != nil {
+		return nil, err
+	}
+
+	chart, err := helmloader.LoadFiles(files)
+	if err != nil {
+		return nil, errs.Errorf(
+			ErrChartLoad,
+			"failed to load in-memory chart for %s: %w",
+			svcName,
+			err,
+		)
+	}
+
+	return chart, nil
+}
+
 func ngrokVolumeValues() []map[string]any {
 	return []map[string]any{
 		{
@@ -247,7 +263,52 @@ func (b *ChartBuilder) commonFiles(svcName string) []*helmloader.BufferedFile {
 	}
 }
 
-func (b *ChartBuilder) serviceFiles(svcName string) []*helmloader.BufferedFile {
+// Read here rather than while the extension resolves, so a file deleted since
+// the last deploy cannot block a teardown.
+func (b *ChartBuilder) loadManifests(
+	manifests []string,
+) ([]*helmloader.BufferedFile, error) {
+	if len(manifests) == 0 {
+		return nil, nil
+	}
+
+	files := make([]*helmloader.BufferedFile, 0, len(manifests))
+
+	for _, declared := range manifests {
+		// #nosec G304 -- validated as a project-relative path in config.
+		data, err := os.ReadFile(declared)
+		if err != nil {
+			return nil, errs.Errorf(
+				ErrManifestRead,
+				"failed to read manifest %s: %w",
+				declared,
+				err,
+			)
+		}
+
+		// path, not filepath: helm routes templates on a "/"-separated prefix.
+		files = append(files, &helmloader.BufferedFile{
+			Name: path.Join(
+				templatesDir,
+				manifestsDir,
+				filepath.ToSlash(declared),
+			),
+			Data: data,
+		})
+	}
+
+	return files, nil
+}
+
+func (b *ChartBuilder) serviceFiles(
+	svcName string,
+	manifests []string,
+) ([]*helmloader.BufferedFile, error) {
+	manifestFiles, err := b.loadManifests(manifests)
+	if err != nil {
+		return nil, err
+	}
+
 	files := b.commonFiles(svcName)
 
 	return slices.Concat(files, []*helmloader.BufferedFile{
@@ -267,10 +328,18 @@ func (b *ChartBuilder) serviceFiles(svcName string) []*helmloader.BufferedFile {
 			Name: serviceAccountFile,
 			Data: []byte(serviceAccountTmpl),
 		},
-	})
+	}, manifestFiles), nil
 }
 
-func (b *ChartBuilder) jobFiles(svcName string) []*helmloader.BufferedFile {
+func (b *ChartBuilder) jobFiles(
+	svcName string,
+	manifests []string,
+) ([]*helmloader.BufferedFile, error) {
+	manifestFiles, err := b.loadManifests(manifests)
+	if err != nil {
+		return nil, err
+	}
+
 	files := b.commonFiles(svcName)
 
 	return slices.Concat(files, []*helmloader.BufferedFile{
@@ -286,7 +355,7 @@ func (b *ChartBuilder) jobFiles(svcName string) []*helmloader.BufferedFile {
 			Name: "templates/job.yaml",
 			Data: []byte(jobTmpl),
 		},
-	})
+	}, manifestFiles), nil
 }
 
 func (b *ChartBuilder) ngrokFiles() []*helmloader.BufferedFile {

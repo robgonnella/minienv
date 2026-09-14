@@ -549,9 +549,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			})
 
 			// The endpoint's upstream targets a container port, so a port
-			// matching none of them publishes a URL that cannot route. Raised
-			// while the extension resolves, which the deployer does for every
-			// service up front, so it fails before a release is touched.
+			// matching none of them publishes a URL that cannot route.
 			It("errors when the ngrok port matches no container port", func() {
 				svc.Extensions = types.Extensions{
 					config.K8sServiceExtension: map[string]any{
@@ -661,6 +659,84 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(result.Command).To(BeNil())
+		})
+	})
+
+	Describe("manifests", func() {
+		It("carries the declared paths through untouched", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"manifests": []any{
+						"k8s/configmap.yaml",
+						"k8s/ingressroute.yaml",
+					},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Manifests).To(Equal([]string{
+				"k8s/configmap.yaml",
+				"k8s/ingressroute.yaml",
+			}))
+		})
+
+		It("leaves them empty when none are declared", func() {
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Manifests).To(BeEmpty())
+		})
+
+		// The declared path names the chart file it becomes, so the name has
+		// to be settled before anything reads it.
+		It("cleans each declared path", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"manifests": []any{"./k8s/../k8s/configmap.yaml"},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Manifests).To(Equal([]string{"k8s/configmap.yaml"}))
+		})
+
+		DescribeTable(
+			"rejects a path that leaves the project",
+			func(declared string) {
+				svc.Extensions = types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"manifests": []any{declared},
+					},
+				}
+
+				_, err := newSvcExt()
+
+				Expect(err).To(MatchError(config.ErrManifestPath))
+			},
+			Entry("an absolute path", "/etc/k8s/configmap.yaml"),
+			Entry("a path climbing out", "../configmap.yaml"),
+			Entry("a path climbing out after cleaning", "k8s/../../cm.yaml"),
+		)
+
+		// These name chart files rather than chart values, so leaking one into
+		// the values map would put an unknown key in front of every template.
+		It("keeps them out of the chart values", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"manifests": []any{"k8s/configmap.yaml"},
+				},
+			}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ToChartValuesMap()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(values).ToNot(HaveKey("manifests"))
 		})
 	})
 

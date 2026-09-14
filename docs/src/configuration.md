@@ -103,6 +103,10 @@ Most files deploy as written. These are the cases that need an edit.
         mountPath: /var/cache
   ```
 
+  A volume backed by a ConfigMap, Secret or PersistentVolumeClaim needs that
+  resource to exist. Declare it in a file and list the file under `manifests` —
+  see [Configuration Reference](./configuration-reference.md).
+
 Also not read: `networks`, `labels`, `deploy`, `restart`, `profiles`, `user`,
 `working_dir`, `extra_hosts`, `expose`, and top-level `volumes`, `networks`,
 `secrets` and `configs`. A service using one still deploys — it just behaves

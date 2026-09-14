@@ -4,8 +4,6 @@ package loader
 
 import "github.com/robgonnella/minienv/internal/errs"
 
-// Failure modes raised by this package. Values are namespaced because errs.Kind
-// is one shared type — see internal/errs.
 const (
 	ErrProjectOptions           errs.Kind = "loader.project_options"
 	ErrProjectLoad              errs.Kind = "loader.project_load"

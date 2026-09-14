@@ -12,10 +12,8 @@ import (
 	"github.com/robgonnella/minienv/internal/git"
 )
 
-// The happy-path specs shell out to the real git against this repo's own
-// checkout, which is the only place ShortSha succeeds. The error branch runs
-// git from a directory outside any repository — see export_test.go for why
-// that is done via the command's own directory rather than os.Chdir.
+// The happy-path specs shell out to real git against this checkout; the error
+// branch runs it from a directory outside any repository.
 var _ = Describe("GitClient", func() {
 	var subject *git.GitClient
 

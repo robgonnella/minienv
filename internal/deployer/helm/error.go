@@ -2,8 +2,6 @@ package helm
 
 import "github.com/robgonnella/minienv/internal/errs"
 
-// Failure modes raised by this package. Values are namespaced because errs.Kind
-// is one shared type — see internal/errs.
 const (
 	ErrInvalidExtension       errs.Kind = "helm.invalid_extension"
 	ErrActionConfig           errs.Kind = "helm.action_config"
@@ -15,4 +13,5 @@ const (
 	ErrComposeDependencyGraph errs.Kind = "helm.compose_dependency_graph"
 	ErrK8sNamespace           errs.Kind = "helm.k8s_namespace"
 	ErrMissingService         errs.Kind = "helm.missing_service"
+	ErrManifestRead           errs.Kind = "helm.manifest_read"
 )
