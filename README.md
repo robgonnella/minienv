@@ -45,9 +45,10 @@ Or target a remote docker host instead of a cluster:
 x-minienv:
   docker:
     namespace: my-feature-branch
-    ssh:
-      host: dev-box.example.com
-      identity: ~/.ssh/id_ed25519
+    transport:
+      ssh:
+        host: dev-box.example.com
+        identity: ~/.ssh/id_ed25519
 ```
 
 Add `--dry-run` to either command to preview without pushing images or changing

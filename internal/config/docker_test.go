@@ -231,11 +231,11 @@ var _ = Describe("XMiniEnvDockerService", func() {
 		})
 	})
 
-	Describe("XMiniEnvDocker", func() {
-		It("names ssh as its only transport field", func() {
-			ext := config.XMiniEnvDocker{}
+	Describe("XMiniEnvDockerTransport", func() {
+		It("names ssh as its only config field", func() {
+			transport := config.XMiniEnvDockerTransport{}
 
-			Expect(ext.TransportFields()).To(Equal([]string{"ssh"}))
+			Expect(transport.ConfigFields()).To(Equal([]string{"ssh"}))
 		})
 	})
 })

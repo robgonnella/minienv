@@ -1,10 +1,11 @@
 x-minienv:
   docker:
     namespace: test-namespace
-    ssh:
-      host: example.com
-      user: tester
-      identity: /tmp/id_ed25519
+    transport:
+      ssh:
+        host: example.com
+        user: tester
+        identity: /tmp/id_ed25519
 
 services:
   hello:

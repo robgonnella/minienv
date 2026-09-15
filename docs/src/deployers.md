@@ -30,9 +30,10 @@ Needs an SSH-reachable host running `docker` and its compose plugin:
 x-minienv:
   docker:
     namespace: my-branch
-    ssh:
-      host: dev-box.example.com
-      identity: ~/.ssh/id_ed25519
+    transport:
+      ssh:
+        host: dev-box.example.com
+        identity: ~/.ssh/id_ed25519
 ```
 
 Per-service overrides go under `x-minienv-docker-service`.

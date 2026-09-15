@@ -187,9 +187,9 @@ func (l *Loader) loadActiveDockerTransport(
 ) (transport.Client, error) {
 	activeTransports := []transport.Client{}
 
-	if ext.SSH != nil {
+	if ext.Transport.SSH != nil {
 		sshTransport, err := transport.NewSSHTransport(
-			transport.SSHTransportOptions{Config: *ext.SSH},
+			transport.SSHTransportOptions{Config: *ext.Transport.SSH},
 		)
 		if err != nil {
 			return nil, err
@@ -203,7 +203,7 @@ func (l *Loader) loadActiveDockerTransport(
 			ErrMultipleDockerTransports,
 			"detected multiple active configurations for docker transport. "+
 				"only one of [%s] can be configured",
-			strings.Join(ext.TransportFields(), ", "),
+			strings.Join(ext.Transport.ConfigFields(), ", "),
 		)
 	}
 
@@ -211,8 +211,9 @@ func (l *Loader) loadActiveDockerTransport(
 		return nil, errs.Errorf(
 			ErrNoActiveDockerTransport,
 			"failed to find an active configuration for docker transport. "+
-				"configure one of [%s] in docker field of x-minienv extension",
-			strings.Join(ext.TransportFields(), ", "),
+				"configure one of [%s] in the transport field of the docker "+
+				"x-minienv extension",
+			strings.Join(ext.Transport.ConfigFields(), ", "),
 		)
 	}
 

@@ -48,9 +48,10 @@ remote host instead:
 x-minienv:
   docker:
     namespace: my-feature-branch
-    ssh:
-      host: dev-box.example.com
-      identity: ~/.ssh/id_ed25519
+    transport:
+      ssh:
+        host: dev-box.example.com
+        identity: ~/.ssh/id_ed25519
 ```
 
 ## Where to go next
