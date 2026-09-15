@@ -488,6 +488,72 @@ var _ = Describe("ChartBuilder", func() {
 			Expect(chart.Validate()).To(Succeed())
 		})
 
+		It("mounts volumes onto the job pod", func() {
+			svc := config.ComposeService{
+				Name:  "migrate",
+				Image: "reg/migrate:v1",
+				Extensions: types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"deploymentType": "job",
+						"volumes": []any{
+							map[string]any{
+								"name":      "sql",
+								"configMap": map[string]any{"name": "migrations"},
+							},
+						},
+						"volumeMounts": []any{
+							map[string]any{
+								"name":      "sql",
+								"mountPath": "/sql",
+							},
+						},
+					},
+				},
+			}
+
+			chart, err := subject.Build(
+				"migrate",
+				config.K8sJobDeploymentType,
+				nil,
+			)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			var job struct {
+				Spec struct {
+					Template struct {
+						Spec struct {
+							Volumes []struct {
+								Name      string         `yaml:"name"`
+								ConfigMap map[string]any `yaml:"configMap"`
+							} `yaml:"volumes"`
+							Containers []struct {
+								VolumeMounts []struct {
+									Name      string `yaml:"name"`
+									MountPath string `yaml:"mountPath"`
+								} `yaml:"volumeMounts"`
+							} `yaml:"containers"`
+						} `yaml:"spec"`
+					} `yaml:"template"`
+				} `yaml:"spec"`
+			}
+
+			rendered := render(chart, resolvedValues(svc))
+			Expect(yaml.Unmarshal(
+				[]byte(templateNamed(rendered, "job.yaml")),
+				&job,
+			)).To(Succeed())
+
+			pod := job.Spec.Template.Spec
+			Expect(pod.Volumes).To(HaveLen(1))
+			Expect(pod.Volumes[0].Name).To(Equal("sql"))
+			Expect(pod.Volumes[0].ConfigMap).
+				To(HaveKeyWithValue("name", "migrations"))
+
+			Expect(pod.Containers).To(HaveLen(1))
+			Expect(pod.Containers[0].VolumeMounts).To(HaveLen(1))
+			Expect(pod.Containers[0].VolumeMounts[0].MountPath).To(Equal("/sql"))
+		})
+
 		It("names the chart after the service so destroy can find it", func() {
 			first, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
 			Expect(err).ShouldNot(HaveOccurred())

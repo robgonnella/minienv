@@ -410,6 +410,7 @@ func (d *Docker) modifyComposeContent(
 	compose.ClearBuildSettings(project)
 	compose.ClearPortMappings(project)
 	compose.ClearServiceVolumes(project)
+	compose.ClearEnvAndLabelFiles(project)
 	compose.ClearEmptyCommandsAndEntryPoints(project)
 
 	if len(d.servicesToPublish) > 0 {

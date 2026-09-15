@@ -12,42 +12,16 @@ for whichever target you picked.
 All three are standard compose extension fields, so `docker compose` ignores
 them and the same file keeps working locally.
 
-Use the service extension matching your target. The other one is not an error —
-it is simply ignored, which is worth remembering when a setting seems to have no
-effect.
+Use the service extension matching your target. The other one is silently
+ignored.
 
-## Choosing a target
-
-Configure exactly one. Configuring both is an error; configuring neither means
-minienv has no target and refuses to run.
-
-```yaml
-x-minienv:
-  k8s:
-    context: minikube # required
-    namespace: my-branch # required
-    deploymentTimeout: 60s # optional, default 60s
-    ngrok:
-      trafficPolicy: "" # optional, applies to all services
-```
-
-```yaml
-x-minienv:
-  docker:
-    namespace: my-branch # required
-    ssh: # exactly one transport is required
-      host: dev-box.example.com # required
-      identity: ~/.ssh/id_ed25519 # required
-      user: me # optional, defaults to the local user
-      port: 22 # optional, default 22
-    ngrok:
-      trafficPolicy: "" # optional, applies to all services
-```
+Configure exactly one target in `x-minienv` — see
+[Deployers](./deployers.md) for what each one does and what it needs.
 
 ## Per-service overrides
 
-Entirely optional — most services need nothing here. Every field is listed in
-the [Configuration Reference](./configuration-reference.md).
+Optional — most services need nothing here. Every field is listed in the
+[Configuration Reference](./configuration-reference.md).
 
 ### Kubernetes
 
@@ -81,122 +55,54 @@ services:
         port: 8080
 ```
 
-The field set is small because compose is already the deployment format:
-commands, environment, health checks and volumes stay on the compose service.
+## Supplying what compose does not carry
 
-## What to change in your compose file
-
-Most files deploy as written. These are the cases that need an edit.
-
-### Kubernetes
-
-- **Move an `entrypoint` override into `command`.** `entrypoint` is not read.
-- **Declare storage in the extension** rather than in compose `volumes`:
-
-  ```yaml
-  x-minienv-k8s-service:
-    volumes:
-      - name: cache
-        emptyDir: {}
-    volumeMounts:
-      - name: cache
-        mountPath: /var/cache
-  ```
-
-  A volume backed by a ConfigMap, Secret or PersistentVolumeClaim needs that
-  resource to exist. Declare it in a file and list the file under `manifests` —
-  see [Configuration Reference](./configuration-reference.md).
-
-Also not read: `networks`, `labels`, `deploy`, `restart`, `profiles`, `user`,
-`working_dir`, `extra_hosts`, `expose`, and top-level `volumes`, `networks`,
-`secrets` and `configs`. A service using one still deploys — it just behaves
-differently than it does locally.
-
-### Docker
-
-- **Replace bind mounts with named volumes.** Host paths do not exist on the
-  remote, so bind mounts are dropped and named volumes are kept.
-- **Avoid `secrets` and `configs` declared with `file:`.** The local path is
-  carried over as written and will not resolve on the remote host.
-
-Everything else is passed through as written.
-
-## Health checks
+Your compose file stays as it is. minienv reads `image`, `build`, `ports`,
+`command`, `environment`, `healthcheck` and `depends_on`; anything else a target
+needs comes from the extension.
 
 ### Kubernetes
 
-A compose `healthcheck` becomes all three probes — startup, liveness and
-readiness.
+These compose keys are not read. Set the extension field when the deployed
+service needs what they describe:
 
-```yaml
-healthcheck:
-  test: curl http://localhost:8080/healthz
-  interval: 10s
-  timeout: 2s
-  retries: 3
-```
+| Compose key          | Set in `x-minienv-k8s-service`         |
+| -------------------- | -------------------------------------- |
+| `entrypoint`         | `command`                              |
+| `volumes`            | `volumes` and `volumeMounts`           |
+| `secrets`, `configs` | `manifests`, mounted through `volumes` |
+| `deploy.replicas`    | `replicas`                             |
+| `labels`             | `podLabels`                            |
+| `user`               | `securityContext`                      |
 
-A `curl` or `wget` test against `http://localhost[:port][/path]` becomes an HTTP
-probe, using the **container** port. Anything else becomes an exec probe.
-`disable: true`, an empty `test`, or `test: ["NONE"]` produces no probes.
-
-> **Caution:** a `curl` or `wget` test pointed at anything other than
-> `localhost` produces **no probes at all** — silently. Use `localhost`, or
-> write the check as a non-HTTP command.
-
-### Docker
-
-A compose `healthcheck` runs on the remote host exactly as it runs locally,
-along with the `depends_on` conditions that build on it. There is nothing to
-configure.
-
-## Environment variables
-
-### Kubernetes
-
-Compose `environment` is copied to the container as plain env vars — no
-ConfigMap, no Secret — so **do not put secrets there** if the manifests are
-visible to others. Values compose could not resolve (the bare `- SOME_VAR` form,
-with nothing set locally) are dropped rather than set empty.
-
-To add or override at deploy time only:
+Storage is declared the Kubernetes way:
 
 ```yaml
 x-minienv-k8s-service:
-  env:
-    LOG_LEVEL: debug
+  volumes:
+    - name: cache
+      emptyDir: {}
+  volumeMounts:
+    - name: cache
+      mountPath: /var/cache
 ```
+
+A volume backed by a ConfigMap, Secret or PersistentVolumeClaim needs that
+resource to exist — declare it in a file and list it under `manifests`.
+
+`networks`, `restart`, `profiles`, `working_dir`, `extra_hosts` and `expose`
+have no Kubernetes equivalent and are ignored.
 
 ### Docker
 
-Compose `environment` reaches the remote host already interpolated, so
-`${DB_HOST}` arrives as the value it had on your machine.
-
-To keep a value off the remote entirely, use the bare `- SOME_VAR` form: with
-nothing set locally it stays unresolved, and the remote host supplies it from
-its own environment.
-
-## Skipping a service
-
-Some services only make sense locally — a mail catcher, a mock, a debug proxy.
-`skip: true` leaves the service out of image builds and out of the deploy.
-
-```yaml
-services:
-  mailhog:
-    image: mailhog/mailhog
-    x-minienv-k8s-service:
-      skip: true
-```
-
-Use `x-minienv-docker-service` for the docker target.
-
-> **Kubernetes:** `destroy` does not check `skip`. If you deploy a service and
-> later mark it skipped, `minienv destroy` still uninstalls it — which is
-> generally what you want, since it cleans up what an earlier deploy created.
+The project reaches the remote host as written, apart from what cannot follow it
+there: bind mounts, whose host paths do not exist on that machine, and
+`secrets` or `configs` declared with `file:`. Named volumes are kept.
 
 ## Next steps
 
+- [Configuration Reference](./configuration-reference.md) — every field, with
+  the per-field detail.
 - [Images and Builds](./images-and-builds.md)
 - [Exposing Services](./exposing-services.md)
 - [Jobs and Dependencies](./jobs-and-dependencies.md)

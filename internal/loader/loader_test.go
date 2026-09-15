@@ -25,8 +25,8 @@ var _ = Describe("Loader", func() {
 		mockGit   *gitmocks.MockClient
 	)
 
-	// ProjectDirectory is pinned to testdata so the repo's own .env and any
-	// COMPOSE_FILE in the environment cannot leak into these specs.
+	// ProjectDirectory is pinned to testdata so the repo's own .env cannot leak
+	// into these specs.
 	newLoader := func(files ...string) *loader.Loader {
 		return loader.New(&loader.LoaderOpts{
 			Files:            files,

@@ -375,6 +375,9 @@ securityContext: {}
 
 resources: {}
 
+volumes: []
+volumeMounts: []
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
@@ -441,6 +444,14 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -18,17 +18,14 @@ services:
 Every deploy creates a **fresh Job**, so re-running a migration works without
 manually deleting the previous one.
 
-The only valid values are `service` (the default) and `job`.
-
 ### What a job ignores
 
 A job accepts the full extension schema, but several keys have no effect on one:
-`replicas`, `service.create`, `service.type`, `volumes`, `volumeMounts`,
-`tolerations`, the three probes, and `ngrok`.
+`replicas`, `service.create`, `service.type`, the three probes, and `ngrok` — a
+job has no Service for an endpoint to route to.
 
-No Kubernetes Service is created for a job, which is why `ngrok` is ignored —
-there is nothing for an endpoint to route to. minienv logs a warning and
-publishes nothing rather than creating a URL that cannot resolve.
+Those keys are absent from a job's chart values, so a `manifests` file that
+reads one — `.Values.replicas`, say — renders empty rather than failing.
 
 ## Ordering with `depends_on`
 
@@ -72,19 +69,12 @@ deploys `api`.
 ### How the conditions are treated
 
 On Kubernetes only the dependency **edges** are used, not the `condition:`
-values — so `service_started` and `service_healthy` behave identically. Each
-service still waits for the one before it to be ready, so the ordering above
-holds either way.
-
-Cycles, and a `depends_on` naming a service that does not exist, are caught
-before anything is deployed.
+values — so `service_started` and `service_healthy` behave identically.
 
 ## Timeouts
 
-On Kubernetes, each service gets 60 seconds to become ready by default. Slow
-migrations and databases that take a while to initialize will hit that limit.
-
-Raise it for everything:
+Slow migrations and databases that take a while to initialize will hit the
+default readiness window. Raise it for everything:
 
 ```yaml
 x-minienv:
@@ -104,7 +94,5 @@ services:
       deploymentTimeout: 10m
 ```
 
-Values are Go duration strings: `30s`, `5m`, `1h30m`.
-
-A service-level `deploymentTimeout` overrides the top-level one. If a deploy
-times out, the release is rolled back.
+Values are duration strings: `30s`, `5m`, `1h30m`. If a deploy times out, the
+release is rolled back.

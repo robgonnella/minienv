@@ -35,6 +35,10 @@ func New(
 	}
 }
 
+func (c *Core) WorkingDir() string {
+	return c.project.WorkingDir
+}
+
 func (c *Core) Deploy(ctx context.Context) error {
 	log.Info().Str("deployer", c.deployer.String()).Msg("initializing")
 

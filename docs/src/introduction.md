@@ -7,10 +7,8 @@ your docker compose config.
 
 You already describe your stack in `docker-compose.yml`. Getting that same stack
 onto a shared cluster — so a teammate can click a link and review your branch —
-normally means maintaining a second description of it: a set of Kubernetes
-manifests, or a Helm chart, that drifts from compose the moment anyone adds a
-service. Deploying it to a plain remote host instead usually means a bespoke
-script doing much the same thing.
+normally means maintaining a second description of it: Kubernetes manifests, or
+a Helm chart, that drifts from compose the moment anyone adds a service.
 
 minienv removes the second description. It reads the compose file you already
 have, plus a small extension block, and deploys it.
@@ -63,7 +61,6 @@ x-minienv:
 - [Configuration Reference](./configuration-reference.md) — every field, in
   tables.
 
-> **Where minienv deploys is configurable.** `k8s` deploys each service as a
-> Helm release to a cluster; `docker` deploys the whole project to a single
-> remote host. Exactly one target may be configured. See
+> **Two targets, one at a time.** `k8s` deploys each service as a Helm release
+> to a cluster; `docker` deploys the whole project to a single remote host. See
 > [Deployers](./deployers.md).

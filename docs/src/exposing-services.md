@@ -5,7 +5,7 @@ services publicly through [ngrok](https://ngrok.com).
 
 > **ngrok is the only exposure mechanism.** minienv never creates an Ingress, a
 > LoadBalancer Service, or a PersistentVolumeClaim. If you need those, manage
-> them outside minienv.
+> them outside minienv or via `manifests` in the k8s service extension.
 
 ## Setup
 
@@ -34,29 +34,20 @@ services:
         port: 8080
 ```
 
-That is the whole setup. On deploy the service becomes reachable at a public
-URL.
-
-> Put the `ngrok` block under the service extension matching your deployer:
-> `x-minienv-k8s-service` or `x-minienv-docker-service`. The examples below use
-> the former.
+On deploy the service becomes reachable at a public URL. The examples below use
+`x-minienv-k8s-service`; use `x-minienv-docker-service` for the docker target.
 
 ## What gets published
 
-One ngrok agent serves every published service in a namespace, and runs
-alongside your containers without changing them.
+One ngrok agent serves every published service in a namespace.
 
-Each endpoint is named `<namespace>-<service>`. That is the name shown in the
-URL table and in the ngrok dashboard, and the namespace prefix is what keeps one
-developer's environment from resolving another's URL on a shared account.
+Each endpoint is named `<namespace>-<service>` — the name shown in the URL table
+and the ngrok dashboard, and the prefix is what keeps one developer's
+environment from resolving another's URL on a shared account.
 
-The agent is replaced only when the published set or the auth token changes,
-which is what decides whether a URL survives:
-
-- A deploy that changes neither leaves URLs without a reserved domain alone.
-- Adding or removing any `ngrok` block reassigns every unreserved URL at once.
-- Removing the last `ngrok` block removes the agent, and `minienv destroy`
-  removes it along with everything else.
+The agent is replaced only when the published set or the auth token changes.
+That is what decides whether a URL survives a redeploy — an unreserved one is
+reassigned every time the agent is replaced.
 
 ## Which port number to use
 
@@ -70,18 +61,6 @@ x-minienv-k8s-service: # or x-minienv-docker-service
   ngrok:
     port: 3000
 ```
-
-### When it does not match
-
-Naming a port the service did not resolve is an error, not a silent fallback.
-The whole deploy is rejected before anything is installed, and the message lists
-the ports that _were_ on offer:
-
-```
-ngrok port 8080 matches no port for this service: expected one of [3000]
-```
-
-See [Troubleshooting](./troubleshooting.md).
 
 ## A stable URL
 
@@ -99,11 +78,9 @@ x-minienv-k8s-service:
 Useful when the URL goes in a pull request description, or when an external
 service needs a fixed webhook target.
 
-> **The domain has to already be reserved.** minienv passes this value to the
-> ngrok agent as-is, and the agent refuses a domain the account does not hold —
-> which fails the deploy. Every account has at least one reserved static domain,
-> including a free one; a paid plan is what buys you more than one and lets you
-> choose the name.
+> **The domain has to already be reserved.** The agent refuses one the account
+> does not hold, which fails the deploy. Every account has at least one static
+> domain, including a free one; a paid plan buys more and lets you name them.
 
 > **On a shared ngrok account, interpolate the namespace into it.** This value
 > is committed to `compose.yml`, so a hardcoded domain is the _same_ domain for
@@ -113,14 +90,7 @@ service needs a fixed webhook target.
 > url: https://${MINIENV_NAMESPACE}-api.example.ngrok.app
 > ```
 >
-> Compose interpolates extension values the same way it does
-> `namespace: $MINIENV_NAMESPACE`, so each developer gets their own. The domain
-> still has to be reserved in ngrok — a wildcard reservation covers the whole
-> pattern.
-
-Without a reserved domain the URL survives a redeploy that changes nothing, but
-adding or removing any published service replaces the agent and reassigns every
-unreserved URL at once.
+> A wildcard reservation covers the whole pattern.
 
 ## Traffic policy
 
@@ -156,13 +126,12 @@ x-minienv:
 
 ## The API key
 
-There is a second, optional credential alongside the auth token:
+`NGROK_API_KEY` is a second, optional credential, used only to print the URL
+table after a deploy:
 
 ```sh
 export NGROK_API_KEY=your_api_key_here
 ```
-
-minienv uses it to print the URL table after a deploy. That is all it does:
 
 ```
 ====== Published Service URLs ======
@@ -171,21 +140,3 @@ Service Name   URL
 api            https://quiet-mesa-1234.ngrok.app
 web            https://my-branch.example.ngrok.app
 ```
-
-Two credentials, two jobs — only one is required:
-
-| Variable          | What it does                                                        |
-| ----------------- | ------------------------------------------------------------------- |
-| `NGROK_AUTHTOKEN` | **Publishes.** Without it every `ngrok` block is silently discarded |
-| `NGROK_API_KEY`   | **Prints the URL table.** Optional; without it the table is skipped |
-
-Without the API key a publishing deploy still succeeds and everything is still
-reachable — you get a warning instead of the table. Teardown never needs it.
-
-## Things to expect
-
-- ngrok configuration has **no effect on a service marked `skip: true`**. It is
-  never deployed, so there is nothing for the endpoint's upstream to reach.
-  minienv logs a warning and publishes nothing for it.
-- On Kubernetes, the same applies to **`deploymentType: job`**. A job renders no
-  k8s Service, so there is nothing for an endpoint to route to.
