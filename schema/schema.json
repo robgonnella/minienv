@@ -201,9 +201,9 @@
           "type": "string",
           "description": "The namespace for this deployment to ensure there are no conflicts\nwith other user minienvs on the same host"
         },
-        "ssh": {
-          "$ref": "#/$defs/XMiniEnvSSH",
-          "description": "SSH uses SSH transport to connect and deploy remote docker services"
+        "transport": {
+          "$ref": "#/$defs/XMiniEnvDockerTransport",
+          "description": "The transport mechanism to use for communication with the remote server"
         },
         "ngrok": {
           "$ref": "#/$defs/NgrokTopLevel",
@@ -213,7 +213,8 @@
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "namespace"
+        "namespace",
+        "transport"
       ],
       "description": "XMiniEnvDocker uses docker and a specified transport mechanism to deploy modified docker-compose config on a remote server."
     },
@@ -235,6 +236,17 @@
       "additionalProperties": false,
       "type": "object",
       "description": "XMiniEnvDockerService is the service level configuration controlling docker deployment properties."
+    },
+    "XMiniEnvDockerTransport": {
+      "properties": {
+        "ssh": {
+          "$ref": "#/$defs/XMiniEnvSSH",
+          "description": "Copies files and runs commands on the remote server over SSH"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "XMiniEnvDockerTransport holds the transport mechanism for copying files and running commands on a remote server."
     },
     "XMiniEnvK8s": {
       "properties": {

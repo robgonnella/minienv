@@ -1,8 +1,9 @@
 x-minienv:
   docker:
     namespace: test-namespace
-    ssh:
-      user: tester
+    transport:
+      ssh:
+        user: tester
 
 services:
   hello:

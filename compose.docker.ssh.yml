@@ -3,11 +3,12 @@
 x-minienv:
   docker:
     namespace: $MINIENV_NAMESPACE
-    ssh:
-      host: localhost
-      user: rob
-      port: 22220
-      identity: $HOME/.ssh/id_rsa
+    transport:
+      ssh:
+        host: localhost
+        user: rob
+        port: 22220
+        identity: $HOME/.ssh/id_rsa
 
 services:
   hello:

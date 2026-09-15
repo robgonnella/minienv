@@ -16,14 +16,10 @@ type XMiniEnvDocker struct {
 	// The namespace for this deployment to ensure there are no conflicts
 	// with other user minienvs on the same host
 	Namespace string `json:"namespace" mapstructure:"namespace"`
-	// SSH uses SSH transport to connect and deploy remote docker services
-	SSH *XMiniEnvSSH `json:"ssh,omitempty" mapstructure:"ssh,omitempty"`
+	// The transport mechanism to use for communication with the remote server
+	Transport XMiniEnvDockerTransport `json:"transport" mapstructure:"transport"`
 	// Ngrok configuration for exposing services publicly
 	Ngrok *NgrokTopLevel `json:"ngrok,omitzero" mapstructure:"ngrok,omitzero"`
-}
-
-func (x *XMiniEnvDocker) TransportFields() []string {
-	return []string{"ssh"}
 }
 
 // XMiniEnvSSH holds the fields required for deploying to any SSH-enabled
@@ -37,6 +33,19 @@ type XMiniEnvSSH struct {
 	Port uint16 `json:"port" mapstructure:"port"`
 	// The RSA private key identity file for the SSH connection
 	Identity string `json:"identity" mapstructure:"identity"`
+}
+
+// XMiniEnvDockerTransport holds the transport mechanism for copying files
+// and running commands on a remote server. Only one transport can be defined
+// at a time.
+type XMiniEnvDockerTransport struct {
+	// Copies files and runs commands on the remote server over SSH
+	SSH *XMiniEnvSSH `json:"ssh,omitempty" mapstructure:"ssh,omitempty"`
+}
+
+// ConfigFields returns the available "json" config fields for this extension.
+func (x *XMiniEnvDockerTransport) ConfigFields() []string {
+	return []string{"ssh"}
 }
 
 // XMiniEnvDockerService is the service level configuration controlling docker

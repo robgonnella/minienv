@@ -19,14 +19,15 @@ configuring more than one is an error.
 
 ### `docker`
 
-| Field                        | Type    | Required | Default    | Description                                                                       |
-| ---------------------------- | ------- | -------- | ---------- | --------------------------------------------------------------------------------- |
-| `docker.namespace`           | string  | **yes**  | —          | Compose project name on the remote host, and the directory it lives in            |
-| `docker.ssh.host`            | string  | **yes**  | —          | Target host for the SSH connection                                                |
-| `docker.ssh.identity`        | string  | **yes**  | —          | Path to the private key file                                                      |
-| `docker.ssh.user`            | string  | no       | local user | User for the SSH connection                                                       |
-| `docker.ssh.port`            | integer | no       | `22`       | Port for the SSH connection                                                       |
-| `docker.ngrok.trafficPolicy` | string  | no       | `""`       | ngrok `on_http_request` policy applied to every service that does not set its own |
+| Field                           | Type    | Required | Default    | Description                                                                       |
+| ------------------------------- | ------- | -------- | ---------- | --------------------------------------------------------------------------------- |
+| `docker.namespace`              | string  | **yes**  | —          | Compose project name on the remote host, and the directory it lives in            |
+| `docker.transport`              | map     | **yes**  | —          | The transport used to reach the remote host                                       |
+| `docker.transport.ssh.host`     | string  | **yes**  | —          | Target host for the SSH connection                                                |
+| `docker.transport.ssh.identity` | string  | **yes**  | —          | Path to the private key file                                                      |
+| `docker.transport.ssh.user`     | string  | no       | local user | User for the SSH connection                                                       |
+| `docker.transport.ssh.port`     | integer | no       | `22`       | Port for the SSH connection                                                       |
+| `docker.ngrok.trafficPolicy`    | string  | no       | `""`       | ngrok `on_http_request` policy applied to every service that does not set its own |
 
 `docker.namespace` is reduced to `[a-z0-9_-]`, and rejected if nothing survives
 that. The deployment lives at `~/.minienv/<namespace>` on the remote host, and
