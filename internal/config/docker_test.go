@@ -231,6 +231,112 @@ var _ = Describe("XMiniEnvDockerService", func() {
 		})
 	})
 
+	Describe("copy", func() {
+		declare := func(entries ...map[string]any) {
+			svc.Image = "reg/app:v1"
+			svc.Extensions = map[string]any{
+				config.DockerServiceExtension: map[string]any{
+					"copy": entries,
+				},
+			}
+		}
+
+		It("carries the declared entries through", func() {
+			declare(
+				map[string]any{
+					"hostPath":      "conf/app.yml",
+					"containerPath": "/etc/app/app.yml",
+				},
+				map[string]any{
+					"hostPath":      "seed",
+					"containerPath": "/var/seed",
+				},
+			)
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Copy).To(Equal([]config.XMiniEnvDockerCopy{
+				{HostPath: "conf/app.yml", ContainerPath: "/etc/app/app.yml"},
+				{HostPath: "seed", ContainerPath: "/var/seed"},
+			}))
+		})
+
+		It("leaves them empty when none are declared", func() {
+			svc.Image = "reg/app:v1"
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Copy).To(BeEmpty())
+		})
+
+		It("cleans each declared host path", func() {
+			declare(map[string]any{
+				"hostPath":      "./conf/../conf/app.yml",
+				"containerPath": "/etc/app/app.yml",
+			})
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Copy[0].HostPath).To(Equal("conf/app.yml"))
+		})
+
+		DescribeTable(
+			"rejects a host path that leaves the project",
+			func(declared string) {
+				declare(map[string]any{
+					"hostPath":      declared,
+					"containerPath": "/etc/app",
+				})
+
+				_, err := newSvcExt()
+
+				Expect(err).To(MatchError(config.ErrCopyHostPath))
+			},
+			Entry("an absolute path", "/etc/app.yml"),
+			Entry("a path climbing out", "../app.yml"),
+			Entry("a path climbing out after cleaning", "conf/../../app.yml"),
+			Entry("an empty path", ""),
+			Entry("the project directory itself", "."),
+		)
+
+		DescribeTable(
+			"rejects an unusable container path",
+			func(declared string) {
+				declare(map[string]any{
+					"hostPath":      "conf/app.yml",
+					"containerPath": declared,
+				})
+
+				_, err := newSvcExt()
+
+				Expect(err).To(MatchError(config.ErrCopyContainerPath))
+			},
+			Entry("a relative path", "etc/app.yml"),
+			Entry("a dot-relative path", "./etc/app.yml"),
+			Entry("an empty path", ""),
+		)
+
+		It("rejects two entries mounting the same container path", func() {
+			declare(
+				map[string]any{
+					"hostPath":      "conf/app.yml",
+					"containerPath": "/etc/app.yml",
+				},
+				map[string]any{
+					"hostPath":      "other/app.yml",
+					"containerPath": "/etc/app.yml",
+				},
+			)
+
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(config.ErrCopyContainerPath))
+		})
+	})
+
 	Describe("XMiniEnvDockerTransport", func() {
 		It("names ssh as its only config field", func() {
 			transport := config.XMiniEnvDockerTransport{}

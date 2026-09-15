@@ -5,6 +5,7 @@ package transport
 type Client interface {
 	String() string
 	CreateFile(filepath string, content []byte) error
+	CopyPath(localPath, remotePath string) error
 	RunCommand(cmd string) error
 	Close() error
 }

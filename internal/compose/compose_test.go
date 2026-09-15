@@ -317,6 +317,65 @@ services:
 		})
 	})
 
+	Describe("BindVolume", func() {
+		It("appends a bind mount to the named service", func() {
+			project := newProject()
+
+			compose.BindVolume(project, "api", "/remote/conf", "/etc/conf")
+
+			vols := project.Services["api"].Volumes
+			Expect(vols[len(vols)-1]).To(Equal(types.ServiceVolumeConfig{
+				Type:   "bind",
+				Source: "/remote/conf",
+				Target: "/etc/conf",
+			}))
+		})
+
+		It("leaves every other service alone", func() {
+			project := newProject()
+			before := len(project.Services["job"].Volumes)
+
+			compose.BindVolume(project, "api", "/remote/conf", "/etc/conf")
+
+			Expect(project.Services["job"].Volumes).To(HaveLen(before))
+		})
+
+		It("does nothing for a service the project does not hold", func() {
+			project := newProject()
+
+			compose.BindVolume(project, "gone", "/remote/conf", "/etc/conf")
+
+			Expect(project.Services).ToNot(HaveKey("gone"))
+		})
+
+		It("survives a prior clearing of the service volumes", func() {
+			project := newProject()
+
+			compose.ClearServiceVolumes(project)
+			compose.BindVolume(project, "api", "/remote/conf", "/etc/conf")
+
+			Expect(project.Services["api"].Volumes).To(ContainElement(
+				types.ServiceVolumeConfig{
+					Type:   "bind",
+					Source: "/remote/conf",
+					Target: "/etc/conf",
+				},
+			))
+		})
+
+		It("keeps repeated calls in declaration order", func() {
+			project := newProject()
+
+			compose.ClearServiceVolumes(project)
+			compose.BindVolume(project, "api", "/remote/one", "/etc/one")
+			compose.BindVolume(project, "api", "/remote/two", "/etc/two")
+
+			vols := project.Services["api"].Volumes
+			Expect(vols[len(vols)-2].Target).To(Equal("/etc/one"))
+			Expect(vols[len(vols)-1].Target).To(Equal("/etc/two"))
+		})
+	})
+
 	Describe("the clearing helpers", func() {
 		It("strips port publishing", func() {
 			project := newProject()

@@ -1,17 +1,19 @@
 package transport
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/user"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/pkg/sftp"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/rs/zerolog/log"
@@ -20,15 +22,12 @@ import (
 )
 
 const (
-	heredocNonceBytes = 8
 	// An unset Timeout means the dial has no deadline at all, and ssh.Dial
 	// takes no context, so a black-holing host would hang with nothing to
 	// cancel it.
 	sshDialTimeout = 30 * time.Second
 )
 
-// Masks cmd before reporting it because a command body can carry a credential,
-// and this error is logged in full further up.
 func runRemoteCommand(client *ssh.Client, cmd string) error {
 	session, err := client.NewSession()
 	if err != nil {
@@ -53,6 +52,7 @@ func runRemoteCommand(client *ssh.Client, cmd string) error {
 		return errs.Errorf(
 			ErrSSHCommandRun,
 			"remote command failed: %s: %w",
+			// Ensures credentials can't leak downstream when logging an error.
 			maskCommand(cmd),
 			err,
 		)
@@ -61,27 +61,14 @@ func runRemoteCommand(client *ssh.Client, cmd string) error {
 	return nil
 }
 
-// A fixed "EOF" truncates any file containing a bare EOF line.
-func heredocDelimiter() (string, error) {
-	nonce := make([]byte, heredocNonceBytes)
-	if _, err := rand.Read(nonce); err != nil {
-		return "", errs.Errorf(
-			ErrSSHHeredocDelimiter,
-			"failed to generate heredoc delimiter: %w",
-			err,
-		)
-	}
-
-	return "MINIENV_" + hex.EncodeToString(nonce), nil
-}
-
 type SSHTransportOptions struct {
 	Config config.XMiniEnvSSH
 }
 
 type SSHTransport struct {
-	config config.XMiniEnvSSH
-	client *ssh.Client
+	config     config.XMiniEnvSSH
+	client     *ssh.Client
+	sftpClient *sftp.Client
 }
 
 func NewSSHTransport(opts SSHTransportOptions) (*SSHTransport, error) {
@@ -93,63 +80,114 @@ func NewSSHTransport(opts SSHTransportOptions) (*SSHTransport, error) {
 		)
 	}
 
-	return &SSHTransport{config: opts.Config, client: nil}, nil
+	return &SSHTransport{
+		config:     opts.Config,
+		client:     nil,
+		sftpClient: nil,
+	}, nil
 }
 
 func (s *SSHTransport) String() string {
 	return "SSH"
 }
 
+// Close shuts the sftp client first: it rides on the ssh connection.
 func (s *SSHTransport) Close() error {
+	sftpClient := s.sftpClient
+	s.sftpClient = nil
+
+	var closeErr error
+
+	if sftpClient != nil {
+		if err := sftpClient.Close(); err != nil {
+			closeErr = errors.Join(closeErr, errs.Errorf(
+				ErrSFTPClientClose,
+				"failed to close sftp client: %w",
+				err,
+			))
+		}
+	}
+
 	if s.client == nil {
-		return nil
+		return closeErr
 	}
 
 	client := s.client
 	s.client = nil
 
 	if err := client.Close(); err != nil {
-		return errs.Errorf(
+		closeErr = errors.Join(closeErr, errs.Errorf(
 			ErrSSHClientClose,
 			"failed to close ssh client: %w",
 			err,
-		)
+		))
 	}
 
-	return nil
+	return closeErr
 }
 
+// CreateFile writes content to file, replacing whatever was there.
 func (s *SSHTransport) CreateFile(
 	file string,
 	content []byte,
 ) error {
-	client, err := s.connect()
+	client, err := s.sftp()
 	if err != nil {
 		return err
 	}
 
-	delimiter, err := heredocDelimiter()
+	target, err := resolveRemotePath(client, file)
 	if err != nil {
 		return err
 	}
 
-	dir := path.Dir(file)
+	if err := makeRemoteParent(client, target); err != nil {
+		return err
+	}
 
-	// Quoting the delimiter is what stops the remote shell expanding the body.
-	cmd := fmt.Sprintf(`mkdir -p %s && cat << '%s' > %s
-%s
-%s`, dir, delimiter, file, content, delimiter)
-
-	if err := runRemoteCommand(client, cmd); err != nil {
+	if err := writeRemoteFile(
+		client,
+		bytes.NewReader(content),
+		target,
+	); err != nil {
 		return err
 	}
 
 	log.
 		Info().
-		Str("file", file).
-		Msg("Successfully created file on remote server")
+		Str("file", target).
+		Msg("created file on remote server")
 
 	return nil
+}
+
+// CopyPath reproduces localPath at remotePath byte for byte, permissions
+// included, recursing when it names a directory.
+func (s *SSHTransport) CopyPath(localPath, remotePath string) error {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return errs.Errorf(
+			ErrSSHLocalFileStats,
+			"failed to get information on file: %w",
+			err,
+		)
+	}
+
+	client, err := s.sftp()
+	if err != nil {
+		return err
+	}
+
+	target, err := resolveRemotePath(client, remotePath)
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		return s.copyTree(client, localPath, target)
+	}
+
+	return copyFile(client, localPath, target, info.Mode())
 }
 
 func (s *SSHTransport) RunCommand(cmd string) error {
@@ -159,6 +197,48 @@ func (s *SSHTransport) RunCommand(cmd string) error {
 	}
 
 	return runRemoteCommand(client, cmd)
+}
+
+func (s *SSHTransport) sftp() (*sftp.Client, error) {
+	if s.sftpClient != nil {
+		return s.sftpClient, nil
+	}
+
+	client, err := s.connect()
+	if err != nil {
+		return nil, err
+	}
+
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		return nil, errs.Errorf(
+			ErrSFTPClientCreate,
+			"failed to open an sftp session: %w",
+			err,
+		)
+	}
+
+	s.sftpClient = sftpClient
+
+	return sftpClient, nil
+}
+
+// There is no shell behind sftp to expand a leading "~".
+func resolveRemotePath(client *sftp.Client, remotePath string) (string, error) {
+	if remotePath != "~" && !strings.HasPrefix(remotePath, "~/") {
+		return remotePath, nil
+	}
+
+	home, err := client.RealPath(".")
+	if err != nil {
+		return "", errs.Errorf(
+			ErrSFTPRealPath,
+			"failed to resolve the remote home directory: %w",
+			err,
+		)
+	}
+
+	return path.Join(home, strings.TrimPrefix(remotePath, "~")), nil
 }
 
 func (s *SSHTransport) connect() (*ssh.Client, error) {
@@ -294,4 +374,195 @@ func (s *SSHTransport) knownHostkeyCallback() (ssh.HostKeyCallback, error) {
 	}
 
 	return hostKeyCallback, nil
+}
+
+func (s *SSHTransport) copyTree(
+	client *sftp.Client,
+	localDir string,
+	remoteDir string,
+) error {
+	walk := func(current string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return errs.Errorf(
+				ErrSSHWalkLocalPath,
+				"failed to walk %s: %w",
+				current,
+				err,
+			)
+		}
+
+		target, err := remoteJoin(localDir, remoteDir, current)
+		if err != nil {
+			return err
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return errs.Errorf(
+				ErrSSHWalkLocalPath,
+				"failed to get information on %s: %w",
+				current,
+				err,
+			)
+		}
+
+		if entry.IsDir() {
+			return makeRemoteDir(client, target, info.Mode())
+		}
+
+		return copyFile(client, current, target, info.Mode())
+	}
+
+	if err := filepath.WalkDir(localDir, walk); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func remoteJoin(localDir, remoteDir, current string) (string, error) {
+	rel, err := filepath.Rel(localDir, current)
+	if err != nil {
+		return "", errs.Errorf(
+			ErrSSHWalkLocalPath,
+			"failed to place %s under %s: %w",
+			current,
+			localDir,
+			err,
+		)
+	}
+
+	if rel == "." {
+		return remoteDir, nil
+	}
+
+	return path.Join(remoteDir, filepath.ToSlash(rel)), nil
+}
+
+func makeRemoteDir(
+	client *sftp.Client,
+	remotePath string,
+	mode fs.FileMode,
+) error {
+	if err := client.MkdirAll(remotePath); err != nil {
+		return errs.Errorf(
+			ErrSFTPRemoteWrite,
+			"failed to create remote directory %s: %w",
+			remotePath,
+			err,
+		)
+	}
+
+	return chmodRemote(client, remotePath, mode)
+}
+
+func copyFile(
+	client *sftp.Client,
+	localPath string,
+	remotePath string,
+	mode fs.FileMode,
+) error {
+	// #nosec G304 -- validated as a project-relative path in config.
+	src, err := os.Open(localPath)
+	if err != nil {
+		return errs.Errorf(
+			ErrSSHReadLocalFile,
+			"failed to read file %s: %w",
+			localPath,
+			err,
+		)
+	}
+
+	defer func() {
+		if err := src.Close(); err != nil {
+			log.Warn().Err(err).Msg("failed to close local file")
+		}
+	}()
+
+	if err := makeRemoteParent(client, remotePath); err != nil {
+		return err
+	}
+
+	if err := writeRemoteFile(client, src, remotePath); err != nil {
+		return err
+	}
+
+	log.
+		Info().
+		Str("src", src.Name()).
+		Str("dest", remotePath).
+		Msg("copied file to remote destination")
+
+	return chmodRemote(client, remotePath, mode)
+}
+
+func makeRemoteParent(client *sftp.Client, remotePath string) error {
+	if err := client.MkdirAll(path.Dir(remotePath)); err != nil {
+		return errs.Errorf(
+			ErrSFTPRemoteWrite,
+			"failed to create remote directory %s: %w",
+			path.Dir(remotePath),
+			err,
+		)
+	}
+
+	return nil
+}
+
+// Close is checked rather than deferred: it is where a failed write surfaces.
+func writeRemoteFile(
+	client *sftp.Client,
+	src io.Reader,
+	remotePath string,
+) error {
+	dst, err := client.Create(remotePath)
+	if err != nil {
+		return errs.Errorf(
+			ErrSFTPRemoteWrite,
+			"failed to create remote file %s: %w",
+			remotePath,
+			err,
+		)
+	}
+
+	if _, err := io.Copy(dst, src); err != nil {
+		if err := dst.Close(); err != nil {
+			log.Warn().Err(err).Msg("failed to close remote file")
+		}
+
+		return errs.Errorf(
+			ErrSFTPRemoteWrite,
+			"failed to write remote file %s: %w",
+			remotePath,
+			err,
+		)
+	}
+
+	if err := dst.Close(); err != nil {
+		return errs.Errorf(
+			ErrSFTPRemoteWrite,
+			"failed to close remote file %s: %w",
+			remotePath,
+			err,
+		)
+	}
+
+	return nil
+}
+
+func chmodRemote(
+	client *sftp.Client,
+	remotePath string,
+	mode fs.FileMode,
+) error {
+	if err := client.Chmod(remotePath, mode.Perm()); err != nil {
+		return errs.Errorf(
+			ErrSFTPRemoteWrite,
+			"failed to set the mode on %s: %w",
+			remotePath,
+			err,
+		)
+	}
+
+	return nil
 }

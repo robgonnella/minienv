@@ -3,6 +3,8 @@ package config
 import (
 	"context"
 	"math"
+	"path"
+	"path/filepath"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/robgonnella/minienv/internal/errs"
@@ -48,6 +50,17 @@ func (x *XMiniEnvDockerTransport) ConfigFields() []string {
 	return []string{"ssh"}
 }
 
+// XMiniEnvDockerCopy copies a file or directory to the remote server and bind
+// mounts it into the container at the specified containerPath. Normal compose
+// bind mounts are intentionally discarded making this config the override
+// escape hatch when needed.
+type XMiniEnvDockerCopy struct {
+	// The path, relative to the project directory, of the file or directory to be copied
+	HostPath string `json:"hostPath" mapstructure:"hostPath"`
+	// The absolute path inside the container to mount the file or directory
+	ContainerPath string `json:"containerPath" mapstructure:"containerPath"`
+}
+
 // XMiniEnvDockerService is the service level configuration controlling docker
 // deployment properties.
 type XMiniEnvDockerService struct {
@@ -55,6 +68,11 @@ type XMiniEnvDockerService struct {
 
 	// The image for this deployment. Will try to use compose service image if not set
 	Image ServiceImage `json:"image,omitzero" mapstructure:"image,omitzero"`
+
+	// Files and directories copied to the remote server and bind mounted into
+	// the container. Normal compose bind mounts are intentionally discarded
+	// making this config the override escape hatch when needed.
+	Copy []XMiniEnvDockerCopy `json:"copy,omitempty" mapstructure:"copy,omitempty"`
 }
 
 func NewXMiniEnvDockerService(
@@ -118,7 +136,49 @@ func (s *XMiniEnvDockerService) resolve(
 		return err
 	}
 
+	if err := s.resolveCopy(); err != nil {
+		return err
+	}
+
 	return s.resolveNgrok(svc, dockerExt, ngrokEnabled)
+}
+
+func (s *XMiniEnvDockerService) resolveCopy() error {
+	targets := map[string]bool{}
+
+	for i, declared := range s.Copy {
+		cleaned := filepath.Clean(declared.HostPath)
+
+		// Clean("") is ".", which IsLocal accepts.
+		if cleaned == "." || !filepath.IsLocal(cleaned) {
+			return errs.Errorf(
+				ErrCopyHostPath,
+				"copy hostPath must name a path inside the project: %s",
+				declared.HostPath,
+			)
+		}
+
+		if !path.IsAbs(declared.ContainerPath) {
+			return errs.Errorf(
+				ErrCopyContainerPath,
+				"copy containerPath must be an absolute path: %s",
+				declared.ContainerPath,
+			)
+		}
+
+		if targets[declared.ContainerPath] {
+			return errs.Errorf(
+				ErrCopyContainerPath,
+				"copy containerPath is already mounted by this service: %s",
+				declared.ContainerPath,
+			)
+		}
+
+		targets[declared.ContainerPath] = true
+		s.Copy[i].HostPath = cleaned
+	}
+
+	return nil
 }
 
 func (s *XMiniEnvDockerService) resolveCommonProperties(

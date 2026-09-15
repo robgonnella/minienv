@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 	"text/template"
@@ -25,11 +26,14 @@ import (
 )
 
 type remotePaths struct {
-	dir         string
+	projectDir  string
 	composeFile string
 	dotEnvFile  string
 	ngrokConfig string
+	copiesDir   string
 }
+
+const remoteCopiesDirName = "copies"
 
 type remoteContent struct {
 	compose []byte
@@ -73,10 +77,11 @@ func New(opts Options) *Docker {
 		opts.DockerExt.Namespace,
 	)
 
-	remoteFolder := "~/.minienv/" + opts.DockerExt.Namespace
-	composeFile := remoteFolder + "/compose.yml"
-	dotEnvFile := remoteFolder + "/.env"
-	ngrokConfig := remoteFolder + "/ngrok.yml"
+	projectDir := "~/.minienv/" + opts.DockerExt.Namespace
+	composeFile := projectDir + "/compose.yml"
+	dotEnvFile := projectDir + "/.env"
+	ngrokConfig := projectDir + "/ngrok.yml"
+	copiesDir := projectDir + "/" + remoteCopiesDirName
 
 	return &Docker{
 		dockerExt:      opts.DockerExt,
@@ -86,10 +91,11 @@ func New(opts Options) *Docker {
 		publishClient:  opts.PublishClient,
 		ngrokAuthToken: opts.NgrokAuthToken,
 		remotePaths: remotePaths{
-			dir:         remoteFolder,
+			projectDir:  projectDir,
 			dotEnvFile:  dotEnvFile,
 			composeFile: composeFile,
 			ngrokConfig: ngrokConfig,
+			copiesDir:   copiesDir,
 		},
 		dryRun: opts.DryRun,
 	}
@@ -190,12 +196,16 @@ func (d *Docker) Deploy(ctx context.Context) error {
 		return err
 	}
 
+	if err := d.copyFiles(); err != nil {
+		return err
+	}
+
 	// --remove-orphans reaps the ngrok container left by a previous deploy that
 	// published when this one does not.
 	return d.transport.RunCommand(
 		fmt.Sprintf(
 			"cd %s && docker compose up -d --remove-orphans",
-			d.remotePaths.dir,
+			d.remotePaths.projectDir,
 		),
 	)
 }
@@ -226,7 +236,7 @@ func (d *Docker) Destroy(_ context.Context) error {
 				"status=$?; "+
 				"rm -rf %[1]s; "+
 				"exit $status",
-			d.remotePaths.dir,
+			d.remotePaths.projectDir,
 		),
 	)
 }
@@ -342,6 +352,19 @@ func (d *Docker) logRemoteFilesDryRun() {
 		Warn().
 		Msgf("would have created compose config: %s", d.remotePaths.composeFile)
 
+	for _, name := range d.copyableServices() {
+		for _, c := range d.services[name].extension.Copy {
+			log.
+				Warn().
+				Str("service", name).
+				Msgf(
+					"would have copied %s to %s",
+					d.copyLocalPath(c),
+					d.copyRemotePath(c),
+				)
+		}
+	}
+
 	if len(d.servicesToPublish) == 0 {
 		return
 	}
@@ -413,6 +436,8 @@ func (d *Docker) modifyComposeContent(
 	compose.ClearEnvAndLabelFiles(project)
 	compose.ClearEmptyCommandsAndEntryPoints(project)
 
+	d.bindCopies(project)
+
 	if len(d.servicesToPublish) > 0 {
 		compose.InjectNgrokService(
 			project,
@@ -471,4 +496,68 @@ func (d *Docker) ngrokConfigContent() ([]byte, error) {
 	}
 
 	return out.Bytes(), nil
+}
+
+func (d *Docker) copyLocalPath(c config.XMiniEnvDockerCopy) string {
+	return filepath.Join(d.project.WorkingDir, c.HostPath)
+}
+
+func (d *Docker) copyRemotePath(c config.XMiniEnvDockerCopy) string {
+	return d.remotePaths.copiesDir + "/" + filepath.ToSlash(c.HostPath)
+}
+
+// Sorted: an unstable order rewrites compose.yml on an unchanged deploy.
+func (d *Docker) copyableServices() []string {
+	names := []string{}
+
+	for name, svc := range d.services {
+		// Nothing on the remote would mount what a skipped service declares.
+		if svc.extension.Skip {
+			continue
+		}
+
+		if len(svc.extension.Copy) > 0 {
+			names = append(names, name)
+		}
+	}
+
+	slices.Sort(names)
+
+	return names
+}
+
+func (d *Docker) bindCopies(project *config.ComposeProject) {
+	for _, name := range d.copyableServices() {
+		for _, c := range d.services[name].extension.Copy {
+			compose.BindVolume(
+				project,
+				name,
+				d.copyRemotePath(c),
+				c.ContainerPath,
+			)
+		}
+	}
+}
+
+// Replaced rather than merged, so a path dropped from the config leaves
+// nothing behind.
+func (d *Docker) copyFiles() error {
+	if err := d.transport.RunCommand(
+		"rm -rf " + d.remotePaths.copiesDir,
+	); err != nil {
+		return err
+	}
+
+	for _, name := range d.copyableServices() {
+		for _, c := range d.services[name].extension.Copy {
+			if err := d.transport.CopyPath(
+				d.copyLocalPath(c),
+				d.copyRemotePath(c),
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }

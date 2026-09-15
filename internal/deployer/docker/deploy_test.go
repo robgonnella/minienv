@@ -6,7 +6,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 
 	composecli "github.com/compose-spec/compose-go/v2/cli"
 	"github.com/compose-spec/compose-go/v2/types"
@@ -60,10 +62,27 @@ func exposedService(
 func projectOnDisk(content string) config.ComposeProject {
 	GinkgoHelper()
 
+	return projectOnDiskWith(content, nil)
+}
+
+// Keys are project-relative, written alongside the compose file.
+func projectOnDiskWith(
+	content string,
+	files map[string]string,
+) config.ComposeProject {
+	GinkgoHelper()
+
 	dir := GinkgoT().TempDir()
 	file := filepath.Join(dir, "compose.yml")
 
 	Expect(os.WriteFile(file, []byte(content), 0o600)).To(Succeed())
+
+	for name, body := range files {
+		path := filepath.Join(dir, name)
+
+		Expect(os.MkdirAll(filepath.Dir(path), 0o700)).To(Succeed())
+		Expect(os.WriteFile(path, []byte(body), 0o600)).To(Succeed())
+	}
 
 	opts, err := composecli.NewProjectOptions(
 		[]string{file},
@@ -95,7 +114,22 @@ func captureDeploy(
 ) remoteFiles {
 	GinkgoHelper()
 
+	files, _ := captureDeployAndCopies(subject, mockTransport)
+
+	return files
+}
+
+// Remote destination keyed by local source.
+type copiedPaths map[string]string
+
+func captureDeployAndCopies(
+	subject *docker.Docker,
+	mockTransport *transportmocks.MockClient,
+) (remoteFiles, copiedPaths) {
+	GinkgoHelper()
+
 	files := remoteFiles{}
+	copies := copiedPaths{}
 
 	mockTransport.
 		EXPECT().
@@ -104,12 +138,21 @@ func captureDeploy(
 			files[path] = string(content)
 		}).
 		Return(nil)
+	// Maybe: most specs declare no copy paths at all.
+	mockTransport.
+		EXPECT().
+		CopyPath(mock.Anything, mock.Anything).
+		Run(func(localPath, remotePath string) {
+			copies[localPath] = remotePath
+		}).
+		Return(nil).
+		Maybe()
 	mockTransport.EXPECT().RunCommand(mock.Anything).Return(nil)
 	mockTransport.EXPECT().Close().Return(nil)
 
 	Expect(subject.Deploy(context.Background())).To(Succeed())
 
-	return files
+	return files, copies
 }
 
 var _ = Describe("Docker deploy", func() {
@@ -467,6 +510,73 @@ services:
 				To(MatchError(errTransport))
 		})
 
+		It("clears the copies directory before the up command", func() {
+			var issued []string
+
+			mockTransport.
+				EXPECT().
+				CreateFile(mock.Anything, mock.Anything).
+				Return(nil)
+			mockTransport.
+				EXPECT().
+				RunCommand(mock.Anything).
+				Run(func(cmd string) { issued = append(issued, cmd) }).
+				Return(nil)
+			mockTransport.EXPECT().Close().Return(nil)
+
+			Expect(subject.Deploy(context.Background())).To(Succeed())
+
+			Expect(issued).To(ContainElement("rm -rf " + remoteDir + "/copies"))
+			Expect(slices.Index(issued, "rm -rf "+remoteDir+"/copies")).
+				To(BeNumerically("<", slices.IndexFunc(issued, func(c string) bool {
+					return strings.Contains(c, "docker compose up")
+				})))
+		})
+
+		It("does not run the up command when a copy fails", func() {
+			subject = docker.New(docker.Options{
+				DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
+				Transport:   mockTransport,
+				ImageClient: mockImage,
+			})
+
+			Expect(subject.Init(context.Background(), projectOnDiskWith(`
+name: test-project
+services:
+  api:
+    image: repo/api:v1
+    x-minienv-docker-service:
+      copy:
+        - hostPath: conf/app.yml
+          containerPath: /etc/app.yml
+`, map[string]string{"conf/app.yml": "declared: yes"}))).To(Succeed())
+
+			var issued []string
+
+			mockTransport.
+				EXPECT().
+				CreateFile(mock.Anything, mock.Anything).
+				Return(nil)
+			mockTransport.
+				EXPECT().
+				RunCommand(mock.Anything).
+				Run(func(cmd string) { issued = append(issued, cmd) }).
+				Return(nil)
+			mockTransport.
+				EXPECT().
+				CopyPath(mock.Anything, mock.Anything).
+				Return(errTransport).
+				Once()
+			mockTransport.EXPECT().Close().Return(nil)
+
+			Expect(subject.Deploy(context.Background())).
+				To(MatchError(errTransport))
+
+			Expect(issued).ToNot(ContainElement(ContainSubstring(
+				"docker compose up",
+			)))
+		})
+
 		Context("in dry-run mode", func() {
 			BeforeEach(func() {
 				dryRun = true
@@ -474,6 +584,28 @@ services:
 			})
 
 			It("writes nothing and opens no session", func() {
+				Expect(subject.Deploy(context.Background())).To(Succeed())
+			})
+
+			It("copies nothing", func() {
+				subject = docker.New(docker.Options{
+					DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
+					Transport:   mockTransport,
+					ImageClient: mockImage,
+					DryRun:      true,
+				})
+
+				Expect(subject.Init(context.Background(), projectOnDiskWith(`
+name: test-project
+services:
+  api:
+    image: repo/api:v1
+    x-minienv-docker-service:
+      copy:
+        - hostPath: conf/app.yml
+          containerPath: /etc/app.yml
+`, map[string]string{"conf/app.yml": "declared: yes"}))).To(Succeed())
+
 				Expect(subject.Deploy(context.Background())).To(Succeed())
 			})
 		})

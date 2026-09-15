@@ -211,17 +211,50 @@ The field set is small because compose is already the deployment format:
 replicas, commands, environment, resources, health checks and volumes stay on
 the compose service and are passed through untouched.
 
-| Field                 | Type            | Default              | Description                                                                        |
-| --------------------- | --------------- | -------------------- | ---------------------------------------------------------------------------------- |
-| `image.platforms`     | list of strings | `["linux/amd64"]`    | Platforms to build and push                                                        |
-| `image.repository`    | string          | from compose `image` | Image repository                                                                   |
-| `image.tag`           | string          | from compose `image` | Image tag. `+git` expands to the short commit SHA                                  |
-| `ngrok.port`          | integer         | —                    | Container port to expose publicly. Use the **container** side of a compose mapping |
-| `ngrok.trafficPolicy` | string          | inherits top level   | ngrok `on_http_request` policy                                                     |
-| `ngrok.url`           | string          | random               | Reserved domain for a stable endpoint                                              |
-| `skip`                | bool            | `false`              | Excludes the service from image builds and deploys                                 |
+| Field                  | Type            | Default              | Description                                                                        |
+| ---------------------- | --------------- | -------------------- | ---------------------------------------------------------------------------------- |
+| `copy[].containerPath` | string          | —                    | Absolute path inside the container to mount the copied path at                     |
+| `copy[].hostPath`      | string          | —                    | Path, relative to the compose project directory, of a file or directory to copy    |
+| `image.platforms`      | list of strings | `["linux/amd64"]`    | Platforms to build and push                                                        |
+| `image.repository`     | string          | from compose `image` | Image repository                                                                   |
+| `image.tag`            | string          | from compose `image` | Image tag. `+git` expands to the short commit SHA                                  |
+| `ngrok.port`           | integer         | —                    | Container port to expose publicly. Use the **container** side of a compose mapping |
+| `ngrok.trafficPolicy`  | string          | inherits top level   | ngrok `on_http_request` policy                                                     |
+| `ngrok.url`            | string          | random               | Reserved domain for a stable endpoint                                              |
+| `skip`                 | bool            | `false`              | Excludes the service from image builds and deploys                                 |
 
 ### Notes
+
+**`copy`** names files and directories, relative to the compose project
+directory, that are sent to the remote host and bind mounted into the container
+— a config file, a TLS certificate, a seed dataset, a directory of fixtures:
+
+```yaml
+services:
+  api:
+    image: myorg/api:latest
+    x-minienv-docker-service:
+      copy:
+        - hostPath: conf/api.yml
+          containerPath: /etc/api/api.yml
+        - hostPath: seed
+          containerPath: /var/lib/seed
+```
+
+A directory is copied recursively. `hostPath` must stay inside the project — an
+absolute path, a path climbing out with `..`, and the project directory itself
+are all rejected. `containerPath` must be absolute, and two entries on one
+service cannot name the same one.
+
+The copied paths land under the deployment's own directory on the remote host,
+each keeping the relative path it was declared with, so two files that share a
+base name stay apart. Two services naming the same `hostPath` share one copy.
+
+> **The whole set is replaced on every deploy.** An entry you remove or rename
+> takes its remote copy with it on the next deploy, and `minienv destroy`
+> removes the deployment directory that holds all of them.
+
+A service marked `skip` is not deployed, so nothing it declares is copied.
 
 **`ngrok.*`** requires `NGROK_AUTHTOKEN`; without it the whole block is ignored.
 Ignored for a service marked `skip`, since it is never deployed. See
@@ -246,6 +279,7 @@ Before the project reaches the remote host, minienv:
 | Clears `build:`                    | Images are built locally and pulled by tag on the remote  |
 | Clears `ports:`                    | Nothing is published to the remote host's network         |
 | Drops bind mounts                  | The host paths do not exist there. Named volumes are kept |
+| Adds a bind mount per `copy` entry | Pointed at where that entry is copied on the host         |
 | Drops `env_file` and `label_file`  | Their values are already in `environment` and `labels`    |
 | Pins `image:`                      | To the repository and tag resolved for this run           |
 | Injects an `ngrok` service         | Only when something publishes                             |

@@ -2,6 +2,7 @@ package docker_test
 
 import (
 	"context"
+	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -192,6 +193,101 @@ services:
   api:
     image: repo/api:v1
 `)).To(ContainSubstring("image: repo/api:v1"))
+		})
+	})
+
+	Describe("copying declared paths into the rewritten project", func() {
+		const copyCompose = `
+name: test-project
+services:
+  api:
+    image: repo/api:v1
+    volumes:
+      - ./conf:/etc/conf
+    x-minienv-docker-service:
+      copy:
+        - hostPath: conf/app.yml
+          containerPath: /etc/app/app.yml
+        - hostPath: nested/deep/app.yml
+          containerPath: /etc/deep/app.yml
+  worker:
+    image: repo/worker:v1
+    x-minienv-docker-service:
+      skip: true
+      copy:
+        - hostPath: conf/worker.yml
+          containerPath: /etc/worker.yml
+`
+
+		var (
+			rendered string
+			copies   copiedPaths
+			workDir  string
+		)
+
+		BeforeEach(func() {
+			mockTransport := transportmocks.NewMockClient(GinkgoT())
+			mockImage := imagemocks.NewMockClient(GinkgoT())
+
+			mockImage.
+				EXPECT().
+				BuildAndPush(mock.Anything, mock.Anything).
+				Return(nil).
+				Maybe()
+
+			subject := docker.New(docker.Options{
+				DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
+				Transport:   mockTransport,
+				ImageClient: mockImage,
+			})
+
+			project := projectOnDiskWith(copyCompose, map[string]string{
+				"conf/app.yml":        "declared: yes",
+				"conf/worker.yml":     "declared: yes",
+				"nested/deep/app.yml": "declared: yes",
+			})
+			workDir = project.WorkingDir
+
+			Expect(subject.Init(context.Background(), project)).To(Succeed())
+
+			files, copied := captureDeployAndCopies(subject, mockTransport)
+			rendered = files.get("compose.yml")
+			copies = copied
+		})
+
+		It("mounts each declared path under the copies directory", func() {
+			Expect(rendered).To(ContainSubstring(
+				"source: " + remoteDir + "/copies/conf/app.yml",
+			))
+			Expect(rendered).To(ContainSubstring("target: /etc/app/app.yml"))
+		})
+
+		It("keeps a nested path's directories apart", func() {
+			Expect(rendered).To(ContainSubstring(
+				"source: " + remoteDir + "/copies/nested/deep/app.yml",
+			))
+		})
+
+		It("still drops the compose bind mount it did not declare", func() {
+			Expect(rendered).ToNot(ContainSubstring("/etc/conf"))
+		})
+
+		It("copies each declared path from the project directory", func() {
+			Expect(copies).To(HaveKeyWithValue(
+				filepath.Join(workDir, "conf/app.yml"),
+				remoteDir+"/copies/conf/app.yml",
+			))
+			Expect(copies).To(HaveKeyWithValue(
+				filepath.Join(workDir, "nested/deep/app.yml"),
+				remoteDir+"/copies/nested/deep/app.yml",
+			))
+		})
+
+		It("copies nothing for a skipped service", func() {
+			Expect(copies).ToNot(HaveKey(
+				filepath.Join(workDir, "conf/worker.yml"),
+			))
+			Expect(rendered).ToNot(ContainSubstring("/etc/worker.yml"))
 		})
 	})
 

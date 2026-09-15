@@ -111,7 +111,8 @@ For a cached image, a `+git` tag gives every commit a unique one. See
 On Kubernetes, minienv reads a subset of compose: `entrypoint`, `volumes`,
 `user` and others have an extension equivalent instead. On Docker, check whether
 it is a bind mount or a `file:`-based secret, which cannot follow the project to
-another host. Both are covered in
+another host — a bind mount can be carried across with `copy`. Both are covered
+in
 [supplying what compose does not carry](./configuration.md#supplying-what-compose-does-not-carry).
 
 ## A health check never runs
