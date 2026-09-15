@@ -70,6 +70,13 @@ linters:
 
   exclusions:
     rules:
+      # WalkDir hands every error to the callback before returning it, so what
+      # comes back has already been wrapped there.
+      - path: internal/transport/ssh\.go
+        linters:
+          - wrapcheck
+        text: "filepath.WalkDir"
+
       # Specs build fixtures and assert on literals; these linters read that as
       # duplication and unsafe code rather than as the point of the test.
       - path: _test\.go
@@ -97,7 +104,7 @@ linters:
       # a tagged field can never satisfy any limit.
       - linters:
           - lll
-        source: '`(json|yaml|mapstructure|jsonschema):'
+        source: "`(json|yaml|mapstructure|jsonschema):"
 
       # Doc comments here are published verbatim as JSON Schema descriptions,
       # and AddGoComments joins wrapped lines with \n rather than a space, so

@@ -99,6 +99,16 @@ The project reaches the remote host as written, apart from what cannot follow it
 there: bind mounts, whose host paths do not exist on that machine, and
 `secrets` or `configs` declared with `file:`. Named volumes are kept.
 
+To carry a host path across anyway, name it under `copy` and minienv sends it to
+the remote host and bind mounts it there:
+
+```yaml
+x-minienv-docker-service:
+  copy:
+    - hostPath: conf/api.yml
+      containerPath: /etc/api/api.yml
+```
+
 ## Next steps
 
 - [Configuration Reference](./configuration-reference.md) — every field, with

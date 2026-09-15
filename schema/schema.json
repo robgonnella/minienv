@@ -218,6 +218,25 @@
       ],
       "description": "XMiniEnvDocker uses docker and a specified transport mechanism to deploy modified docker-compose config on a remote server."
     },
+    "XMiniEnvDockerCopy": {
+      "properties": {
+        "hostPath": {
+          "type": "string",
+          "description": "The path, relative to the project directory, of the file or directory to be copied"
+        },
+        "containerPath": {
+          "type": "string",
+          "description": "The absolute path inside the container to mount the file or directory"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "hostPath",
+        "containerPath"
+      ],
+      "description": "XMiniEnvDockerCopy copies a file or directory to the remote server and bind mounts it into the container at the specified containerPath."
+    },
     "XMiniEnvDockerService": {
       "properties": {
         "ngrok": {
@@ -231,6 +250,13 @@
         "image": {
           "$ref": "#/$defs/ServiceImage",
           "description": "The image for this deployment. Will try to use compose service image if not set"
+        },
+        "copy": {
+          "items": {
+            "$ref": "#/$defs/XMiniEnvDockerCopy"
+          },
+          "type": "array",
+          "description": "Files and directories copied to the remote server and bind mounted into\nthe container. Normal compose bind mounts are intentionally discarded\nmaking this config the override escape hatch when needed."
         }
       },
       "additionalProperties": false,

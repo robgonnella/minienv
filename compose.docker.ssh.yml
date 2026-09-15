@@ -13,6 +13,11 @@ x-minienv:
 services:
   hello:
     x-minienv-docker-service:
+      copy:
+        - hostPath: ./cmd
+          containerPath: /minienv-cmds
+        - hostPath: ./schema/schema.json
+          containerPath: /etc/schema/schema.json
       image:
         repository: rgonnella/demo-hello
         tag: test-+git

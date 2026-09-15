@@ -14,6 +14,8 @@ import (
 	"github.com/robgonnella/minienv/internal/errs"
 )
 
+const bindMountType = "bind"
+
 // ReloadWithNewName re-parses rather than renaming in place: compose derives
 // volume, network and container names from the project name, and only a fresh
 // load redoes that derivation.
@@ -128,7 +130,7 @@ func ClearServiceVolumes(project *config.ComposeProject) {
 
 		for _, vol := range svc.Volumes {
 			// The host path behind a bind mount does not exist on the remote.
-			if vol.Type == "bind" {
+			if vol.Type == bindMountType {
 				continue
 			}
 
@@ -209,7 +211,7 @@ func InjectNgrokService(
 		DependsOn: dependencies,
 		Volumes: []types.ServiceVolumeConfig{
 			{
-				Type:   "bind",
+				Type:   bindMountType,
 				Source: remoteConfigPath,
 				Target: fmt.Sprintf(
 					"%s/%s",
@@ -221,6 +223,26 @@ func InjectNgrokService(
 		},
 	}
 	project.Services[serviceName] = service
+}
+
+func BindVolume(
+	project *config.ComposeProject,
+	svcName string,
+	hostPath string,
+	containerPath string,
+) {
+	svc, ok := project.Services[svcName]
+	if !ok {
+		return
+	}
+
+	svc.Volumes = append(svc.Volumes, types.ServiceVolumeConfig{
+		Type:   bindMountType,
+		Source: hostPath,
+		Target: containerPath,
+	})
+
+	project.Services[svcName] = svc
 }
 
 func Marshal(project *config.ComposeProject) ([]byte, error) {

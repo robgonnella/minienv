@@ -3,7 +3,6 @@ package transport_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -138,108 +137,244 @@ var _ = Describe("SSHTransport", func() {
 		// ErrSSHCommandRun is logged in full further up, so anything a command
 		// body carries reaches the log with it.
 		Describe("what a failure reports", func() {
-			const secret = "2abcTESTTOKENvalue_do_not_log"
-
 			BeforeEach(func() {
 				srv.FailWith(remoteFailureExitCode)
 			})
 
-			It("redacts a heredoc body", func() {
-				err := subject.CreateFile("/remote/.env", []byte(
-					"NGROK_AUTHTOKEN="+secret,
-				))
+			It("masks a command that could be carrying a credential", func() {
+				err := subject.RunCommand("cat /etc/shadow")
+
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("cat <REDACTED>"))
+				Expect(err.Error()).ToNot(ContainSubstring("/etc/shadow"))
+			})
+		})
+
+		Describe("what a failed write reports", func() {
+			const secret = "2abcTESTTOKENvalue_do_not_log"
+
+			var blocked string
+
+			BeforeEach(func() {
+				blocked = filepath.Join(srv.SFTPHome(), "blocked")
+
+				Expect(os.MkdirAll(blocked, 0o500)).To(Succeed())
+			})
+
+			It("says nothing about the content it was writing", func() {
+				err := subject.CreateFile(
+					blocked+"/.env",
+					[]byte("NGROK_AUTHTOKEN="+secret),
+				)
 
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).ToNot(ContainSubstring(secret))
-				Expect(err.Error()).To(ContainSubstring("<REDACTED>"))
 			})
 
-			// Redacting the whole command would leave no way to tell which
-			// write failed.
 			It("keeps the path of the file it was writing", func() {
-				err := subject.CreateFile("/remote/.env", []byte(secret))
+				err := subject.CreateFile(blocked+"/.env", []byte(secret))
 
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("/remote/.env"))
-			})
-
-			It("redacts a body spanning several lines", func() {
-				err := subject.CreateFile("/remote/compose.yml", []byte(
-					"services:\n  api:\n    environment:\n      TOKEN: "+
-						secret+"\n",
-				))
-
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).ToNot(ContainSubstring(secret))
+				Expect(err.Error()).To(ContainSubstring(".env"))
 			})
 		})
 
 		Describe("CreateFile", func() {
+			landed := func(name string) string {
+				return filepath.Join(srv.SFTPHome(), name)
+			}
+
 			It("creates the parent directory before writing", func() {
-				Expect(subject.CreateFile("/remote/dir/compose.yml", []byte("a"))).
+				Expect(subject.CreateFile("~/dir/compose.yml", []byte("a"))).
 					To(Succeed())
 
-				Expect(srv.Commands()).To(HaveLen(1))
-				Expect(srv.Commands()[0]).
-					To(HavePrefix("mkdir -p /remote/dir && cat << "))
+				Expect(landed("dir/compose.yml")).To(BeAnExistingFile())
 			})
 
-			It("redirects the heredoc at the requested path", func() {
-				Expect(subject.CreateFile("/remote/compose.yml", []byte("a"))).
-					To(Succeed())
-
-				Expect(srv.Commands()[0]).
-					To(ContainSubstring("> /remote/compose.yml"))
-			})
-
-			It("writes the body between the delimiters", func() {
+			It("writes the body exactly as given", func() {
 				body := "services:\n  api:\n    image: repo/api:v1\n"
 
-				Expect(subject.CreateFile("/remote/compose.yml", []byte(body))).
+				Expect(subject.CreateFile("~/compose.yml", []byte(body))).
 					To(Succeed())
 
-				Expect(heredocBody(srv.Commands()[0])).To(Equal(body))
+				Expect(os.ReadFile(landed("compose.yml"))).
+					To(Equal([]byte(body)))
 			})
 
-			It("quotes the delimiter so the remote shell cannot expand the body", func() {
+			It("writes shell syntax as the literal text it is", func() {
 				body := "GREETING=$HOME\nSUB=`id`\nOTHER=$(whoami)\n"
 
-				Expect(subject.CreateFile("/remote/.env", []byte(body))).
+				Expect(subject.CreateFile("~/.env", []byte(body))).To(Succeed())
+
+				Expect(os.ReadFile(landed(".env"))).To(Equal([]byte(body)))
+			})
+
+			It("adds nothing to a body that ends without a newline", func() {
+				Expect(subject.CreateFile("~/compose.yml", []byte("a"))).
 					To(Succeed())
 
-				cmd := srv.Commands()[0]
-
-				Expect(cmd).To(MatchRegexp(`cat << 'MINIENV_[0-9a-f]+' >`))
-				Expect(heredocBody(cmd)).To(Equal(body))
+				Expect(os.ReadFile(landed("compose.yml"))).To(Equal([]byte("a")))
 			})
 
-			// A fixed "EOF" would truncate any file containing a bare EOF line.
-			It("survives a body containing a bare EOF line", func() {
-				body := "before\nEOF\nafter\n"
-
-				Expect(subject.CreateFile("/remote/compose.yml", []byte(body))).
+			It("replaces a longer body rather than writing over part of it", func() {
+				Expect(subject.CreateFile("~/compose.yml", []byte("a long body"))).
+					To(Succeed())
+				Expect(subject.CreateFile("~/compose.yml", []byte("short"))).
 					To(Succeed())
 
-				Expect(heredocBody(srv.Commands()[0])).To(Equal(body))
+				Expect(os.ReadFile(landed("compose.yml"))).
+					To(Equal([]byte("short")))
 			})
 
-			It("uses a fresh delimiter on every call", func() {
-				Expect(subject.CreateFile("/remote/a", []byte("a"))).To(Succeed())
-				Expect(subject.CreateFile("/remote/b", []byte("b"))).To(Succeed())
+			It("reports a path it cannot write", func() {
+				blocked := landed("blocked")
 
-				first := heredocDelimiterOf(srv.Commands()[0])
-				second := heredocDelimiterOf(srv.Commands()[1])
+				Expect(os.MkdirAll(blocked, 0o500)).To(Succeed())
 
-				Expect(first).To(HavePrefix("MINIENV_"))
-				Expect(second).To(HavePrefix("MINIENV_"))
-				Expect(first).ToNot(Equal(second))
+				Expect(subject.CreateFile(blocked+"/compose.yml", []byte("a"))).
+					To(MatchError(transport.ErrSFTPRemoteWrite))
+			})
+		})
+
+		Describe("CopyPath", func() {
+			var local string
+
+			BeforeEach(func() {
+				local = GinkgoT().TempDir()
 			})
 
-			It("reports a non-zero exit from the remote write", func() {
-				srv.FailWith(remoteFailureExitCode)
+			writeLocal := func(name, body string, mode os.FileMode) string {
+				GinkgoHelper()
 
-				Expect(subject.CreateFile("/remote/compose.yml", []byte("a"))).
-					To(MatchError(transport.ErrSSHCommandRun))
+				full := filepath.Join(local, name)
+
+				Expect(os.MkdirAll(filepath.Dir(full), 0o700)).To(Succeed())
+				Expect(os.WriteFile(full, []byte(body), mode)).To(Succeed())
+
+				return full
+			}
+
+			landed := func(name string) string {
+				return filepath.Join(srv.SFTPHome(), name)
+			}
+
+			It("reproduces a file byte for byte", func() {
+				body := "declared: yes"
+				file := writeLocal("app.yml", body, 0o600)
+
+				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+
+				Expect(os.ReadFile(landed("copies/app.yml"))).
+					To(Equal([]byte(body)))
+			})
+
+			It("adds nothing to a body already ending in a newline", func() {
+				body := "declared: yes\n"
+				file := writeLocal("app.yml", body, 0o600)
+
+				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+
+				Expect(os.ReadFile(landed("copies/app.yml"))).
+					To(Equal([]byte(body)))
+			})
+
+			It("carries content no shell could have carried", func() {
+				body := string([]byte{0x00, 0xff, 0x1b, 0x0a, 0x00, 0x80})
+				file := writeLocal("blob.bin", body, 0o600)
+
+				Expect(subject.CopyPath(file, "~/copies/blob.bin")).
+					To(Succeed())
+
+				Expect(os.ReadFile(landed("copies/blob.bin"))).
+					To(Equal([]byte(body)))
+			})
+
+			It("keeps a file executable", func() {
+				file := writeLocal("run.sh", "#!/bin/sh\necho hi\n", 0o755)
+
+				Expect(subject.CopyPath(file, "~/copies/run.sh")).To(Succeed())
+
+				info, err := os.Stat(landed("copies/run.sh"))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o755)))
+			})
+
+			It("leaves an unexecutable file unexecutable", func() {
+				file := writeLocal("app.yml", "declared: yes", 0o644)
+
+				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+
+				info, err := os.Stat(landed("copies/app.yml"))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o644)))
+			})
+
+			It("recreates a nested tree under the remote path", func() {
+				writeLocal("tree/top.yml", "top", 0o600)
+				writeLocal("tree/deep/inner.yml", "inner", 0o600)
+
+				Expect(subject.CopyPath(
+					filepath.Join(local, "tree"),
+					"~/copies/tree",
+				)).To(Succeed())
+
+				Expect(os.ReadFile(landed("copies/tree/top.yml"))).
+					To(Equal([]byte("top")))
+				Expect(os.ReadFile(landed("copies/tree/deep/inner.yml"))).
+					To(Equal([]byte("inner")))
+			})
+
+			It("creates a directory that holds nothing", func() {
+				Expect(os.MkdirAll(
+					filepath.Join(local, "empty"),
+					0o700,
+				)).To(Succeed())
+
+				Expect(subject.CopyPath(
+					filepath.Join(local, "empty"),
+					"~/copies/empty",
+				)).To(Succeed())
+
+				entries, err := os.ReadDir(landed("copies/empty"))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(entries).To(BeEmpty())
+			})
+
+			It("resolves a home-relative remote path", func() {
+				file := writeLocal("app.yml", "declared: yes", 0o600)
+
+				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+
+				Expect(landed("copies/app.yml")).To(BeAnExistingFile())
+				Expect(landed("~")).ToNot(BeAnExistingFile())
+			})
+
+			It("writes an absolute remote path as given", func() {
+				file := writeLocal("app.yml", "declared: yes", 0o600)
+				target := landed("abs/app.yml")
+
+				Expect(subject.CopyPath(file, target)).To(Succeed())
+
+				Expect(target).To(BeAnExistingFile())
+			})
+
+			It("reports a local path that is not there", func() {
+				err := subject.CopyPath(
+					filepath.Join(local, "nope.yml"),
+					"~/copies/nope.yml",
+				)
+
+				Expect(err).To(MatchError(transport.ErrSSHLocalFileStats))
+			})
+
+			It("reports a remote path it cannot write", func() {
+				file := writeLocal("app.yml", "declared: yes", 0o600)
+				blocked := landed("blocked")
+
+				Expect(os.MkdirAll(blocked, 0o500)).To(Succeed())
+
+				Expect(subject.CopyPath(file, blocked+"/app.yml")).
+					To(MatchError(transport.ErrSFTPRemoteWrite))
 			})
 		})
 	})
@@ -380,33 +515,6 @@ var _ = Describe("SSHTransport", func() {
 		})
 	})
 })
-
-func heredocDelimiterOf(cmd string) string {
-	GinkgoHelper()
-
-	_, rest, found := strings.Cut(cmd, "<< '")
-	Expect(found).To(BeTrue(), "no heredoc in %q", cmd)
-
-	delimiter, _, found := strings.Cut(rest, "'")
-	Expect(found).To(BeTrue(), "unterminated delimiter in %q", cmd)
-
-	return delimiter
-}
-
-// Asserts on what the remote would write, not on the command's shape.
-func heredocBody(cmd string) string {
-	GinkgoHelper()
-
-	delimiter := heredocDelimiterOf(cmd)
-
-	_, body, found := strings.Cut(cmd, "\n")
-	Expect(found).To(BeTrue(), "no heredoc body in %q", cmd)
-
-	body, found = strings.CutSuffix(body, "\n"+delimiter)
-	Expect(found).To(BeTrue(), "body not terminated by %q", delimiter)
-
-	return body
-}
 
 func mustGetwd() string {
 	GinkgoHelper()

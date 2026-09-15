@@ -13,6 +13,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -24,8 +25,7 @@ const identityFileMode = 0o600
 
 const sshDirMode = 0o700
 
-// An ssh server in this process, on loopback. The heredoc quoting under test
-// is only observable in what a server actually receives.
+// An ssh server in this process, on loopback.
 type testServer struct {
 	listener net.Listener
 	hostKey  ssh.PublicKey
@@ -35,6 +35,7 @@ type testServer struct {
 	exitCode  int
 	refuseAll bool
 	closed    bool
+	sftpHome  string
 
 	wg sync.WaitGroup
 }
@@ -61,6 +62,7 @@ func newTestServer() *testServer {
 	srv := &testServer{
 		listener: listener,
 		hostKey:  sshHostPub,
+		sftpHome: GinkgoT().TempDir(),
 	}
 
 	config := &ssh.ServerConfig{
@@ -121,6 +123,15 @@ func (s *testServer) HostKey() ssh.PublicKey {
 	return s.hostKey
 }
 
+// SFTPHome is the directory the server reports for ".", so a remote path
+// written as "~/..." resolves inside it.
+func (s *testServer) SFTPHome() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.sftpHome
+}
+
 func (s *testServer) accept(config *ssh.ServerConfig) {
 	defer s.wg.Done()
 
@@ -166,6 +177,14 @@ func (s *testServer) handleChannel(newChannel ssh.NewChannel) {
 	defer func() { _ = channel.Close() }()
 
 	for req := range requests {
+		if req.Type == "subsystem" && s.isSFTP(req.Payload) {
+			_ = req.Reply(true, nil)
+
+			s.serveSFTP(channel)
+
+			return
+		}
+
 		if req.Type != "exec" {
 			_ = req.Reply(false, nil)
 			continue
@@ -181,6 +200,31 @@ func (s *testServer) handleChannel(newChannel ssh.NewChannel) {
 
 		return
 	}
+}
+
+// A subsystem payload carries its name the same way an exec payload does.
+func (s *testServer) isSFTP(payload []byte) bool {
+	if len(payload) < execPayloadPrefixLen {
+		return false
+	}
+
+	return string(payload[execPayloadPrefixLen:]) == "sftp"
+}
+
+// Serves the real filesystem, rooted for "." at a temp directory, so specs can
+// assert on the bytes and modes that land.
+func (s *testServer) serveSFTP(channel ssh.Channel) {
+	server, err := sftp.NewServer(
+		channel,
+		sftp.WithServerWorkingDirectory(s.SFTPHome()),
+	)
+	if err != nil {
+		return
+	}
+
+	defer func() { _ = server.Close() }()
+
+	_ = server.Serve()
 }
 
 // An exec payload is a 4-byte big-endian length followed by the command.
