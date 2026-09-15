@@ -96,6 +96,16 @@ func ClearBuildSettings(project *config.ComposeProject) {
 	}
 }
 
+// ClearEnvAndLabelFiles drops paths that name the developer's machine. Compose
+// has already merged what they contained into environment and labels.
+func ClearEnvAndLabelFiles(project *config.ComposeProject) {
+	for i, svc := range project.Services {
+		svc.EnvFiles = nil
+		svc.LabelFiles = nil
+		project.Services[i] = svc
+	}
+}
+
 func ClearEmptyCommandsAndEntryPoints(project *config.ComposeProject) {
 	for i, svc := range project.Services {
 		// An empty slice marshals as `command: []`, which compose reads as

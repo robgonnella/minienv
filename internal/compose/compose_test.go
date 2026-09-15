@@ -32,6 +32,12 @@ func newProject() *config.ComposeProject {
 				},
 				Command:    types.ShellCommand{},
 				Entrypoint: types.ShellCommand{},
+				// Absolute because compose resolves them at load; their
+				// contents are already in Environment and Labels.
+				EnvFiles:    []types.EnvFile{{Path: "/home/dev/demo/.env.api"}},
+				LabelFiles:  []string{"/home/dev/demo/labels.env"},
+				Environment: types.MappingWithEquals{"FROM_ENV_FILE": nil},
+				Labels:      types.Labels{"from.label.file": "yes"},
 				DependsOn: types.DependsOnConfig{
 					"job": {Condition: "service_completed_successfully"},
 					"db":  {Condition: "service_healthy"},
@@ -339,6 +345,21 @@ services:
 			Expect(vols[0].Source).To(Equal("data"))
 		})
 
+		// Clearing is only safe because the values survive the drop; a spec
+		// that checked the nils alone would pass on a rewrite that took the
+		// resolved variables with them.
+		It("drops env and label files but keeps what they resolved to", func() {
+			project := newProject()
+
+			compose.ClearEnvAndLabelFiles(project)
+
+			api := project.Services["api"]
+			Expect(api.EnvFiles).To(BeEmpty())
+			Expect(api.LabelFiles).To(BeEmpty())
+			Expect(api.Environment).To(HaveKey("FROM_ENV_FILE"))
+			Expect(api.Labels).To(HaveKeyWithValue("from.label.file", "yes"))
+		})
+
 		It("nils out empty commands and entrypoints", func() {
 			project := newProject()
 
@@ -383,6 +404,7 @@ services:
 			compose.ClearBuildSettings(project)
 			compose.ClearPortMappings(project)
 			compose.ClearServiceVolumes(project)
+			compose.ClearEnvAndLabelFiles(project)
 			compose.ClearEmptyCommandsAndEntryPoints(project)
 			compose.InjectNgrokService(project, "/remote/ngrok.yml", "sum")
 
@@ -401,6 +423,14 @@ services:
 			Expect(ok).To(BeTrue(), "no services block in %s", out)
 			Expect(services).To(HaveKey("ngrok"))
 			Expect(services).ToNot(HaveKey("job"))
+
+			// These name paths on the developer's machine, and the remote
+			// fails the whole project rather than skipping one it cannot find.
+			api, ok := services["api"].(map[string]any)
+			Expect(ok).To(BeTrue(), "no api service in %s", out)
+			Expect(api).ToNot(HaveKey("env_file"))
+			Expect(api).ToNot(HaveKey("label_file"))
+			Expect(api).To(HaveKey("environment"))
 		})
 
 		It("escapes a literal dollar so the remote cannot re-interpolate it", func() {

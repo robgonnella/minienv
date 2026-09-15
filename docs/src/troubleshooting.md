@@ -1,30 +1,21 @@
 # Troubleshooting
 
-When minienv fails, it names the field that was wrong and why, and it resolves
-your whole configuration before deploying anything — so a rejected config never
-leaves a half-applied environment behind. Read the message first; this page is
-for what minienv does _not_ tell you.
+Read the error first — this page is for what minienv does _not_ tell you.
 
 ## Nothing is exposed publicly
 
-`NGROK_AUTHTOKEN` is not set. When it is missing, every `ngrok` block in your
-config is discarded without a warning and the deploy still succeeds. Check this
-before anything else.
+`NGROK_AUTHTOKEN` is not set. When it is missing, every `ngrok` block is
+discarded without a warning and the deploy still succeeds. Check this first.
 
 ## No URL table prints after a successful deploy
 
-Printing the table is the last, cosmetic step, so failing to read the URLs back
-is a warning rather than a failed deploy — the environment is already up.
-
-The usual cause is an unset or invalid `NGROK_API_KEY`. That is a different
-credential from `NGROK_AUTHTOKEN` and is optional: publishing does not need it,
-and neither does teardown. Only the table does.
+An unset or invalid `NGROK_API_KEY`. That is a different credential from
+`NGROK_AUTHTOKEN` and only the table needs it, so the environment is already up.
 
 ## The URL table shows `my-namespace-api` rather than `api`
 
-That is the ngrok endpoint name, deliberately prefixed with the namespace so it
-is unique on the account. It is also the name to look for in the ngrok
-dashboard.
+That is the ngrok endpoint name, prefixed with the namespace so it is unique on
+the account. It is also the name to look for in the ngrok dashboard.
 
 ## A published URL changed after a redeploy
 
@@ -32,15 +23,12 @@ An endpoint with no reserved `ngrok.url` keeps its address only while the ngrok
 agent survives. Changing the set of published services — or rotating the auth
 token — replaces the agent, which reassigns every unreserved URL at once.
 
-Pin the ones that matter with `ngrok.url`. A randomly assigned URL cannot be
-re-claimed, so a reserved domain is the only way to hold an address. See
+A reserved domain is the only way to hold an address — see
 [Exposing Services](./exposing-services.md#a-stable-url).
 
 ## A new service is not published, or a removed one still is
 
-Adding or removing an `ngrok` block replaces the agent, which also reassigns
-every URL with no reserved `url`. If a URL looks stale, check whether the agent
-actually restarted.
+If a URL looks stale, check whether the agent actually restarted.
 
 On Kubernetes:
 
@@ -76,12 +64,9 @@ ssh <host> 'cd ~/.minienv/<namespace> && docker compose logs ngrok'
 
 ## Two developers cannot both publish the same service
 
-Check whether `ngrok.url` is a hardcoded domain. Endpoint _names_ are prefixed
-with the namespace, so lookups never cross environments — but a reserved domain
-is committed to `compose.yml` and is therefore the same for everyone, and two
-agents cannot claim one domain at once.
-
-Interpolate the namespace into it:
+Check whether `ngrok.url` is a hardcoded domain. It is committed to
+`compose.yml` and is therefore the same for everyone, and two agents cannot
+claim one domain at once. Interpolate the namespace into it:
 
 ```yaml
 url: https://${MINIENV_NAMESPACE}-api.example.ngrok.app
@@ -98,38 +83,36 @@ On Kubernetes you can instead force a replacement on every deploy with
 
 ## A code change does not show up at all
 
-Either the build was skipped — look for `missing required fields: skipping build
-and push` in the output — or the target is reusing a cached image. A `+git` tag
-gives every commit a unique one. See
+Either the build was skipped or the target is reusing a cached image.
+
+A service with a `build:` section is skipped when minienv cannot work out a
+complete image reference — registry, tag, context and dockerfile. It logs
+`missing required fields: skipping build and push`, then deploys whatever image
+reference it does have. That is a warning, not an error.
+
+For a cached image, a `+git` tag gives every commit a unique one. See
 [Images and Builds](./images-and-builds.md).
 
 ## A setting under a service extension has no effect
 
-Four possibilities:
-
 1. **The extension does not match the active deployer.** Each deployer reads
-   only its own service extension; any other is ignored in full and silently,
-   without an error. This is the first thing to check after switching targets.
-2. The key is misspelled. Unknown extension keys are ignored at runtime. The
-   [JSON schema](./getting-started.md#editor-autocomplete) would have flagged it
-   in your editor — the schema is stricter than the runtime.
-3. The key is one the target ignores. On Kubernetes a `deploymentType: job`
-   ignores `replicas`, `service.*`, `volumes`, `volumeMounts`, `tolerations`,
-   probes and `ngrok`.
+   only its own, and ignores any other silently. Check this first after
+   switching targets.
+2. The key is misspelled. Unknown keys are ignored at runtime; the
+   [JSON schema](./getting-started.md#editor-autocomplete) is stricter and would
+   have flagged it in your editor.
+3. The key is one the target ignores — see
+   [what a job ignores](./jobs-and-dependencies.md#what-a-job-ignores).
 4. The key is nested wrongly. The extension is mostly flat: `replicas` and
-   `resources` sit directly under `x-minienv-k8s-service`, not under a `values`
-   or `chart` key.
-
-Each extension's accepted fields are listed in
-[Configuration Reference](./configuration-reference.md).
+   `resources` sit directly under `x-minienv-k8s-service`.
 
 ## A compose setting has no effect
 
 On Kubernetes, minienv reads a subset of compose: `entrypoint`, `volumes`,
-`networks`, `restart`, `user` and others are ignored. On Docker, check whether
+`user` and others have an extension equivalent instead. On Docker, check whether
 it is a bind mount or a `file:`-based secret, which cannot follow the project to
 another host. Both are covered in
-[what to change in your compose file](./configuration.md#what-to-change-in-your-compose-file).
+[supplying what compose does not carry](./configuration.md#supplying-what-compose-does-not-carry).
 
 ## A health check never runs
 
@@ -152,5 +135,5 @@ supported.
 ## Teardown failed and left containers behind
 
 The directory holding your configuration and credentials is removed even when
-teardown fails, so a retry starts clean. Containers or volumes may survive it;
-check directly on the host with `docker ps`.
+teardown fails. Containers or volumes may survive it; check on the host with
+`docker ps`.

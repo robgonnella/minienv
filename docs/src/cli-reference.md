@@ -21,8 +21,7 @@ All flags are global and work on every command.
 | `--project-name`      | `-p`  | —       | Project name. Same as `docker compose -p`                                 |
 | `--dry-run`           | —     | `false` | Build images without pushing, and preview the deploy without applying it  |
 
-The first three behave exactly as they do in `docker compose`, because minienv
-delegates file discovery to the same library.
+The first three behave exactly as they do in `docker compose`.
 
 What `--dry-run` still touches depends on the deployer you configured — see
 [Getting Started](./getting-started.md#preview-without-deploying).
@@ -36,11 +35,8 @@ What `--dry-run` still touches depends on the deployer you configured — see
 | `HELM_DRIVER`     | Helm storage backend for the `k8s` deployer. Defaults to `secret`                                                     |
 
 Standard compose environment handling also applies: `COMPOSE_FILE`,
-`COMPOSE_PROJECT_NAME`, `.env` file loading, and `${VAR}` interpolation inside
-the compose file all work as usual.
-
-That last one is the easiest way to give each developer or branch its own
-namespace:
+`COMPOSE_PROJECT_NAME`, `.env` file loading, and `${VAR}` interpolation. That
+last one is the easiest way to give each developer or branch its own namespace:
 
 ```yaml
 x-minienv:

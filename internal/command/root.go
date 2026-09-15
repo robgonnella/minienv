@@ -5,6 +5,7 @@ import (
 	goos "os"
 
 	"github.com/robgonnella/minienv/internal/core"
+	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
 	"github.com/robgonnella/minienv/internal/loader"
@@ -42,7 +43,7 @@ make those environments accessible for review and testing.`,
 	return cmd
 }
 
-// Execute runs the CLI. Every layer below takes its context from the one
+// Execute runs the CLI. Every layer below should take its context from the one
 // created here, so cancellation has a single origin.
 func Execute() {
 	if err := newRootCmd().ExecuteContext(context.Background()); err != nil {
@@ -109,5 +110,21 @@ func loadProject(
 		return nil, err
 	}
 
-	return loader.New(loaderOpts).LoadCore(ctx)
+	minienv, err := loader.New(loaderOpts).LoadCore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Standing in the project directory is what makes an x-minienv path resolve
+	// the way compose resolves build contexts and env files.
+	if err := goos.Chdir(minienv.WorkingDir()); err != nil {
+		return nil, errs.Errorf(
+			ErrWorkingDir,
+			"failed to enter the project directory %s: %w",
+			minienv.WorkingDir(),
+			err,
+		)
+	}
+
+	return minienv, nil
 }

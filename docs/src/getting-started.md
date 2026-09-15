@@ -9,14 +9,11 @@
 | A reachable Kubernetes context                             | Only for the `k8s` deployer                    |
 | An SSH-reachable host with `docker` and its compose plugin | Only for the `docker` deployer                 |
 
-Helm is built into minienv as a library — you do **not** need the `helm` binary
-installed. The `docker` deployer likewise needs no extra client: it reaches the
-remote host over SSH directly.
+You do **not** need the `helm` binary installed.
 
 For the `docker` deployer, the remote host must already be in your
-`~/.ssh/known_hosts`. minienv verifies the host key and offers no prompt or
-bypass, so connect once by hand first. Encrypted identity files are not
-supported.
+`~/.ssh/known_hosts`. minienv offers no prompt or bypass, so connect once by
+hand first. Encrypted identity files are not supported.
 
 ## Install
 
@@ -48,9 +45,6 @@ services:
       - "8080:8080"
 ```
 
-`context` and `namespace` are both required. Setting them is what tells minienv
-to deploy to Kubernetes.
-
 Deploy it:
 
 ```sh
@@ -73,8 +67,8 @@ Both commands accept `up` and `down` as aliases.
 minienv deploy --dry-run
 ```
 
-It is not, however, entirely offline. Images are still built locally with
-`buildx` — they are simply not pushed.
+It is not entirely offline. Images are still built locally with `buildx` — they
+are simply not pushed.
 
 **Kubernetes.** The cluster is still contacted, read-only: reachability checks,
 API discovery, and reading existing release state. Nothing is applied.
@@ -95,8 +89,7 @@ interpolation. The same flags work too:
 minienv deploy -f compose.yml -f compose.override.yml
 ```
 
-This means you can give every developer their own namespace with nothing but an
-environment variable:
+So every developer can have their own namespace from an environment variable:
 
 ```yaml
 x-minienv:
@@ -114,12 +107,8 @@ own extension fields. Point at it from the top of your compose file:
 # $schema: https://raw.githubusercontent.com/robgonnella/minienv/refs/heads/main/schema/schema.json
 ```
 
-Editors that honor this comment will autocomplete and validate the `x-minienv`
-blocks.
-
-This is worth doing: the schema is **stricter than the runtime**. It rejects
-unknown keys, whereas at deploy time a misspelled extension key is silently
-ignored — your setting simply has no effect, with no error to tell you why.
+Worth doing: the schema is **stricter than the runtime**. It rejects unknown
+keys, whereas at deploy time a misspelled extension key is silently ignored.
 
 ## Next steps
 
