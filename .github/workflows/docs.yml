@@ -1,0 +1,25 @@
+name: Docs
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ github.repository == 'robgonnella/minienv' && !contains(github.ref_name, '-rc.') }}
+    concurrency: publish-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: peaceiris/actions-mdbook@v2
+      - run: cd docs && mdbook build
+      - uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/book
+          cname: minienv.rgon.io
