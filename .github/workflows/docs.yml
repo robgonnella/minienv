@@ -15,7 +15,7 @@ jobs:
     concurrency: publish-docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: peaceiris/actions-mdbook@v2
       - run: cd docs && mdbook build
       - uses: peaceiris/actions-gh-pages@v3
