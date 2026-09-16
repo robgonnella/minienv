@@ -29,7 +29,7 @@ jobs:
           go build \
           -ldflags="-s -w" \
           -trimpath \
-          -o build/${{ github.event.repository.name }}-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} \
+          -o build/${{ github.event.repository.name }}${{ matrix.ext }} \
           cmd/minienv/main.go
       - name: Package
         uses: a7ul/tar-action@v1.2.0
@@ -37,7 +37,7 @@ jobs:
           command: c
           cwd: ./build
           files: |
-            ${{ github.event.repository.name }}-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+            ${{ github.event.repository.name }}${{ matrix.ext }}
           outPath: ${{ github.event.repository.name }}-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tgz
       - name: Upload artifact
         uses: actions/upload-artifact@v5
