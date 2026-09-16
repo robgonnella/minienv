@@ -1,3 +1,9 @@
+# [0.1.1](https://github.com/robgonnella/minienv/compare/v0.1.0...v0.1.1) - 2026-09-16
+
+### ⏩ CI/CD
+
+- fixes issue with publish workflow [_(ac014ff)_](https://github.com/robgonnella/minienv/commit/ac014ffc9860988214327a64a64861560a8d3658)
+
 # [0.1.0](https://github.com/robgonnella/minienv/releases/tag/v0.1.0) - 2026-09-16
 
 ### 🚀 Features
