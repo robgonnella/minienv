@@ -42,8 +42,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
+          if-no-files-found: error
           name: ${{ github.event.repository.name }}-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tgz
-          path: build/${{ github.event.repository.name }}-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tgz
+          path: ${{ github.event.repository.name }}-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tgz
   update-release:
     if: ${{ github.repository == 'robgonnella/minienv' }}
     runs-on: ubuntu-latest
