@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  releasaurus:
+    runs-on: ubuntu-latest
+    steps:
+      - name: pause for PR availability
+        run: sleep 5
+        shell: bash
+      - uses: robgonnella/releasaurus/action@v1.1.0
+        with:
+          command: release
+          command_args: >-
+            --forge github
+            --repo ${{ github.server_url}}/${{ github.repository }}
+            --token ${{ secrets.RELEASE_TOKEN }}
+            --debug
+      - uses: robgonnella/releasaurus/action@v1.1.0
+        with:
+          command: release-pr
+          command_args: >-
+            --forge github
+            --repo ${{ github.server_url}}/${{ github.repository }}
+            --token ${{ secrets.RELEASE_TOKEN }}
+            --debug
