@@ -65,3 +65,14 @@ x-minienv:
 > **Two targets, one at a time.** `k8s` deploys each service as a Helm release
 > to a cluster; `docker` deploys the whole project to a single remote host. See
 > [Deployers](./deployers.md).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0
+  ([LICENSE-APACHE](https://github.com/robgonnella/minienv/blob/main/LICENSE-APACHE)
+  or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license
+  ([LICENSE-MIT](https://github.com/robgonnella/minienv/blob/main/LICENSE-MIT)
+  or <http://opensource.org/licenses/MIT>)
