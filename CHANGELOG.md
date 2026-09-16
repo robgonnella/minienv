@@ -1,3 +1,9 @@
+# [0.1.2](https://github.com/robgonnella/minienv/compare/v0.1.1...v0.1.2) - 2026-09-16
+
+### ⏩ CI/CD
+
+- minor update to publish workflow [_(686e0d8)_](https://github.com/robgonnella/minienv/commit/686e0d8b06cf7a97ec3377bea5ab3ce933567be8)
+
 # [0.1.1](https://github.com/robgonnella/minienv/compare/v0.1.0...v0.1.1) - 2026-09-16
 
 ### ⏩ CI/CD
