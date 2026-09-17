@@ -111,6 +111,11 @@ x-minienv-docker-service:
       containerPath: /etc/api/api.yml
 ```
 
+`environment` reaches the remote host already interpolated, so `${DB_HOST}`
+arrives as the value it had on your machine. To keep a value off the remote
+entirely, use the bare `- SOME_VAR` form: with nothing set locally it stays
+unresolved, and the remote host supplies it from its own environment.
+
 ## Next steps
 
 - [Configuration Reference](./configuration-reference.md) — every field, with

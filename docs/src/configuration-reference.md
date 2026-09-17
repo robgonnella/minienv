@@ -19,19 +19,17 @@ configuring more than one is an error.
 
 ### `docker`
 
-| Field                           | Type    | Required | Default    | Description                                                                       |
-| ------------------------------- | ------- | -------- | ---------- | --------------------------------------------------------------------------------- |
-| `docker.namespace`              | string  | **yes**  | —          | Compose project name on the remote host, and the directory it lives in            |
-| `docker.transport`              | map     | **yes**  | —          | The transport used to reach the remote host                                       |
-| `docker.transport.ssh.host`     | string  | **yes**  | —          | Target host for the SSH connection                                                |
-| `docker.transport.ssh.identity` | string  | **yes**  | —          | Path to the private key file                                                      |
-| `docker.transport.ssh.user`     | string  | no       | local user | User for the SSH connection                                                       |
-| `docker.transport.ssh.port`     | integer | no       | `22`       | Port for the SSH connection                                                       |
-| `docker.ngrok.trafficPolicy`    | string  | no       | `""`       | ngrok `on_http_request` policy applied to every service that does not set its own |
+| Field                                  | Type    | Required | Default    | Description                                                                                               |
+| -------------------------------------- | ------- | -------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `docker.namespace`                     | string  | **yes**  | —          | Compose project name and directory (`~/.minienv/<namespace>`) on the remote host. Reduced to `[a-z0-9_-]` |
+| [`docker.transport`](#dockertransport) | map     | **yes**  | —          | How to reach the remote host                                                                              |
+| `docker.transport.ssh.host`            | string  | **yes**  | —          | Target host for the SSH connection                                                                        |
+| `docker.transport.ssh.identity`        | string  | **yes**  | —          | Path to the private key file                                                                              |
+| `docker.transport.ssh.user`            | string  | no       | local user | User for the SSH connection                                                                               |
+| `docker.transport.ssh.port`            | integer | no       | `22`       | Port for the SSH connection                                                                               |
+| `docker.ngrok.trafficPolicy`           | string  | no       | `""`       | ngrok `on_http_request` policy applied to every service that does not set its own                         |
 
-`docker.namespace` is reduced to `[a-z0-9_-]`, and rejected if nothing survives
-that. The deployment lives at `~/.minienv/<namespace>` on the remote host, and
-`minienv destroy` removes that directory.
+#### `docker.transport`
 
 Exactly one transport must be configured; configuring none, like configuring
 more than one, is an error.
@@ -45,110 +43,55 @@ more than one, is an error.
 
 Under `services.<name>`. All fields are optional.
 
-| Field                        | Type                    | Default                      | Description                                                                                           |
-| ---------------------------- | ----------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `affinity`                   | k8s schema              | —                            | Passed through to the pod spec                                                                        |
-| `command`                    | list of strings         | compose `command`            | Container command                                                                                     |
-| `configMapFrom`              | list of strings         | —                            | Files, relative to compose-project-directory, that become one ConfigMap named after the service       |
-| `deploymentTimeout`          | duration                | inherits top level           | Helm timeout for this service                                                                         |
-| `deploymentType`             | `service` \| `job`      | `service`                    | Deploy as a Deployment or a run-to-completion Job                                                     |
-| `env`                        | k8s schema              | —                            | Container env vars as `EnvVar` entries, merged over compose `environment` by `name`                   |
-| `envFrom`                    | k8s schema              | —                            | Sources to populate container env vars from, as `EnvFromSource` entries                               |
-| `image.platforms`            | list of strings         | `["linux/amd64"]`            | Platforms to build and push                                                                           |
-| `image.pullPolicy`           | string                  | `IfNotPresent`               | Kubernetes image pull policy                                                                          |
-| `image.repository`           | string                  | from compose `image`         | Image repository                                                                                      |
-| `image.tag`                  | string                  | from compose `image`         | Image tag. `+git` expands to the short commit SHA                                                     |
-| `imagePullSecrets[].name`    | string                  | —                            | Name of an existing pull secret in the namespace                                                      |
-| `livenessProbe`              | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                                  |
-| `manifests`                  | list of strings         | —                            | Paths, relative to compose-project-directory, to extra manifests rendered into this service's release |
-| `ngrok.port`                 | integer                 | —                            | Container port to expose publicly. Use the **container** side of a compose mapping                    |
-| `ngrok.trafficPolicy`        | string                  | inherits top level           | ngrok `on_http_request` policy                                                                        |
-| `ngrok.url`                  | string                  | random                       | Reserved domain for a stable endpoint                                                                 |
-| `nodeSelector`               | k8s schema              | —                            | Passed through to the pod spec                                                                        |
-| `podAnnotations`             | map of string to string | —                            | Passed through to the pod template                                                                    |
-| `podLabels`                  | map of string to string | —                            | Passed through to the pod template                                                                    |
-| `podSecurityContext`         | k8s schema              | —                            | Passed through to the pod spec                                                                        |
-| `readinessProbe`             | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                                  |
-| `recreate`                   | bool                    | `false`                      | Replaces the pods on every deploy, even unchanged ones                                                |
-| `replicas`                   | integer                 | `1`                          | Number of replicas. No effect on a job                                                                |
-| `resources`                  | k8s schema              | —                            | Passed through to the container spec                                                                  |
-| `securityContext`            | k8s schema              | —                            | Passed through to the container spec                                                                  |
-| `service.create`             | bool                    | `true`                       | Whether to create a Kubernetes Service. Forced to `false` when the service resolves no ports          |
-| `service.ports[]`            | list                    | derived from compose `ports` | Explicit port mappings, merged with the derived ones                                                  |
-| `service.type`               | string                  | `ClusterIP`                  | Service type                                                                                          |
-| `serviceAccount.annotations` | map of string to string | `{}`                         | Extra annotations                                                                                     |
-| `serviceAccount.automount`   | bool                    | `true`                       | Automount the service account token                                                                   |
-| `serviceAccount.create`      | bool                    | `true`                       | Whether to create a ServiceAccount. Forced to `false` when the service resolves no ports              |
-| `serviceAccount.name`        | string                  | `""`                         | Name. Empty means the generated fullname when creating, otherwise `default`                           |
-| `skip`                       | bool                    | `false`                      | Excludes the service from image builds and deploys                                                    |
-| `startupProbe`               | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                                  |
-| `tolerations`                | k8s schema              | —                            | Passed through to the pod spec                                                                        |
-| `volumeMounts`               | k8s schema              | —                            | Passed through to the container spec                                                                  |
-| `volumes`                    | k8s schema              | —                            | Passed through to the pod spec                                                                        |
+| Field                             | Type                    | Default                      | Description                                                                                                                                                                                                 |
+| --------------------------------- | ----------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `affinity`                        | k8s schema              | —                            | Passed through to the pod spec                                                                                                                                                                              |
+| `command`                         | list of strings         | compose `command`            | Container command                                                                                                                                                                                           |
+| [`configMapFrom`](#configmapfrom) | list of strings         | —                            | Files, relative to the compose project directory, that become one ConfigMap named after the service                                                                                                         |
+| `deploymentTimeout`               | duration                | inherits top level           | Helm timeout for this service                                                                                                                                                                               |
+| `deploymentType`                  | `service` \| `job`      | `service`                    | Deploy as a Deployment or a run-to-completion Job                                                                                                                                                           |
+| [`env`](#env)                     | k8s schema              | —                            | Container env vars as `EnvVar` entries, merged over compose `environment` by `name`                                                                                                                         |
+| `envFrom`                         | k8s schema              | —                            | Sources to populate container env vars from, as `EnvFromSource` entries                                                                                                                                     |
+| `image.platforms`                 | list of strings         | `["linux/amd64"]`            | Platforms to build and push                                                                                                                                                                                 |
+| `image.pullPolicy`                | string                  | `IfNotPresent`               | Kubernetes image pull policy                                                                                                                                                                                |
+| `image.repository`                | string                  | from compose `image`         | Image repository                                                                                                                                                                                            |
+| `image.tag`                       | string                  | from compose `image`         | Image tag. `+git` expands to the short commit SHA                                                                                                                                                           |
+| `imagePullSecrets[].name`         | string                  | —                            | Existing pull secret in the namespace. See [Private registries](./images-and-builds.md#private-registries)                                                                                                  |
+| [`livenessProbe`](#probes)        | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                                                                                                                                        |
+| [`manifests`](#manifests)         | list of strings         | —                            | Paths, relative to the compose project directory, to extra manifests rendered into this service's release                                                                                                   |
+| `ngrok.port`                      | integer                 | —                            | Container port to expose publicly — the **container** side of a compose mapping. Ignored for a job, a skipped service, and when `NGROK_AUTHTOKEN` is unset. See [Exposing Services](./exposing-services.md) |
+| `ngrok.trafficPolicy`             | string                  | inherits top level           | ngrok `on_http_request` policy                                                                                                                                                                              |
+| `ngrok.url`                       | string                  | random                       | Reserved domain for a stable endpoint                                                                                                                                                                       |
+| `nodeSelector`                    | k8s schema              | —                            | Passed through to the pod spec                                                                                                                                                                              |
+| `podAnnotations`                  | map of string to string | —                            | Passed through to the pod template                                                                                                                                                                          |
+| `podLabels`                       | map of string to string | —                            | Passed through to the pod template                                                                                                                                                                          |
+| `podSecurityContext`              | k8s schema              | —                            | Passed through to the pod spec                                                                                                                                                                              |
+| [`readinessProbe`](#probes)       | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                                                                                                                                        |
+| `recreate`                        | bool                    | `false`                      | Replace the pods, and any resource that cannot be patched in place, on every deploy. For fixed tags like `latest`                                                                                           |
+| `replicas`                        | integer                 | `1`                          | Number of replicas. No effect on a job                                                                                                                                                                      |
+| `resources`                       | k8s schema              | —                            | Passed through to the container spec                                                                                                                                                                        |
+| `securityContext`                 | k8s schema              | —                            | Passed through to the container spec                                                                                                                                                                        |
+| `service.create`                  | bool                    | `true`                       | Whether to create a Kubernetes Service. Forced to `false` when the service resolves no ports                                                                                                                |
+| [`service.ports`](#serviceports)  | list                    | derived from compose `ports` | Explicit port mappings, merged with the derived ones                                                                                                                                                        |
+| `service.type`                    | string                  | `ClusterIP`                  | Service type                                                                                                                                                                                                |
+| `serviceAccount.annotations`      | map of string to string | `{}`                         | Extra annotations                                                                                                                                                                                           |
+| `serviceAccount.automount`        | bool                    | `true`                       | Automount the service account token                                                                                                                                                                         |
+| `serviceAccount.create`           | bool                    | `true`                       | Whether to create a ServiceAccount. Forced to `false` when the service resolves no ports                                                                                                                    |
+| `serviceAccount.name`             | string                  | `""`                         | Name. Empty means the generated fullname when creating, otherwise `default`                                                                                                                                 |
+| `skip`                            | bool                    | `false`                      | Excludes the service from image builds and deploys. `destroy` still uninstalls it                                                                                                                           |
+| [`startupProbe`](#probes)         | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                                                                                                                                        |
+| `tolerations`                     | k8s schema              | —                            | Passed through to the pod spec                                                                                                                                                                              |
+| `volumeMounts`                    | k8s schema              | —                            | Passed through to the container spec                                                                                                                                                                        |
+| `volumes`                         | k8s schema              | —                            | Passed through to the pod spec                                                                                                                                                                              |
 
-### Notes
-
-**Fields marked `k8s schema`** reach the generated manifests exactly as written,
-so the [Kubernetes documentation](https://kubernetes.io/docs/reference/) is the
+Fields marked `k8s schema` reach the generated manifests exactly as written, so
+the [Kubernetes documentation](https://kubernetes.io/docs/reference/) is the
 reference for their shape.
 
-**The three probes** are derived from a compose `healthcheck`. A `curl` or
-`wget` test against `http://localhost[:port][/path]` becomes an HTTP probe on
-the **container** port; anything else becomes an exec probe. `disable: true`, an
-empty `test`, or `test: ["NONE"]` produces none.
+#### `configMapFrom`
 
-Set any of the three to write it yourself. The ones you leave unset still come
-from the compose `healthcheck`:
-
-```yaml
-x-minienv-k8s-service:
-  readinessProbe:
-    httpGet:
-      path: /ready
-      port: 8080
-    initialDelaySeconds: 5
-```
-
-> **Caution:** a `curl` or `wget` test pointed at anything other than
-> `localhost` produces **no probes at all** — silently. Use `localhost`, write
-> the check as a non-HTTP command, or set the probes yourself.
-
-**`env`** is merged over compose `environment`. A literal `value` is written
-into the manifest, so **do not put secrets there** if the manifests are visible
-to others. Values compose could not resolve (the bare `- SOME_VAR` form, with
-nothing set locally) are dropped rather than set empty.
-
-```yaml
-x-minienv-k8s-service:
-  env:
-    - name: EXAMPLE_VAR
-      value: example-value
-    - name: EXAMPLE_FROM_VAR
-      valueFrom:
-        secretKeyRef:
-          name: example-secret
-          key: example-key
-```
-
-**`skip`** leaves a service out of image builds and out of the deploy, for the
-ones that only make sense locally. `destroy` does not check it, so a service you
-deployed and later marked skipped is still uninstalled.
-
-**Each entry in `service.ports[]`** requires all three fields:
-
-| Field               | Type    | Description                                    |
-| ------------------- | ------- | ---------------------------------------------- |
-| `containerPortName` | string  | Name of the port, on the container and Service |
-| `containerPort`     | integer | Port the container listens on                  |
-| `protocol`          | string  | `TCP` or `UDP`                                 |
-
-Ports derived from compose take the container side of the mapping, are named
-`p<port>` — `p8080` for container port 8080 — and default to protocol `TCP`.
-
-**`configMapFrom`** names files, relative to the compose project directory,
-whose contents become a ConfigMap named after the service. Each file's base name
-is a key and the file's content is its value. Mount it with `volumes` and
-`volumeMounts`:
+Each file's base name is a key and its content is the value. Mount the
+ConfigMap with `volumes` and `volumeMounts`:
 
 ```yaml
 services:
@@ -172,9 +115,29 @@ Two entries may not share a base name. A change to any file's content replaces
 the pods on the next deploy. A file under `manifests` must not also produce a
 ConfigMap named after the service, since the two would collide in the release.
 
-**`manifests`** names files, relative to the compose project directory, that are
-deployed as part of the service's release — a ConfigMap or Secret behind a
-`volumes` entry, an Ingress, a PVC, a Traefik `IngressRoute`:
+#### `env`
+
+Merged over compose `environment` by `name`. A literal `value` is written into
+the manifest, so **do not put secrets there** if the manifests are visible to
+others. Values compose could not resolve (the bare `- SOME_VAR` form, with
+nothing set locally) are dropped rather than set empty.
+
+```yaml
+x-minienv-k8s-service:
+  env:
+    - name: EXAMPLE_VAR
+      value: example-value
+    - name: EXAMPLE_FROM_VAR
+      valueFrom:
+        secretKeyRef:
+          name: example-secret
+          key: example-key
+```
+
+#### `manifests`
+
+Files deployed as part of the service's release — a ConfigMap or Secret behind
+a `volumes` entry, an Ingress, a PVC, a Traefik `IngressRoute`:
 
 ```yaml
 services:
@@ -221,54 +184,63 @@ A manifest is created and removed with its service's release. Two services must
 not declare manifests producing the same object — the second release to reach it
 fails on ownership, and the order between them is not fixed.
 
-**`ngrok.*`** requires `NGROK_AUTHTOKEN`; without it the whole block is ignored.
-Ignored for `deploymentType: job` and for a service marked `skip`, since neither
-has a k8s Service for an endpoint to route to. See
-[Exposing Services](./exposing-services.md).
+#### Probes
 
-**`recreate`** exists because Helm only restarts pods when something in the
-release actually changed. A service whose image tag is fixed — `latest`, or any
-tag you rebuild in place — keeps running the old image after a redeploy, because
-from Helm's point of view nothing about the release moved.
+`livenessProbe`, `readinessProbe` and `startupProbe` are derived from a compose
+`healthcheck`. A `curl` or `wget` test against `http://localhost[:port][/path]`
+becomes an HTTP probe on the **container** port; anything else becomes an exec
+probe. `disable: true`, an empty `test`, or `test: ["NONE"]` produces none.
+
+Set any of the three to write it yourself. The ones you leave unset still come
+from the compose `healthcheck`:
 
 ```yaml
-services:
-  api:
-    image: myorg/api:latest
-    x-minienv-k8s-service:
-      recreate: true
+x-minienv-k8s-service:
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
 ```
 
-The alternative is to make the tag change instead, with `+git` — see
-[Images and Builds](./images-and-builds.md). It applies to the whole release,
-not just the pods: any resource that cannot be patched in place is replaced,
-including one named in `manifests`.
+> **Caution:** a `curl` or `wget` test pointed at anything other than
+> `localhost` produces **no probes at all** — silently. Use `localhost`, write
+> the check as a non-HTTP command, or set the probes yourself.
+
+#### `service.ports`
+
+Each entry requires all three fields:
+
+| Field               | Type    | Description                                    |
+| ------------------- | ------- | ---------------------------------------------- |
+| `containerPortName` | string  | Name of the port, on the container and Service |
+| `containerPort`     | integer | Port the container listens on                  |
+| `protocol`          | string  | `TCP` or `UDP`                                 |
+
+Ports derived from compose take the container side of the mapping, are named
+`p<port>` — `p8080` for container port 8080 — and default to protocol `TCP`.
 
 ## `x-minienv-docker-service`
 
 Under `services.<name>`. All fields are optional.
 
-The field set is small because compose is already the deployment format:
-replicas, commands, environment, resources, health checks and volumes stay on
-the compose service and are passed through untouched.
+| Field                           | Type            | Default              | Description                                                                                                                                                                                         |
+| ------------------------------- | --------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`copy[].containerPath`](#copy) | string          | —                    | Absolute path inside the container to mount the copied path at                                                                                                                                      |
+| [`copy[].hostPath`](#copy)      | string          | —                    | Path, relative to the compose project directory, of a file or directory to copy                                                                                                                     |
+| `image.platforms`               | list of strings | `["linux/amd64"]`    | Platforms to build and push                                                                                                                                                                         |
+| `image.repository`              | string          | from compose `image` | Image repository                                                                                                                                                                                    |
+| `image.tag`                     | string          | from compose `image` | Image tag. `+git` expands to the short commit SHA                                                                                                                                                   |
+| `ngrok.port`                    | integer         | —                    | Container port to expose publicly — the **container** side of a compose mapping. Ignored for a skipped service and when `NGROK_AUTHTOKEN` is unset. See [Exposing Services](./exposing-services.md) |
+| `ngrok.trafficPolicy`           | string          | inherits top level   | ngrok `on_http_request` policy                                                                                                                                                                      |
+| `ngrok.url`                     | string          | random               | Reserved domain for a stable endpoint                                                                                                                                                               |
+| `skip`                          | bool            | `false`              | Excludes the service from image builds and deploys                                                                                                                                                  |
 
-| Field                  | Type            | Default              | Description                                                                        |
-| ---------------------- | --------------- | -------------------- | ---------------------------------------------------------------------------------- |
-| `copy[].containerPath` | string          | —                    | Absolute path inside the container to mount the copied path at                     |
-| `copy[].hostPath`      | string          | —                    | Path, relative to the compose project directory, of a file or directory to copy    |
-| `image.platforms`      | list of strings | `["linux/amd64"]`    | Platforms to build and push                                                        |
-| `image.repository`     | string          | from compose `image` | Image repository                                                                   |
-| `image.tag`            | string          | from compose `image` | Image tag. `+git` expands to the short commit SHA                                  |
-| `ngrok.port`           | integer         | —                    | Container port to expose publicly. Use the **container** side of a compose mapping |
-| `ngrok.trafficPolicy`  | string          | inherits top level   | ngrok `on_http_request` policy                                                     |
-| `ngrok.url`            | string          | random               | Reserved domain for a stable endpoint                                              |
-| `skip`                 | bool            | `false`              | Excludes the service from image builds and deploys                                 |
+#### `copy`
 
-### Notes
-
-**`copy`** names files and directories, relative to the compose project
-directory, that are sent to the remote host and bind mounted into the container
-— a config file, a TLS certificate, a seed dataset, a directory of fixtures:
+Files and directories sent to the remote host and bind mounted into the
+container — a config file, a TLS certificate, a seed dataset, a directory of
+fixtures:
 
 ```yaml
 services:
@@ -289,73 +261,12 @@ service cannot name the same one.
 
 The copied paths land under the deployment's own directory on the remote host,
 each keeping the relative path it was declared with, so two files that share a
-base name stay apart. Two services naming the same `hostPath` share one copy.
+base name stay apart. Two services naming the same `hostPath` share one copy. A
+service marked `skip` is not deployed, so nothing it declares is copied.
 
 > **The whole set is replaced on every deploy.** An entry you remove or rename
 > takes its remote copy with it on the next deploy, and `minienv destroy`
 > removes the deployment directory that holds all of them.
-
-A service marked `skip` is not deployed, so nothing it declares is copied.
-
-**`ngrok.*`** requires `NGROK_AUTHTOKEN`; without it the whole block is ignored.
-Ignored for a service marked `skip`, since it is never deployed. See
-[Exposing Services](./exposing-services.md).
-
-**`skip`** leaves a service out of image builds and out of the deploy, for the
-ones that only make sense locally.
-
-**Compose `environment`** reaches the remote host already interpolated, so
-`${DB_HOST}` arrives as the value it had on your machine. To keep a value off
-the remote entirely, use the bare `- SOME_VAR` form: with nothing set locally it
-stays unresolved, and the remote host supplies it from its own environment.
-
-### What the rewrite changes
-
-Before the project reaches the remote host, minienv:
-
-| Change                             | Why                                                       |
-| ---------------------------------- | --------------------------------------------------------- |
-| Renames the project to `namespace` | Keeps two environments on one host from colliding         |
-| Drops services marked `skip`       | Along with any `depends_on` edge pointing at them         |
-| Clears `build:`                    | Images are built locally and pulled by tag on the remote  |
-| Clears `ports:`                    | Nothing is published to the remote host's network         |
-| Drops bind mounts                  | The host paths do not exist there. Named volumes are kept |
-| Adds a bind mount per `copy` entry | Pointed at where that entry is copied on the host         |
-| Drops `env_file` and `label_file`  | Their values are already in `environment` and `labels`    |
-| Pins `image:`                      | To the repository and tag resolved for this run           |
-| Injects an `ngrok` service         | Only when something publishes                             |
-
-Everything else — `environment`, `healthcheck`, `command`, `depends_on`,
-`networks`, named `volumes` — is passed through as written, already fully
-interpolated.
-
-## Generated resources
-
-### Kubernetes
-
-Per compose service, minienv creates:
-
-| Resource       | When                                                   |
-| -------------- | ------------------------------------------------------ |
-| Deployment     | `deploymentType: service` (the default)                |
-| Job            | `deploymentType: job`                                  |
-| Service        | `deploymentType: service` and `service.create` is true |
-| ServiceAccount | `serviceAccount.create` is true                        |
-| ConfigMap      | `configMapFrom` names at least one file                |
-
-And once per namespace, not per service:
-
-| Resource                                                       | When                            |
-| -------------------------------------------------------------- | ------------------------------- |
-| `ngrok` release: Deployment, ConfigMap, Secret, ServiceAccount | any service publishes via ngrok |
-
-The target namespace is created on deploy if it does not already exist.
-
-Nothing else is derived from the compose file — no Ingress,
-PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
-compose `environment` is rendered inline rather than into a ConfigMap or
-Secret. Anything else a service needs is declared explicitly, with
-`configMapFrom` or `manifests`.
 
 ## Machine-readable schema
 
