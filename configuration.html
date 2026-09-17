@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-224dbf2c.js";
+            window.path_to_searchindex_js = "searchindex-4b6cf39e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -244,7 +244,8 @@ service needs what they describe:</p>
 <tbody>
 <tr><td><code>entrypoint</code></td><td><code>command</code></td></tr>
 <tr><td><code>volumes</code></td><td><code>volumes</code> and <code>volumeMounts</code></td></tr>
-<tr><td><code>secrets</code>, <code>configs</code></td><td><code>manifests</code>, mounted through <code>volumes</code></td></tr>
+<tr><td><code>configs</code></td><td><code>configMapFrom</code>, mounted through <code>volumes</code></td></tr>
+<tr><td><code>secrets</code></td><td><code>manifests</code>, mounted through <code>volumes</code></td></tr>
 <tr><td><code>deploy.replicas</code></td><td><code>replicas</code></td></tr>
 <tr><td><code>labels</code></td><td><code>podLabels</code></td></tr>
 <tr><td><code>user</code></td><td><code>securityContext</code></td></tr>
@@ -260,8 +261,9 @@ service needs what they describe:</p>
     - name: cache
       mountPath: /var/cache
 </code></pre>
-<p>A volume backed by a ConfigMap, Secret or PersistentVolumeClaim needs that
-resource to exist — declare it in a file and list it under <code>manifests</code>.</p>
+<p>A volume backed by a ConfigMap can come from <code>configMapFrom</code>. One backed by a
+Secret or PersistentVolumeClaim needs that resource to exist — declare it in a
+file and list it under <code>manifests</code>.</p>
 <p><code>networks</code>, <code>restart</code>, <code>profiles</code>, <code>working_dir</code>, <code>extra_hosts</code> and <code>expose</code>
 have no Kubernetes equivalent and are ignored.</p>
 <h3 id="docker-1"><a class="header" href="#docker-1">Docker</a></h3>

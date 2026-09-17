@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-224dbf2c.js";
+            window.path_to_searchindex_js = "searchindex-4b6cf39e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -396,7 +396,8 @@ service needs what they describe:</p>
 <tbody>
 <tr><td><code>entrypoint</code></td><td><code>command</code></td></tr>
 <tr><td><code>volumes</code></td><td><code>volumes</code> and <code>volumeMounts</code></td></tr>
-<tr><td><code>secrets</code>, <code>configs</code></td><td><code>manifests</code>, mounted through <code>volumes</code></td></tr>
+<tr><td><code>configs</code></td><td><code>configMapFrom</code>, mounted through <code>volumes</code></td></tr>
+<tr><td><code>secrets</code></td><td><code>manifests</code>, mounted through <code>volumes</code></td></tr>
 <tr><td><code>deploy.replicas</code></td><td><code>replicas</code></td></tr>
 <tr><td><code>labels</code></td><td><code>podLabels</code></td></tr>
 <tr><td><code>user</code></td><td><code>securityContext</code></td></tr>
@@ -412,8 +413,9 @@ service needs what they describe:</p>
     - name: cache
       mountPath: /var/cache
 </code></pre>
-<p>A volume backed by a ConfigMap, Secret or PersistentVolumeClaim needs that
-resource to exist — declare it in a file and list it under <code>manifests</code>.</p>
+<p>A volume backed by a ConfigMap can come from <code>configMapFrom</code>. One backed by a
+Secret or PersistentVolumeClaim needs that resource to exist — declare it in a
+file and list it under <code>manifests</code>.</p>
 <p><code>networks</code>, <code>restart</code>, <code>profiles</code>, <code>working_dir</code>, <code>extra_hosts</code> and <code>expose</code>
 have no Kubernetes equivalent and are ignored.</p>
 <h3 id="docker-1"><a class="header" href="#docker-1">Docker</a></h3>
@@ -811,9 +813,11 @@ files are not supported.</p>
 <tbody>
 <tr><td><code>affinity</code></td><td>k8s schema</td><td>—</td><td>Passed through to the pod spec</td></tr>
 <tr><td><code>command</code></td><td>list of strings</td><td>compose <code>command</code></td><td>Container command</td></tr>
+<tr><td><code>configMapFrom</code></td><td>list of strings</td><td>—</td><td>Files, relative to compose-project-directory, that become one ConfigMap named after the service</td></tr>
 <tr><td><code>deploymentTimeout</code></td><td>duration</td><td>inherits top level</td><td>Helm timeout for this service</td></tr>
 <tr><td><code>deploymentType</code></td><td><code>service</code> | <code>job</code></td><td><code>service</code></td><td>Deploy as a Deployment or a run-to-completion Job</td></tr>
-<tr><td><code>env</code></td><td>map of string to string</td><td>—</td><td>Container env vars, merged over compose <code>environment</code></td></tr>
+<tr><td><code>env</code></td><td>k8s schema</td><td>—</td><td>Container env vars as <code>EnvVar</code> entries, merged over compose <code>environment</code> by <code>name</code></td></tr>
+<tr><td><code>envFrom</code></td><td>k8s schema</td><td>—</td><td>Sources to populate container env vars from, as <code>EnvFromSource</code> entries</td></tr>
 <tr><td><code>image.platforms</code></td><td>list of strings</td><td><code>["linux/amd64"]</code></td><td>Platforms to build and push</td></tr>
 <tr><td><code>image.pullPolicy</code></td><td>string</td><td><code>IfNotPresent</code></td><td>Kubernetes image pull policy</td></tr>
 <tr><td><code>image.repository</code></td><td>string</td><td>from compose <code>image</code></td><td>Image repository</td></tr>
@@ -870,10 +874,20 @@ from the compose <code>healthcheck</code>:</p>
 <code>localhost</code> produces <strong>no probes at all</strong> — silently. Use <code>localhost</code>, write
 the check as a non-HTTP command, or set the probes yourself.</p>
 </blockquote>
-<p><strong><code>env</code></strong> is merged over compose <code>environment</code> and reaches the container as
-plain env vars — no ConfigMap, no Secret — so <strong>do not put secrets there</strong> if
-the manifests are visible to others. Values compose could not resolve (the bare
-<code>- SOME_VAR</code> form, with nothing set locally) are dropped rather than set empty.</p>
+<p><strong><code>env</code></strong> is merged over compose <code>environment</code>. A literal <code>value</code> is written
+into the manifest, so <strong>do not put secrets there</strong> if the manifests are visible
+to others. Values compose could not resolve (the bare <code>- SOME_VAR</code> form, with
+nothing set locally) are dropped rather than set empty.</p>
+<pre><code class="language-yaml">x-minienv-k8s-service:
+  env:
+    - name: EXAMPLE_VAR
+      value: example-value
+    - name: EXAMPLE_FROM_VAR
+      valueFrom:
+        secretKeyRef:
+          name: example-secret
+          key: example-key
+</code></pre>
 <p><strong><code>skip</code></strong> leaves a service out of image builds and out of the deploy, for the
 ones that only make sense locally. <code>destroy</code> does not check it, so a service you
 deployed and later marked skipped is still uninstalled.</p>
@@ -892,6 +906,29 @@ deployed and later marked skipped is still uninstalled.</p>
 </div>
 <p>Ports derived from compose take the container side of the mapping, are named
 <code>p&lt;port&gt;</code> — <code>p8080</code> for container port 8080 — and default to protocol <code>TCP</code>.</p>
+<p><strong><code>configMapFrom</code></strong> names files, relative to the compose project directory,
+whose contents become a ConfigMap named after the service. Each file’s base name
+is a key and the file’s content is its value. Mount it with <code>volumes</code> and
+<code>volumeMounts</code>:</p>
+<pre><code class="language-yaml">services:
+  postgres:
+    image: postgres:15
+    x-minienv-k8s-service:
+      configMapFrom:
+        - db/init/01-schema.sql
+        - db/init/02-seed.sql
+      volumes:
+        - name: init
+          configMap:
+            name: postgres
+      volumeMounts:
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
+</code></pre>
+<p>Content is written as-is, not rendered as a template, and must be UTF-8 text.
+Two entries may not share a base name. A change to any file’s content replaces
+the pods on the next deploy. A file under <code>manifests</code> must not also produce a
+ConfigMap named after the service, since the two would collide in the release.</p>
 <p><strong><code>manifests</code></strong> names files, relative to the compose project directory, that are
 deployed as part of the service’s release — a ConfigMap or Secret behind a
 <code>volumes</code> entry, an Ingress, a PVC, a Traefik <code>IngressRoute</code>:</p>
@@ -1047,6 +1084,7 @@ interpolated.</p>
 <tr><td>Job</td><td><code>deploymentType: job</code></td></tr>
 <tr><td>Service</td><td><code>deploymentType: service</code> and <code>service.create</code> is true</td></tr>
 <tr><td>ServiceAccount</td><td><code>serviceAccount.create</code> is true</td></tr>
+<tr><td>ConfigMap</td><td><code>configMapFrom</code> names at least one file</td></tr>
 </tbody>
 </table>
 </div>
@@ -1064,8 +1102,9 @@ interpolated.</p>
 <p>The target namespace is created on deploy if it does not already exist.</p>
 <p>Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
-<code>environment</code> is rendered inline rather than into a ConfigMap or Secret.
-Anything else a service needs is declared explicitly, with <code>manifests</code>.</p>
+compose <code>environment</code> is rendered inline rather than into a ConfigMap or
+Secret. Anything else a service needs is declared explicitly, with
+<code>configMapFrom</code> or <code>manifests</code>.</p>
 <h2 id="machine-readable-schema"><a class="header" href="#machine-readable-schema">Machine-readable schema</a></h2>
 <p>The authoritative schema lives at <code>schema/schema.json</code> in the repository. It
 wraps the official compose spec and adds the three extension fields
