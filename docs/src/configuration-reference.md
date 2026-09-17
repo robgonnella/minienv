@@ -51,7 +51,8 @@ Under `services.<name>`. All fields are optional.
 | `command`                    | list of strings         | compose `command`            | Container command                                                                                     |
 | `deploymentTimeout`          | duration                | inherits top level           | Helm timeout for this service                                                                         |
 | `deploymentType`             | `service` \| `job`      | `service`                    | Deploy as a Deployment or a run-to-completion Job                                                     |
-| `env`                        | map of string to string | —                            | Container env vars, merged over compose `environment`                                                 |
+| `env`                        | k8s schema              | —                            | Container env vars as `EnvVar` entries, merged over compose `environment` by `name`                   |
+| `envFrom`                    | k8s schema              | —                            | Sources to populate container env vars from, as `EnvFromSource` entries                               |
 | `image.platforms`            | list of strings         | `["linux/amd64"]`            | Platforms to build and push                                                                           |
 | `image.pullPolicy`           | string                  | `IfNotPresent`               | Kubernetes image pull policy                                                                          |
 | `image.repository`           | string                  | from compose `image`         | Image repository                                                                                      |
@@ -111,10 +112,22 @@ x-minienv-k8s-service:
 > `localhost` produces **no probes at all** — silently. Use `localhost`, write
 > the check as a non-HTTP command, or set the probes yourself.
 
-**`env`** is merged over compose `environment` and reaches the container as
-plain env vars — no ConfigMap, no Secret — so **do not put secrets there** if
-the manifests are visible to others. Values compose could not resolve (the bare
-`- SOME_VAR` form, with nothing set locally) are dropped rather than set empty.
+**`env`** is merged over compose `environment`. A literal `value` is written
+into the manifest, so **do not put secrets there** if the manifests are visible
+to others. Values compose could not resolve (the bare `- SOME_VAR` form, with
+nothing set locally) are dropped rather than set empty.
+
+```yaml
+x-minienv-k8s-service:
+  env:
+    - name: EXAMPLE_VAR
+      value: example-value
+    - name: EXAMPLE_FROM_VAR
+      valueFrom:
+        secretKeyRef:
+          name: example-secret
+          key: example-key
+```
 
 **`skip`** leaves a service out of image builds and out of the deploy, for the
 ones that only make sense locally. `destroy` does not check it, so a service you
@@ -311,8 +324,8 @@ The target namespace is created on deploy if it does not already exist.
 
 Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
-`environment` is rendered inline rather than into a ConfigMap or Secret.
-Anything else a service needs is declared explicitly, with `manifests`.
+compose `environment` is rendered inline rather than into a ConfigMap or
+Secret. Anything else a service needs is declared explicitly, with `manifests`.
 
 ## Machine-readable schema
 

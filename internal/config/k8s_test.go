@@ -268,7 +268,12 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 
 			Expect(err).ShouldNot(HaveOccurred())
-			Expect(result.Env).To(Equal(map[string]string{"FOO": "bar"}))
+			Expect(result.Env).To(Equal([]map[string]any{
+				{
+					"name":  "FOO",
+					"value": "bar",
+				},
+			}))
 		})
 
 		It("lets the extension env win over the compose env", func() {
@@ -278,16 +283,101 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			}
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
-					"env": map[string]any{"FOO": "from-extension"},
+					"env": []map[string]any{
+						{
+							"name":  "FOO",
+							"value": "from-extension",
+						},
+					},
 				},
 			}
 
 			result, err := newSvcExt()
 
 			Expect(err).ShouldNot(HaveOccurred())
-			Expect(result.Env).To(Equal(map[string]string{
-				"FOO": "from-extension",
-				"BAZ": "qux",
+			Expect(result.Env).To(Equal([]map[string]any{
+				{
+					"name":  "FOO",
+					"value": "from-extension",
+				},
+				{
+					"name":  "BAZ",
+					"value": "qux",
+				},
+			}))
+		})
+
+		It("orders compose variables by name", func() {
+			svc.Environment = types.MappingWithEquals{
+				"CHARLIE": new("3"),
+				"ALPHA":   new("1"),
+				"BRAVO":   new("2"),
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Env).To(Equal([]map[string]any{
+				{"name": "ALPHA", "value": "1"},
+				{"name": "BRAVO", "value": "2"},
+				{"name": "CHARLIE", "value": "3"},
+			}))
+		})
+
+		It("passes a valueFrom entry through untouched", func() {
+			svc.Environment = types.MappingWithEquals{
+				"DB_PASSWORD": new("from-compose"),
+			}
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"env": []map[string]any{
+						{
+							"name": "DB_PASSWORD",
+							"valueFrom": map[string]any{
+								"configMapKeyRef": map[string]any{
+									"name": "app-config",
+									"key":  "password",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Env).To(Equal([]map[string]any{
+				{
+					"name": "DB_PASSWORD",
+					"valueFrom": map[string]any{
+						"configMapKeyRef": map[string]any{
+							"name": "app-config",
+							"key":  "password",
+						},
+					},
+				},
+			}))
+		})
+
+		It("decodes envFrom sources", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"envFrom": []map[string]any{
+						{
+							"configMapRef": map[string]any{"name": "app-config"},
+						},
+					},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.EnvFrom).To(Equal([]map[string]any{
+				{
+					"configMapRef": map[string]any{"name": "app-config"},
+				},
 			}))
 		})
 
@@ -302,8 +392,12 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 
 			Expect(err).ShouldNot(HaveOccurred())
-			Expect(result.Env).To(Equal(map[string]string{"RESOLVED": "value"}))
-			Expect(result.Env).ToNot(HaveKey("FOO"))
+			Expect(result.Env).To(Equal([]map[string]any{
+				{
+					"name":  "RESOLVED",
+					"value": "value",
+				},
+			}))
 		})
 	})
 

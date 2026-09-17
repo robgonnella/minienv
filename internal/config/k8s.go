@@ -88,8 +88,10 @@ type ChartValues struct {
 	Service ChartService `json:"service,omitzero" mapstructure:"service"`
 	// Service account configuration
 	ServiceAccount ChartServiceAccount `json:"serviceAccount,omitzero" mapstructure:"serviceAccount,omitzero"`
-	// Container environment configuration
-	Env map[string]string `json:"env,omitempty" mapstructure:"env,omitempty"`
+	// Container environment variables as Kubernetes EnvVar entries, merged over compose environment by name
+	Env []map[string]any `json:"env,omitempty" mapstructure:"env,omitempty"`
+	// Sources to populate container environment variables from, as Kubernetes EnvFromSource entries
+	EnvFrom []map[string]any `json:"envFrom,omitempty" mapstructure:"envFrom,omitempty"`
 	// Annotations to add to the deployment pods
 	PodAnnotations map[string]string `json:"podAnnotations,omitempty" mapstructure:"podAnnotations,omitempty"`
 	// Labels to add to the deployment pods
@@ -611,22 +613,36 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 
 func (s *XMiniEnvK8sService) resolveEnvironment(svc ComposeService) {
 	if len(svc.Environment) > 0 {
-		mapping := map[string]string{}
+		k8sMappings := []map[string]any{}
 
-		for key, value := range svc.Environment {
+		if s.Env != nil {
+			k8sMappings = slices.Clone(s.Env)
+		}
+
+		k8sHasValue := func(key string) bool {
+			return slices.ContainsFunc(k8sMappings, func(entry map[string]any) bool {
+				return entry["name"] == key
+			})
+		}
+
+		// Sorted: an unchanged project must render an unchanged pod template.
+		for _, key := range slices.Sorted(maps.Keys(svc.Environment)) {
+			value := svc.Environment[key]
+
 			// A nil value is compose's "inherit this variable from the host"
 			// form (`environment: [FOO]`) that it could not resolve. Leave the
 			// variable unset rather than setting it to the empty string.
-			if value != nil {
-				mapping[key] = *value
+			if value == nil || k8sHasValue(key) {
+				continue
 			}
+
+			k8sMappings = append(k8sMappings, map[string]any{
+				"name":  key,
+				"value": *value,
+			})
 		}
 
-		if s.Env != nil {
-			maps.Copy(mapping, s.Env)
-		}
-
-		s.Env = mapping
+		s.Env = k8sMappings
 	}
 }
 

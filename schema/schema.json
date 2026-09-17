@@ -342,11 +342,18 @@
           "description": "Service account configuration"
         },
         "env": {
-          "additionalProperties": {
-            "type": "string"
+          "items": {
+            "type": "object"
           },
-          "type": "object",
-          "description": "Container environment configuration"
+          "type": "array",
+          "description": "Container environment variables as Kubernetes EnvVar entries, merged over compose environment by name"
+        },
+        "envFrom": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array",
+          "description": "Sources to populate container environment variables from, as Kubernetes EnvFromSource entries"
         },
         "podAnnotations": {
           "additionalProperties": {
