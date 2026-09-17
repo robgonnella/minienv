@@ -559,6 +559,10 @@ func (s *XMiniEnvK8sService) resolveServiceImage(
 	svc ComposeService,
 	gitClient git.Client,
 ) error {
+	if s.Skip {
+		return nil
+	}
+
 	image := &ServiceImage{
 		Repository: s.Image.Repository,
 		Tag:        s.Image.Tag,

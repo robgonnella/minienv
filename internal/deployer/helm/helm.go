@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmcli "helm.sh/helm/v3/pkg/cli"
+	helmdriver "helm.sh/helm/v3/pkg/storage/driver"
 	k8sv1 "k8s.io/api/core/v1"
 	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -518,19 +520,20 @@ func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
 	log.Info().Str("chart", svcName).Msg("uninstalling chart")
 
 	response, err := client.Run(svcName)
-	if err != nil {
+
+	switch {
+	case errors.Is(err, helmdriver.ErrReleaseNotFound),
+		err == nil && (response == nil || response.Release == nil):
+		log.Info().Str("service", svcName).Msg("no release found for service")
+
+		return nil
+	case err != nil:
 		return errs.Errorf(
 			ErrChartUninstall,
 			"failed to uninstall service chart %s: %w",
 			svcName,
 			err,
 		)
-	}
-
-	if response == nil || response.Release == nil {
-		log.Info().Str("service", svcName).Msg("no release found for service")
-
-		return nil
 	}
 
 	log.

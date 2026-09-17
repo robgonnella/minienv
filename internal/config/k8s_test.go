@@ -1046,5 +1046,32 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(result.Skip).To(BeTrue())
 		})
+
+		It("does not require an image when skipped", func() {
+			svc = config.ComposeService{
+				Name: "test-service",
+				Extensions: types.Extensions{
+					config.K8sServiceExtension: map[string]any{"skip": true},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Skip).To(BeTrue())
+		})
+
+		It("does not expand a +git tag when skipped", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"skip":  true,
+					"image": map[string]any{"tag": "+git"},
+				},
+			}
+
+			_, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+		})
 	})
 })
