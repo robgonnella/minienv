@@ -66,14 +66,15 @@ needs comes from the extension.
 These compose keys are not read. Set the extension field when the deployed
 service needs what they describe:
 
-| Compose key          | Set in `x-minienv-k8s-service`         |
-| -------------------- | -------------------------------------- |
-| `entrypoint`         | `command`                              |
-| `volumes`            | `volumes` and `volumeMounts`           |
-| `secrets`, `configs` | `manifests`, mounted through `volumes` |
-| `deploy.replicas`    | `replicas`                             |
-| `labels`             | `podLabels`                            |
-| `user`               | `securityContext`                      |
+| Compose key       | Set in `x-minienv-k8s-service`             |
+| ----------------- | ------------------------------------------ |
+| `entrypoint`      | `command`                                  |
+| `volumes`         | `volumes` and `volumeMounts`               |
+| `configs`         | `configMapFrom`, mounted through `volumes` |
+| `secrets`         | `manifests`, mounted through `volumes`     |
+| `deploy.replicas` | `replicas`                                 |
+| `labels`          | `podLabels`                                |
+| `user`            | `securityContext`                          |
 
 Storage is declared the Kubernetes way:
 
@@ -87,8 +88,9 @@ x-minienv-k8s-service:
       mountPath: /var/cache
 ```
 
-A volume backed by a ConfigMap, Secret or PersistentVolumeClaim needs that
-resource to exist — declare it in a file and list it under `manifests`.
+A volume backed by a ConfigMap can come from `configMapFrom`. One backed by a
+Secret or PersistentVolumeClaim needs that resource to exist — declare it in a
+file and list it under `manifests`.
 
 `networks`, `restart`, `profiles`, `working_dir`, `extra_hosts` and `expose`
 have no Kubernetes equivalent and are ignored.

@@ -202,6 +202,20 @@ data:
     {{- end }}
 `
 
+const filesConfigMapTmpl = `
+{{- $files := .Files.Glob "files/configmap/*" }}
+{{- if $files }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "generated.fullname" . }}
+  labels:
+    {{- include "generated.labels" . | nindent 4 }}
+data:
+  {{- $files.AsConfig | nindent 2 }}
+{{- end }}
+`
+
 const deploymentTmpl = `
 apiVersion: apps/v1
 kind: Deployment
@@ -220,9 +234,15 @@ spec:
       {{- include "generated.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- $files := .Files.Glob "files/configmap/*" }}
+      {{- if or .Values.podAnnotations $files }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $files }}
+        checksum/configmap: {{ $files.AsConfig | sha256sum }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "generated.labels" . | nindent 8 }}
@@ -392,9 +412,15 @@ spec:
   backoffLimit: 1
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- $files := .Files.Glob "files/configmap/*" }}
+      {{- if or .Values.podAnnotations $files }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $files }}
+        checksum/configmap: {{ $files.AsConfig | sha256sum }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "generated.labels" . | nindent 8 }}

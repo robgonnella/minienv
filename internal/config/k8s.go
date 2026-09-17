@@ -18,6 +18,7 @@ import (
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/rs/zerolog/log"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 var urlRegex = regexp.MustCompile(`(?m)http:\/\/localhost(:?\:\d+)?(:?\/.*)?`)
@@ -156,6 +157,8 @@ type XMiniEnvK8sService struct {
 	DeploymentTimeout string `json:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
 	// Paths to Kubernetes manifest files, relative to the project directory, rendered as part of this service's chart
 	Manifests []string `json:"manifests,omitempty" mapstructure:"manifests,omitempty"`
+	// Paths to files, relative to the project directory, whose contents become this service's ConfigMap keyed by file name
+	ConfigMapFrom []string `json:"configMapFrom,omitempty" mapstructure:"configMapFrom,omitempty"`
 }
 
 // XMiniEnvK8sServiceOptions carries the runtime inputs needed to properly
@@ -296,6 +299,10 @@ func (s *XMiniEnvK8sService) resolve(
 	}
 
 	if err := s.resolveManifests(); err != nil {
+		return err
+	}
+
+	if err := s.resolveConfigMapFrom(); err != nil {
 		return err
 	}
 
@@ -684,6 +691,46 @@ func (s *XMiniEnvK8sService) resolveManifests() error {
 		}
 
 		s.Manifests[i] = cleaned
+	}
+
+	return nil
+}
+
+func (s *XMiniEnvK8sService) resolveConfigMapFrom() error {
+	keys := map[string]bool{}
+
+	for i, declared := range s.ConfigMapFrom {
+		cleaned := filepath.Clean(declared)
+
+		if cleaned == "." || !filepath.IsLocal(cleaned) {
+			return errs.Errorf(
+				ErrConfigMapFromPath,
+				"configMapFrom path must name a file inside the project: %s",
+				declared,
+			)
+		}
+
+		key := filepath.Base(cleaned)
+
+		if msgs := validation.IsConfigMapKey(key); len(msgs) > 0 {
+			return errs.Errorf(
+				ErrConfigMapFromPath,
+				"configMapFrom file name %q is not a valid ConfigMap key: %s",
+				key,
+				strings.Join(msgs, "; "),
+			)
+		}
+
+		if keys[key] {
+			return errs.Errorf(
+				ErrConfigMapFromPath,
+				"configMapFrom file name is already used by this service: %s",
+				key,
+			)
+		}
+
+		keys[key] = true
+		s.ConfigMapFrom[i] = cleaned
 	}
 
 	return nil

@@ -68,6 +68,15 @@ services:
   postgres:
     x-minienv-k8s-service:
       skip: false
+      configMapFrom:
+        - init/01-schema.sql
+      volumes:
+        - name: init
+          configMap:
+            name: postgres
+      volumeMounts:
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
     image: postgres:15
     environment:
       POSTGRES_PASSWORD: secret

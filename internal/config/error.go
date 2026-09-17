@@ -14,6 +14,7 @@ const (
 	ErrNgrokPortMismatch      errs.Kind = "config.ngrok_port_mismatch"
 	ErrInvalidDeploymentType  errs.Kind = "config.invalid_deployment_type"
 	ErrManifestPath           errs.Kind = "config.manifest_path"
+	ErrConfigMapFromPath      errs.Kind = "config.config_map_from_path"
 	ErrCopyHostPath           errs.Kind = "config.copy_host_path"
 	ErrCopyContainerPath      errs.Kind = "config.copy_container_path"
 )

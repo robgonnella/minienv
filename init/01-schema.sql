@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS hello (
+  id SERIAL PRIMARY KEY,
+  greeting TEXT NOT NULL
+);
