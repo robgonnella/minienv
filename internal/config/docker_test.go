@@ -210,7 +210,6 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 	Describe("common service properties", func() {
 		It("decodes skip through the squashed common struct", func() {
-			svc.Image = "reg/app:v1"
 			svc.Extensions = map[string]any{
 				config.DockerServiceExtension: map[string]any{"skip": true},
 			}
@@ -219,6 +218,19 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(svcExt.Skip).To(BeTrue())
+		})
+
+		It("does not expand a +git tag when skipped", func() {
+			svc.Extensions = map[string]any{
+				config.DockerServiceExtension: map[string]any{
+					"skip":  true,
+					"image": map[string]any{"tag": "+git"},
+				},
+			}
+
+			_, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("defaults skip to false when the extension is absent", func() {

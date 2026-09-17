@@ -226,5 +226,9 @@ func (s *XMiniEnvDockerService) resolveServiceImage(
 	svc ComposeService,
 	gitClient git.Client,
 ) error {
+	if s.Skip {
+		return nil
+	}
+
 	return resolveServiceImage(ctx, &s.Image, svc, gitClient)
 }

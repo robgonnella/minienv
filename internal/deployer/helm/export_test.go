@@ -4,7 +4,21 @@ import (
 	"context"
 
 	"github.com/robgonnella/minienv/internal/config"
+	helmaction "helm.sh/helm/v3/pkg/action"
 )
+
+// SetActionConfig installs an in-process action config. Init only ever builds
+// one against a live cluster, so this is the only way to reach helm actions
+// from a test binary.
+func (h *Helm) SetActionConfig(cfg *helmaction.Configuration) {
+	h.actionConfig = cfg
+}
+
+// UninstallChart exposes the per-release teardown step that both Destroy and
+// the ngrok-off branch of Deploy dispatch to.
+func (h *Helm) UninstallChart(ctx context.Context, name string) error {
+	return h.uninstallChart(ctx, name)
+}
 
 // InitProject exposes the half of Init that needs no cluster. Init itself
 // builds a helm action config against a live one, so this is the only way to
