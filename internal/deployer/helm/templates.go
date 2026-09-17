@@ -108,7 +108,8 @@ fullnameOverride: ""
 
 command: []
 
-env: {}
+env: []
+envFrom: []
 
 serviceAccount:
   create: true
@@ -171,7 +172,7 @@ endpoints: []
 
 podAnnotations: {}
 
-env: {}
+env: []
 envFrom: []
 volumes: []
 volumeMounts: []
@@ -260,15 +261,13 @@ spec:
               protocol: {{ .protocol }}
             {{- end }}
           {{- end }}
-          {{- if .Values.env }}
+          {{- with .Values.env }}
           env:
-            {{- range $k, $v := .Values.env }}
-            - name: {{ $k }}
-              value: {{ $v }}
-            {{- end }}
+            {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if .Values.envFrom }}
-          envFrom: {{ .Values.envFrom | toYaml | nindent 12 }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.startupProbe }}
           startupProbe:
@@ -366,7 +365,8 @@ serviceAccount:
 service:
   ports: []
 
-env: {}
+env: []
+envFrom: []
 
 podAnnotations: {}
 podLabels: {}
@@ -433,12 +433,13 @@ spec:
               protocol: {{ .protocol }}
             {{- end }}
           {{- end }}
-          {{- if .Values.env }}
+          {{- with .Values.env }}
           env:
-            {{- range $k, $v := .Values.env }}
-            - name: {{ $k }}
-              value: {{ $v }}
-            {{- end }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.resources }}
           resources:
