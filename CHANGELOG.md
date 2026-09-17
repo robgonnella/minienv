@@ -1,3 +1,13 @@
+# [0.2.1](https://github.com/robgonnella/minienv/compare/v0.2.0...v0.2.1) - 2026-09-17
+
+### 🐛 Bug Fixes
+
+- fixes two minor issues [_(bad30b9)_](https://github.com/robgonnella/minienv/commit/bad30b931f704a40487ebe32dc269bfc6c866aa2)
+
+### 📚 Documentation
+
+- updates documentation [_(5a8306f)_](https://github.com/robgonnella/minienv/commit/5a8306f06372245027ebe52610d70cd6cabd7146)
+
 # [0.2.0](https://github.com/robgonnella/minienv/compare/v0.1.2...v0.2.0) - 2026-09-17
 
 ### 🚀 Features
