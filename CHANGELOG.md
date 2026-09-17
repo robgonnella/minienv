@@ -1,3 +1,13 @@
+# [0.2.0](https://github.com/robgonnella/minienv/compare/v0.1.2...v0.2.0) - 2026-09-17
+
+### 🚀 Features
+
+- _(k8s)_ adds support for generating config maps from file [_(2510d29)_](https://github.com/robgonnella/minienv/commit/2510d29589dcfffdc784ffc2c6204cad225313d5)
+
+### 🐛 Bug Fixes
+
+- _(k8s)_ fixes issue with k8s env [_(b26c7e0)_](https://github.com/robgonnella/minienv/commit/b26c7e01482dbff2c9b67891bc3fb69fe7a5d5df)
+
 # [0.1.2](https://github.com/robgonnella/minienv/compare/v0.1.1...v0.1.2) - 2026-09-16
 
 ### ⏩ CI/CD
