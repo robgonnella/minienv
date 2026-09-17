@@ -49,6 +49,7 @@ Under `services.<name>`. All fields are optional.
 | ---------------------------- | ----------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `affinity`                   | k8s schema              | —                            | Passed through to the pod spec                                                                        |
 | `command`                    | list of strings         | compose `command`            | Container command                                                                                     |
+| `configMapFrom`              | list of strings         | —                            | Files, relative to compose-project-directory, that become one ConfigMap named after the service       |
 | `deploymentTimeout`          | duration                | inherits top level           | Helm timeout for this service                                                                         |
 | `deploymentType`             | `service` \| `job`      | `service`                    | Deploy as a Deployment or a run-to-completion Job                                                     |
 | `env`                        | k8s schema              | —                            | Container env vars as `EnvVar` entries, merged over compose `environment` by `name`                   |
@@ -143,6 +144,33 @@ deployed and later marked skipped is still uninstalled.
 
 Ports derived from compose take the container side of the mapping, are named
 `p<port>` — `p8080` for container port 8080 — and default to protocol `TCP`.
+
+**`configMapFrom`** names files, relative to the compose project directory,
+whose contents become a ConfigMap named after the service. Each file's base name
+is a key and the file's content is its value. Mount it with `volumes` and
+`volumeMounts`:
+
+```yaml
+services:
+  postgres:
+    image: postgres:15
+    x-minienv-k8s-service:
+      configMapFrom:
+        - db/init/01-schema.sql
+        - db/init/02-seed.sql
+      volumes:
+        - name: init
+          configMap:
+            name: postgres
+      volumeMounts:
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
+```
+
+Content is written as-is, not rendered as a template, and must be UTF-8 text.
+Two entries may not share a base name. A change to any file's content replaces
+the pods on the next deploy. A file under `manifests` must not also produce a
+ConfigMap named after the service, since the two would collide in the release.
 
 **`manifests`** names files, relative to the compose project directory, that are
 deployed as part of the service's release — a ConfigMap or Secret behind a
@@ -313,6 +341,7 @@ Per compose service, minienv creates:
 | Job            | `deploymentType: job`                                  |
 | Service        | `deploymentType: service` and `service.create` is true |
 | ServiceAccount | `serviceAccount.create` is true                        |
+| ConfigMap      | `configMapFrom` names at least one file                |
 
 And once per namespace, not per service:
 
@@ -325,7 +354,8 @@ The target namespace is created on deploy if it does not already exist.
 Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
 compose `environment` is rendered inline rather than into a ConfigMap or
-Secret. Anything else a service needs is declared explicitly, with `manifests`.
+Secret. Anything else a service needs is declared explicitly, with
+`configMapFrom` or `manifests`.
 
 ## Machine-readable schema
 

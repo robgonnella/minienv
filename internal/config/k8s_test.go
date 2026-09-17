@@ -834,6 +834,77 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		})
 	})
 
+	Describe("configMapFrom", func() {
+		It("carries each declared path through cleaned", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"configMapFrom": []any{
+						"./db/init/../init/01-schema.sql",
+						"db/init/02-seed.sql",
+					},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.ConfigMapFrom).To(Equal([]string{
+				"db/init/01-schema.sql",
+				"db/init/02-seed.sql",
+			}))
+		})
+
+		It("leaves them empty when none are declared", func() {
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.ConfigMapFrom).To(BeEmpty())
+		})
+
+		DescribeTable(
+			"rejects paths that cannot become ConfigMap keys",
+			func(declared []string) {
+				entries := make([]any, 0, len(declared))
+				for _, d := range declared {
+					entries = append(entries, d)
+				}
+
+				svc.Extensions = types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"configMapFrom": entries,
+					},
+				}
+
+				_, err := newSvcExt()
+
+				Expect(err).To(MatchError(config.ErrConfigMapFromPath))
+			},
+			Entry("an absolute path", []string{"/etc/init.sql"}),
+			Entry("a path climbing out", []string{"../init.sql"}),
+			Entry("a path climbing out after cleaning",
+				[]string{"db/../../init.sql"}),
+			Entry("the project directory itself", []string{"."}),
+			Entry("a file name with a space", []string{"db/init 01.sql"}),
+			Entry("two files sharing a name",
+				[]string{"db/init.sql", "seed/init.sql"}),
+		)
+
+		It("keeps them out of the chart values", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"configMapFrom": []any{"db/init/01-schema.sql"},
+				},
+			}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ToChartValuesMap()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(values).ToNot(HaveKey("configMapFrom"))
+		})
+	})
+
 	Describe("ToChartValuesMap", func() {
 		It("decodes service ports into the nested chart shape", func() {
 			svc.Ports = []types.ServicePortConfig{

@@ -14,4 +14,6 @@ const (
 	ErrK8sNamespace           errs.Kind = "helm.k8s_namespace"
 	ErrMissingService         errs.Kind = "helm.missing_service"
 	ErrManifestRead           errs.Kind = "helm.manifest_read"
+	ErrConfigMapFileRead      errs.Kind = "helm.config_map_file_read"
+	ErrConfigMapFileEncoding  errs.Kind = "helm.config_map_file_encoding"
 )

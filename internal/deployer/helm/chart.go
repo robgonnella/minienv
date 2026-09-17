@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/errs"
@@ -28,11 +29,14 @@ const (
 	templatesDir       = "templates"
 	serviceAccountFile = "templates/serviceaccount.yaml"
 	deploymentFile     = "templates/deployment.yaml"
+	configMapFile      = "templates/configmap.yaml"
 )
 
 // Manifests nest here so one named deployment.yaml cannot replace the
 // generated template.
 const manifestsDir = "manifests"
+
+const configMapFilesDir = "files/configmap"
 
 // The agent reads ngrok.yml only at startup, and the pod template is otherwise
 // constant, so this is what makes helm replace the pod when the config changes.
@@ -95,12 +99,13 @@ func (b *ChartBuilder) Build(
 	svcName string,
 	deploymentType config.K8sDeploymentType,
 	manifests []string,
+	configMapFrom []string,
 ) (*helmchart.Chart, error) {
 	if deploymentType == config.K8sJobDeploymentType {
-		return b.jobChart(svcName, manifests)
+		return b.jobChart(svcName, manifests, configMapFrom)
 	}
 
-	return b.serviceChart(svcName, manifests)
+	return b.serviceChart(svcName, manifests, configMapFrom)
 }
 
 func (b *ChartBuilder) BuildNgrok() (*helmchart.Chart, error) {
@@ -174,8 +179,9 @@ func (b *ChartBuilder) NgrokValues(
 func (b *ChartBuilder) serviceChart(
 	svcName string,
 	manifests []string,
+	configMapFrom []string,
 ) (*helmchart.Chart, error) {
-	files, err := b.serviceFiles(svcName, manifests)
+	files, err := b.serviceFiles(svcName, manifests, configMapFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -196,8 +202,9 @@ func (b *ChartBuilder) serviceChart(
 func (b *ChartBuilder) jobChart(
 	svcName string,
 	manifests []string,
+	configMapFrom []string,
 ) (*helmchart.Chart, error) {
-	files, err := b.jobFiles(svcName, manifests)
+	files, err := b.jobFiles(svcName, manifests, configMapFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -300,11 +307,55 @@ func (b *ChartBuilder) loadManifests(
 	return files, nil
 }
 
+func (b *ChartBuilder) loadConfigMapFiles(
+	paths []string,
+) ([]*helmloader.BufferedFile, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	files := make([]*helmloader.BufferedFile, 0, len(paths))
+
+	for _, declared := range paths {
+		// #nosec G304 -- validated as a project-relative path in config.
+		data, err := os.ReadFile(declared)
+		if err != nil {
+			return nil, errs.Errorf(
+				ErrConfigMapFileRead,
+				"failed to read configMapFrom file %s: %w",
+				declared,
+				err,
+			)
+		}
+
+		if !utf8.Valid(data) {
+			return nil, errs.Errorf(
+				ErrConfigMapFileEncoding,
+				"configMapFrom file %s is not UTF-8 text",
+				declared,
+			)
+		}
+
+		files = append(files, &helmloader.BufferedFile{
+			Name: path.Join(configMapFilesDir, filepath.Base(declared)),
+			Data: data,
+		})
+	}
+
+	return files, nil
+}
+
 func (b *ChartBuilder) serviceFiles(
 	svcName string,
 	manifests []string,
+	configMapFrom []string,
 ) ([]*helmloader.BufferedFile, error) {
 	manifestFiles, err := b.loadManifests(manifests)
+	if err != nil {
+		return nil, err
+	}
+
+	configMapFiles, err := b.loadConfigMapFiles(configMapFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -328,14 +379,24 @@ func (b *ChartBuilder) serviceFiles(
 			Name: serviceAccountFile,
 			Data: []byte(serviceAccountTmpl),
 		},
-	}, manifestFiles), nil
+		{
+			Name: configMapFile,
+			Data: []byte(filesConfigMapTmpl),
+		},
+	}, manifestFiles, configMapFiles), nil
 }
 
 func (b *ChartBuilder) jobFiles(
 	svcName string,
 	manifests []string,
+	configMapFrom []string,
 ) ([]*helmloader.BufferedFile, error) {
 	manifestFiles, err := b.loadManifests(manifests)
+	if err != nil {
+		return nil, err
+	}
+
+	configMapFiles, err := b.loadConfigMapFiles(configMapFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +416,11 @@ func (b *ChartBuilder) jobFiles(
 			Name: "templates/job.yaml",
 			Data: []byte(jobTmpl),
 		},
-	}, manifestFiles), nil
+		{
+			Name: configMapFile,
+			Data: []byte(filesConfigMapTmpl),
+		},
+	}, manifestFiles, configMapFiles), nil
 }
 
 func (b *ChartBuilder) ngrokFiles() []*helmloader.BufferedFile {
@@ -375,7 +440,7 @@ func (b *ChartBuilder) ngrokFiles() []*helmloader.BufferedFile {
 			Data: []byte(serviceAccountTmpl),
 		},
 		{
-			Name: "templates/configmap.yaml",
+			Name: configMapFile,
 			Data: []byte(ngrokConfigMapTmpl),
 		},
 		{

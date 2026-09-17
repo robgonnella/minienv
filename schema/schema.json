@@ -445,6 +445,13 @@
           },
           "type": "array",
           "description": "Paths to Kubernetes manifest files, relative to the project directory, rendered as part of this service's chart"
+        },
+        "configMapFrom": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Paths to files, relative to the project directory, whose contents become this service's ConfigMap keyed by file name"
         }
       },
       "additionalProperties": false,

@@ -3,6 +3,8 @@ package helm_test
 import (
 	"context"
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -118,10 +120,13 @@ func ngrokAgentConfigFrom(rendered map[string]string) ngrokAgentConfig {
 	return parsed
 }
 
-func podAnnotation(rendered map[string]string, key string) string {
+func podTemplateAnnotations(
+	rendered map[string]string,
+	template string,
+) map[string]string {
 	GinkgoHelper()
 
-	var deployment struct {
+	var workload struct {
 		Spec struct {
 			Template struct {
 				Metadata struct {
@@ -132,14 +137,52 @@ func podAnnotation(rendered map[string]string, key string) string {
 	}
 
 	Expect(yaml.Unmarshal(
-		[]byte(templateNamed(rendered, "deployment.yaml")),
-		&deployment,
-	)).To(Succeed(), "rendered deployment is not valid yaml")
+		[]byte(templateNamed(rendered, template)),
+		&workload,
+	)).To(Succeed(), "rendered %s is not valid yaml", template)
 
-	value, ok := deployment.Spec.Template.Metadata.Annotations[key]
+	return workload.Spec.Template.Metadata.Annotations
+}
+
+func podAnnotation(rendered map[string]string, key string) string {
+	GinkgoHelper()
+
+	value, ok := podTemplateAnnotations(rendered, "deployment.yaml")[key]
 	Expect(ok).To(BeTrue(), "pod template carries no %s annotation", key)
 
 	return value
+}
+
+type renderedConfigMap struct {
+	Metadata struct {
+		Name string `yaml:"name"`
+	} `yaml:"metadata"`
+	Data map[string]string `yaml:"data"`
+}
+
+func configMapNamed(
+	rendered map[string]string,
+	name string,
+) renderedConfigMap {
+	GinkgoHelper()
+
+	body, ok := rendered[name]
+	Expect(ok).To(BeTrue(), "no rendered template named %s", name)
+
+	var cm renderedConfigMap
+	Expect(yaml.Unmarshal([]byte(body), &cm)).
+		To(Succeed(), "rendered %s is not valid yaml", name)
+
+	return cm
+}
+
+func writeTempFile(name string, data []byte) string {
+	GinkgoHelper()
+
+	full := filepath.Join(GinkgoT().TempDir(), name)
+	Expect(os.WriteFile(full, data, 0o600)).To(Succeed())
+
+	return full
 }
 
 // A fixed fake. The real NGROK_AUTHTOKEN is only ever read at the
@@ -203,7 +246,7 @@ var _ = Describe("ChartBuilder", func() {
 	// which leaves the branch untestable anywhere else.
 	Describe("Build", func() {
 		It("builds a job chart for a job deployment type", func() {
-			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).To(ContainElement("templates/job.yaml"))
@@ -212,7 +255,7 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("builds a service chart for a service deployment type", func() {
-			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
+			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).
@@ -223,7 +266,7 @@ var _ = Describe("ChartBuilder", func() {
 		// K8sDeploymentType is a string alias, so an unset extension arrives
 		// here as "" rather than as the service default.
 		It("falls back to a service chart for an unset deployment type", func() {
-			chart, err := subject.Build("hello", "", nil)
+			chart, err := subject.Build("hello", "", nil, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).
@@ -233,7 +276,7 @@ var _ = Describe("ChartBuilder", func() {
 
 	Describe("a service chart", func() {
 		It("assembles every chart file in memory", func() {
-			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
+			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Name()).To(Equal("hello"))
@@ -247,11 +290,12 @@ var _ = Describe("ChartBuilder", func() {
 				"templates/deployment.yaml",
 				"templates/service.yaml",
 				"templates/serviceaccount.yaml",
+				"templates/configmap.yaml",
 			))
 		})
 
 		It("produces a chart helm can validate", func() {
-			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
+			chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
@@ -274,7 +318,7 @@ var _ = Describe("ChartBuilder", func() {
 			})
 
 			JustBeforeEach(func() {
-				chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil)
+				chart, err := subject.Build("hello", config.K8sServiceDeploymentType, nil, nil)
 				Expect(err).ShouldNot(HaveOccurred())
 
 				rendered = render(chart, resolvedValues(svc))
@@ -374,7 +418,7 @@ var _ = Describe("ChartBuilder", func() {
 			})
 
 			JustBeforeEach(func() {
-				chart, err := subject.Build("hello", config.K8sServiceDeploymentType, declared)
+				chart, err := subject.Build("hello", config.K8sServiceDeploymentType, declared, nil)
 				Expect(err).ShouldNot(HaveOccurred())
 				Expect(chart.Validate()).To(Succeed())
 
@@ -447,9 +491,190 @@ var _ = Describe("ChartBuilder", func() {
 				"hello",
 				config.K8sServiceDeploymentType,
 				[]string{"testdata/nope.yaml"},
+				nil,
 			)
 
 			Expect(err).To(MatchError(helm.ErrManifestRead))
+		})
+
+		Context("with configMapFrom files", func() {
+			var (
+				svc      config.ComposeService
+				declared []string
+				built    *helmchart.Chart
+				rendered map[string]string
+			)
+
+			const (
+				schemaFile = "testdata/init/01-schema.sql"
+				seedFile   = "testdata/init/02-seed.sql"
+			)
+
+			BeforeEach(func() {
+				svc = config.ComposeService{
+					Name:  "hello",
+					Image: "reg/hello:v1",
+				}
+				declared = []string{schemaFile, seedFile}
+			})
+
+			JustBeforeEach(func() {
+				chart, err := subject.Build(
+					"hello",
+					config.K8sServiceDeploymentType,
+					nil,
+					declared,
+				)
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(chart.Validate()).To(Succeed())
+
+				built = chart
+				rendered = render(chart, resolvedValues(svc))
+			})
+
+			It("carries each file under its base name", func() {
+				Expect(fileNames(built)).To(ContainElements(
+					"files/configmap/01-schema.sql",
+					"files/configmap/02-seed.sql",
+				))
+			})
+
+			It("renders a ConfigMap named after the service", func() {
+				cm := configMapNamed(rendered, "hello/templates/configmap.yaml")
+
+				Expect(cm.Metadata.Name).To(Equal("hello"))
+			})
+
+			It("writes each file's content under its base name", func() {
+				schema, err := os.ReadFile(schemaFile)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				seed, err := os.ReadFile(seedFile)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				cm := configMapNamed(rendered, "hello/templates/configmap.yaml")
+
+				Expect(cm.Data).To(HaveLen(2))
+				Expect(cm.Data).
+					To(HaveKeyWithValue("01-schema.sql", string(schema)))
+				Expect(cm.Data).
+					To(HaveKeyWithValue("02-seed.sql", string(seed)))
+			})
+
+			It("does not render file content as a template", func() {
+				cm := configMapNamed(rendered, "hello/templates/configmap.yaml")
+
+				Expect(cm.Data["02-seed.sql"]).
+					To(ContainSubstring("{{ .Values.nope }}"))
+			})
+
+			It("stamps the pod template with a checksum of the files", func() {
+				Expect(podAnnotation(rendered, "checksum/configmap")).
+					To(MatchRegexp(`^[0-9a-f]{64}$`))
+			})
+
+			It("keeps the checksum stable across renders", func() {
+				before := podAnnotation(rendered, "checksum/configmap")
+
+				for range 5 {
+					Expect(podAnnotation(
+						render(built, resolvedValues(svc)), "checksum/configmap",
+					)).To(Equal(before))
+				}
+			})
+
+			It("changes the checksum when a file's content changes", func() {
+				before := podAnnotation(rendered, "checksum/configmap")
+
+				changed := writeTempFile(
+					"01-schema.sql",
+					[]byte("CREATE TABLE other ();\n"),
+				)
+
+				chart, err := subject.Build(
+					"hello",
+					config.K8sServiceDeploymentType,
+					nil,
+					[]string{changed, seedFile},
+				)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				Expect(podAnnotation(
+					render(chart, resolvedValues(svc)), "checksum/configmap",
+				)).ToNot(Equal(before))
+			})
+
+			Context("alongside pod annotations", func() {
+				BeforeEach(func() {
+					svc.Extensions = types.Extensions{
+						config.K8sServiceExtension: map[string]any{
+							"podAnnotations": map[string]any{
+								"team": "platform",
+							},
+						},
+					}
+				})
+
+				It("renders both onto the pod template", func() {
+					Expect(podAnnotation(rendered, "team")).To(Equal("platform"))
+					Expect(podAnnotation(rendered, "checksum/configmap")).
+						ToNot(BeEmpty())
+				})
+			})
+		})
+
+		Context("with no configMapFrom files", func() {
+			var rendered map[string]string
+
+			BeforeEach(func() {
+				chart, err := subject.Build(
+					"hello",
+					config.K8sServiceDeploymentType,
+					nil,
+					nil,
+				)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				rendered = render(chart, resolvedValues(config.ComposeService{
+					Name:  "hello",
+					Image: "reg/hello:v1",
+				}))
+			})
+
+			It("renders no ConfigMap", func() {
+				Expect(strings.TrimSpace(
+					rendered["hello/templates/configmap.yaml"],
+				)).To(BeEmpty())
+			})
+
+			It("stamps no checksum onto the pod template", func() {
+				Expect(podTemplateAnnotations(rendered, "deployment.yaml")).
+					ToNot(HaveKey("checksum/configmap"))
+			})
+		})
+
+		It("reports a configMapFrom file that is not on disk", func() {
+			_, err := subject.Build(
+				"hello",
+				config.K8sServiceDeploymentType,
+				nil,
+				[]string{"testdata/init/nope.sql"},
+			)
+
+			Expect(err).To(MatchError(helm.ErrConfigMapFileRead))
+		})
+
+		It("rejects a configMapFrom file that is not UTF-8 text", func() {
+			binary := writeTempFile("blob.bin", []byte{0xff, 0xfe, 0xfd})
+
+			_, err := subject.Build(
+				"hello",
+				config.K8sServiceDeploymentType,
+				nil,
+				[]string{binary},
+			)
+
+			Expect(err).To(MatchError(helm.ErrConfigMapFileEncoding))
 		})
 	})
 
@@ -457,7 +682,7 @@ var _ = Describe("ChartBuilder", func() {
 		It("carries a declared manifest too", func() {
 			chart, err := subject.Build("migrate", config.K8sJobDeploymentType, []string{
 				"testdata/configmap.yaml",
-			})
+			}, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).To(ContainElement(
@@ -466,7 +691,7 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("assembles only the files a job needs", func() {
-			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 
@@ -478,14 +703,43 @@ var _ = Describe("ChartBuilder", func() {
 				"templates/_helpers.tpl",
 				"templates/serviceaccount.yaml",
 				"templates/job.yaml",
+				"templates/configmap.yaml",
 			))
 		})
 
 		It("produces a chart that validates", func() {
-			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil, nil)
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(chart.Validate()).To(Succeed())
+		})
+
+		It("renders configMapFrom files and stamps the job pod", func() {
+			svc := config.ComposeService{
+				Name:  "migrate",
+				Image: "reg/migrate:v1",
+				Extensions: types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"deploymentType": "job",
+					},
+				},
+			}
+
+			chart, err := subject.Build(
+				"migrate",
+				config.K8sJobDeploymentType,
+				nil,
+				[]string{"testdata/init/01-schema.sql"},
+			)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			rendered := render(chart, resolvedValues(svc))
+			cm := configMapNamed(rendered, "migrate/templates/configmap.yaml")
+
+			Expect(cm.Metadata.Name).To(Equal("migrate"))
+			Expect(cm.Data).To(HaveKey("01-schema.sql"))
+			Expect(podTemplateAnnotations(rendered, "job.yaml")).
+				To(HaveKey("checksum/configmap"))
 		})
 
 		It("mounts volumes onto the job pod", func() {
@@ -514,6 +768,7 @@ var _ = Describe("ChartBuilder", func() {
 			chart, err := subject.Build(
 				"migrate",
 				config.K8sJobDeploymentType,
+				nil,
 				nil,
 			)
 			Expect(err).ShouldNot(HaveOccurred())
@@ -555,10 +810,10 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("names the chart after the service so destroy can find it", func() {
-			first, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
+			first, err := subject.Build("hello", config.K8sJobDeploymentType, nil, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			second, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
+			second, err := subject.Build("hello", config.K8sJobDeploymentType, nil, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
 			Expect(first.Name()).To(Equal("hello"))
@@ -568,7 +823,7 @@ var _ = Describe("ChartBuilder", func() {
 		// A Job's spec.template and spec.selector are immutable, so an upgrade
 		// cannot patch one in place.
 		It("renders a new job name on every render", func() {
-			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil)
+			chart, err := subject.Build("hello", config.K8sJobDeploymentType, nil, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
 			values := map[string]any{}
@@ -586,7 +841,7 @@ var _ = Describe("ChartBuilder", func() {
 		It("keeps a long service name within the job name limit", func() {
 			longName := strings.Repeat("a", 60)
 
-			chart, err := subject.Build(longName, config.K8sJobDeploymentType, nil)
+			chart, err := subject.Build(longName, config.K8sJobDeploymentType, nil, nil)
 			Expect(err).ShouldNot(HaveOccurred())
 
 			name := jobName(render(chart, map[string]any{}))
@@ -618,7 +873,7 @@ var _ = Describe("ChartBuilder", func() {
 			JustBeforeEach(func() {
 				var err error
 
-				chart, err = subject.Build("migrate", config.K8sJobDeploymentType, nil)
+				chart, err = subject.Build("migrate", config.K8sJobDeploymentType, nil, nil)
 				Expect(err).ShouldNot(HaveOccurred())
 
 				rendered = render(chart, resolvedValues(svc))

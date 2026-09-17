@@ -305,6 +305,7 @@ func (h *Helm) deployService(
 		svc.Name,
 		internalService.extension.DeploymentType,
 		internalService.extension.Manifests,
+		internalService.extension.ConfigMapFrom,
 	)
 	if err != nil {
 		return err
