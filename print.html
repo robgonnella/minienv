@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4b6cf39e.js";
+            window.path_to_searchindex_js = "searchindex-60954e9e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -429,6 +429,10 @@ the remote host and bind mounts it there:</p>
     - hostPath: conf/api.yml
       containerPath: /etc/api/api.yml
 </code></pre>
+<p><code>environment</code> reaches the remote host already interpolated, so <code>${DB_HOST}</code>
+arrives as the value it had on your machine. To keep a value off the remote
+entirely, use the bare <code>- SOME_VAR</code> form: with nothing set locally it stays
+unresolved, and the remote host supplies it from its own environment.</p>
 <h2 id="next-steps-1"><a class="header" href="#next-steps-1">Next steps</a></h2>
 <ul>
 <li><a href="#configuration-reference">Configuration Reference</a> — every field, with
@@ -439,6 +443,9 @@ the per-field detail.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="images-and-builds"><a class="header" href="#images-and-builds">Images and Builds</a></h1>
+<p>Every service resolves to one image: a repository and a tag. The <code>image</code> fields
+below are the same under <code>x-minienv-k8s-service</code> and <code>x-minienv-docker-service</code>;
+the examples use the first.</p>
 <h2 id="building-from-source"><a class="header" href="#building-from-source">Building from source</a></h2>
 <p>Any service with a <code>build:</code> section is built and pushed before the deploy
 starts:</p>
@@ -452,14 +459,14 @@ starts:</p>
 </code></pre>
 <h2 id="where-the-image-name-comes-from"><a class="header" href="#where-the-image-name-comes-from">Where the image name comes from</a></h2>
 <p>minienv needs a repository and a tag. The extension fields win, and compose
-<code>image:</code> supplies whichever of them you leave unset:</p>
-<p>So this is enough for a service you are not building:</p>
+<code>image:</code> supplies whichever of them you leave unset, so this is enough for a
+service you are not building:</p>
 <pre><code class="language-yaml">services:
   db:
     image: postgres:15 # repository: postgres, tag: 15
 </code></pre>
-<p>An untagged <code>image: myapp</code> resolves to <code>myapp:latest</code>, so it inherits the stale
-image problem described under <a href="#pull-policy">Pull policy</a>.</p>
+<p>An untagged <code>image: myapp</code> resolves to <code>myapp:latest</code> — see
+<a href="#fixed-tags">Fixed tags</a>.</p>
 <blockquote>
 <p><strong>A digest reference is rejected.</strong> <code>image: myapp@sha256:...</code> fails the
 deploy — set <code>image.repository</code> and <code>image.tag</code> in the extension instead.</p>
@@ -476,7 +483,8 @@ SHA:</p>
 built instead of a cached one. It works as a suffix too — <code>tag: v1-+git</code>
 produces something like <code>v1-a1b2c3d</code>.</p>
 <h2 id="platforms"><a class="header" href="#platforms">Platforms</a></h2>
-<p>Override when your cluster nodes differ from your laptop, or when you need both:</p>
+<p>Override when the target’s architecture differs from your laptop, or when you
+need both:</p>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   image:
     repository: myorg/api
@@ -485,20 +493,38 @@ produces something like <code>v1-a1b2c3d</code>.</p>
       - linux/amd64
       - linux/arm64/v8
 </code></pre>
-<h2 id="pull-policy"><a class="header" href="#pull-policy">Pull policy</a></h2>
-<p>On a fixed tag like <code>latest</code>, set <code>Always</code> — otherwise the cluster keeps running
-a stale cached image:</p>
+<h2 id="fixed-tags"><a class="header" href="#fixed-tags">Fixed tags</a></h2>
+<p>A tag rebuilt in place — <code>latest</code>, <code>dev</code> — names an image the target may
+already hold, so a redeploy can keep running the old one. <code>+git</code> sidesteps this
+by changing the tag every commit. Where it is not an option:</p>
+<h3 id="kubernetes-2"><a class="header" href="#kubernetes-2">Kubernetes</a></h3>
+<p>Set the pull policy to <code>Always</code>:</p>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   image:
     pullPolicy: Always
 </code></pre>
+<p>Or set <code>recreate: true</code>, which replaces the pods on every deploy even when
+nothing in the release changed.</p>
+<h3 id="docker-2"><a class="header" href="#docker-2">Docker</a></h3>
+<p>The remote host pulls with <code>docker compose up -d</code>, which by default keeps an
+image it already has. Set compose <code>pull_policy</code> on the service; it reaches the
+host as written:</p>
+<pre><code class="language-yaml">services:
+  api:
+    image: myorg/api:latest
+    pull_policy: always
+</code></pre>
 <h2 id="private-registries"><a class="header" href="#private-registries">Private registries</a></h2>
+<h3 id="kubernetes-1-1"><a class="header" href="#kubernetes-1-1">Kubernetes</a></h3>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   imagePullSecrets:
     - name: my-registry-creds
 </code></pre>
 <p>The secret must already exist in the target namespace; minienv does not create
 it.</p>
+<h3 id="docker-1-1"><a class="header" href="#docker-1-1">Docker</a></h3>
+<p>The remote host’s Docker daemon pulls the image, so it must already be logged
+in to the registry. minienv does not log it in.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="exposing-services"><a class="header" href="#exposing-services">Exposing Services</a></h1>
 <p>A mini environment is only useful if someone can reach it. minienv exposes
@@ -775,15 +801,15 @@ configuring more than one is an error.</p>
 </tbody>
 </table>
 </div>
-<h3 id="docker-2"><a class="header" href="#docker-2"><code>docker</code></a></h3>
+<h3 id="docker-3"><a class="header" href="#docker-3"><code>docker</code></a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>docker.namespace</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Compose project name on the remote host, and the directory it lives in</td></tr>
-<tr><td><code>docker.transport</code></td><td>map</td><td><strong>yes</strong></td><td>—</td><td>The transport used to reach the remote host</td></tr>
+<tr><td><code>docker.namespace</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Compose project name and directory (<code>~/.minienv/&lt;namespace&gt;</code>) on the remote host. Reduced to <code>[a-z0-9_-]</code></td></tr>
+<tr><td><a href="#dockertransport"><code>docker.transport</code></a></td><td>map</td><td><strong>yes</strong></td><td>—</td><td>How to reach the remote host</td></tr>
 <tr><td><code>docker.transport.ssh.host</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Target host for the SSH connection</td></tr>
 <tr><td><code>docker.transport.ssh.identity</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Path to the private key file</td></tr>
 <tr><td><code>docker.transport.ssh.user</code></td><td>string</td><td>no</td><td>local user</td><td>User for the SSH connection</td></tr>
@@ -792,9 +818,7 @@ configuring more than one is an error.</p>
 </tbody>
 </table>
 </div>
-<p><code>docker.namespace</code> is reduced to <code>[a-z0-9_-]</code>, and rejected if nothing survives
-that. The deployment lives at <code>~/.minienv/&lt;namespace&gt;</code> on the remote host, and
-<code>minienv destroy</code> removes that directory.</p>
+<h4 id="dockertransport"><a class="header" href="#dockertransport"><code>docker.transport</code></a></h4>
 <p>Exactly one transport must be configured; configuring none, like configuring
 more than one, is an error.</p>
 <blockquote>
@@ -813,103 +837,51 @@ files are not supported.</p>
 <tbody>
 <tr><td><code>affinity</code></td><td>k8s schema</td><td>—</td><td>Passed through to the pod spec</td></tr>
 <tr><td><code>command</code></td><td>list of strings</td><td>compose <code>command</code></td><td>Container command</td></tr>
-<tr><td><code>configMapFrom</code></td><td>list of strings</td><td>—</td><td>Files, relative to compose-project-directory, that become one ConfigMap named after the service</td></tr>
+<tr><td><a href="#configmapfrom"><code>configMapFrom</code></a></td><td>list of strings</td><td>—</td><td>Files, relative to the compose project directory, that become one ConfigMap named after the service</td></tr>
 <tr><td><code>deploymentTimeout</code></td><td>duration</td><td>inherits top level</td><td>Helm timeout for this service</td></tr>
 <tr><td><code>deploymentType</code></td><td><code>service</code> | <code>job</code></td><td><code>service</code></td><td>Deploy as a Deployment or a run-to-completion Job</td></tr>
-<tr><td><code>env</code></td><td>k8s schema</td><td>—</td><td>Container env vars as <code>EnvVar</code> entries, merged over compose <code>environment</code> by <code>name</code></td></tr>
+<tr><td><a href="#env"><code>env</code></a></td><td>k8s schema</td><td>—</td><td>Container env vars as <code>EnvVar</code> entries, merged over compose <code>environment</code> by <code>name</code></td></tr>
 <tr><td><code>envFrom</code></td><td>k8s schema</td><td>—</td><td>Sources to populate container env vars from, as <code>EnvFromSource</code> entries</td></tr>
 <tr><td><code>image.platforms</code></td><td>list of strings</td><td><code>["linux/amd64"]</code></td><td>Platforms to build and push</td></tr>
 <tr><td><code>image.pullPolicy</code></td><td>string</td><td><code>IfNotPresent</code></td><td>Kubernetes image pull policy</td></tr>
 <tr><td><code>image.repository</code></td><td>string</td><td>from compose <code>image</code></td><td>Image repository</td></tr>
 <tr><td><code>image.tag</code></td><td>string</td><td>from compose <code>image</code></td><td>Image tag. <code>+git</code> expands to the short commit SHA</td></tr>
-<tr><td><code>imagePullSecrets[].name</code></td><td>string</td><td>—</td><td>Name of an existing pull secret in the namespace</td></tr>
-<tr><td><code>livenessProbe</code></td><td>k8s schema</td><td>from compose <code>healthcheck</code></td><td>Passed through to the container spec</td></tr>
-<tr><td><code>manifests</code></td><td>list of strings</td><td>—</td><td>Paths, relative to compose-project-directory, to extra manifests rendered into this service’s release</td></tr>
-<tr><td><code>ngrok.port</code></td><td>integer</td><td>—</td><td>Container port to expose publicly. Use the <strong>container</strong> side of a compose mapping</td></tr>
+<tr><td><code>imagePullSecrets[].name</code></td><td>string</td><td>—</td><td>Existing pull secret in the namespace. See <a href="#private-registries">Private registries</a></td></tr>
+<tr><td><a href="#probes"><code>livenessProbe</code></a></td><td>k8s schema</td><td>from compose <code>healthcheck</code></td><td>Passed through to the container spec</td></tr>
+<tr><td><a href="#manifests"><code>manifests</code></a></td><td>list of strings</td><td>—</td><td>Paths, relative to the compose project directory, to extra manifests rendered into this service’s release</td></tr>
+<tr><td><code>ngrok.port</code></td><td>integer</td><td>—</td><td>Container port to expose publicly — the <strong>container</strong> side of a compose mapping. Ignored for a job, a skipped service, and when <code>NGROK_AUTHTOKEN</code> is unset. See <a href="#exposing-services">Exposing Services</a></td></tr>
 <tr><td><code>ngrok.trafficPolicy</code></td><td>string</td><td>inherits top level</td><td>ngrok <code>on_http_request</code> policy</td></tr>
 <tr><td><code>ngrok.url</code></td><td>string</td><td>random</td><td>Reserved domain for a stable endpoint</td></tr>
 <tr><td><code>nodeSelector</code></td><td>k8s schema</td><td>—</td><td>Passed through to the pod spec</td></tr>
 <tr><td><code>podAnnotations</code></td><td>map of string to string</td><td>—</td><td>Passed through to the pod template</td></tr>
 <tr><td><code>podLabels</code></td><td>map of string to string</td><td>—</td><td>Passed through to the pod template</td></tr>
 <tr><td><code>podSecurityContext</code></td><td>k8s schema</td><td>—</td><td>Passed through to the pod spec</td></tr>
-<tr><td><code>readinessProbe</code></td><td>k8s schema</td><td>from compose <code>healthcheck</code></td><td>Passed through to the container spec</td></tr>
-<tr><td><code>recreate</code></td><td>bool</td><td><code>false</code></td><td>Replaces the pods on every deploy, even unchanged ones</td></tr>
+<tr><td><a href="#probes"><code>readinessProbe</code></a></td><td>k8s schema</td><td>from compose <code>healthcheck</code></td><td>Passed through to the container spec</td></tr>
+<tr><td><code>recreate</code></td><td>bool</td><td><code>false</code></td><td>Replace the pods, and any resource that cannot be patched in place, on every deploy. For fixed tags like <code>latest</code></td></tr>
 <tr><td><code>replicas</code></td><td>integer</td><td><code>1</code></td><td>Number of replicas. No effect on a job</td></tr>
 <tr><td><code>resources</code></td><td>k8s schema</td><td>—</td><td>Passed through to the container spec</td></tr>
 <tr><td><code>securityContext</code></td><td>k8s schema</td><td>—</td><td>Passed through to the container spec</td></tr>
 <tr><td><code>service.create</code></td><td>bool</td><td><code>true</code></td><td>Whether to create a Kubernetes Service. Forced to <code>false</code> when the service resolves no ports</td></tr>
-<tr><td><code>service.ports[]</code></td><td>list</td><td>derived from compose <code>ports</code></td><td>Explicit port mappings, merged with the derived ones</td></tr>
+<tr><td><a href="#serviceports"><code>service.ports</code></a></td><td>list</td><td>derived from compose <code>ports</code></td><td>Explicit port mappings, merged with the derived ones</td></tr>
 <tr><td><code>service.type</code></td><td>string</td><td><code>ClusterIP</code></td><td>Service type</td></tr>
 <tr><td><code>serviceAccount.annotations</code></td><td>map of string to string</td><td><code>{}</code></td><td>Extra annotations</td></tr>
 <tr><td><code>serviceAccount.automount</code></td><td>bool</td><td><code>true</code></td><td>Automount the service account token</td></tr>
 <tr><td><code>serviceAccount.create</code></td><td>bool</td><td><code>true</code></td><td>Whether to create a ServiceAccount. Forced to <code>false</code> when the service resolves no ports</td></tr>
 <tr><td><code>serviceAccount.name</code></td><td>string</td><td><code>""</code></td><td>Name. Empty means the generated fullname when creating, otherwise <code>default</code></td></tr>
-<tr><td><code>skip</code></td><td>bool</td><td><code>false</code></td><td>Excludes the service from image builds and deploys</td></tr>
-<tr><td><code>startupProbe</code></td><td>k8s schema</td><td>from compose <code>healthcheck</code></td><td>Passed through to the container spec</td></tr>
+<tr><td><code>skip</code></td><td>bool</td><td><code>false</code></td><td>Excludes the service from image builds and deploys. <code>destroy</code> still uninstalls it</td></tr>
+<tr><td><a href="#probes"><code>startupProbe</code></a></td><td>k8s schema</td><td>from compose <code>healthcheck</code></td><td>Passed through to the container spec</td></tr>
 <tr><td><code>tolerations</code></td><td>k8s schema</td><td>—</td><td>Passed through to the pod spec</td></tr>
 <tr><td><code>volumeMounts</code></td><td>k8s schema</td><td>—</td><td>Passed through to the container spec</td></tr>
 <tr><td><code>volumes</code></td><td>k8s schema</td><td>—</td><td>Passed through to the pod spec</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="notes"><a class="header" href="#notes">Notes</a></h3>
-<p><strong>Fields marked <code>k8s schema</code></strong> reach the generated manifests exactly as written,
-so the <a href="https://kubernetes.io/docs/reference/">Kubernetes documentation</a> is the
+<p>Fields marked <code>k8s schema</code> reach the generated manifests exactly as written, so
+the <a href="https://kubernetes.io/docs/reference/">Kubernetes documentation</a> is the
 reference for their shape.</p>
-<p><strong>The three probes</strong> are derived from a compose <code>healthcheck</code>. A <code>curl</code> or
-<code>wget</code> test against <code>http://localhost[:port][/path]</code> becomes an HTTP probe on
-the <strong>container</strong> port; anything else becomes an exec probe. <code>disable: true</code>, an
-empty <code>test</code>, or <code>test: ["NONE"]</code> produces none.</p>
-<p>Set any of the three to write it yourself. The ones you leave unset still come
-from the compose <code>healthcheck</code>:</p>
-<pre><code class="language-yaml">x-minienv-k8s-service:
-  readinessProbe:
-    httpGet:
-      path: /ready
-      port: 8080
-    initialDelaySeconds: 5
-</code></pre>
-<blockquote>
-<p><strong>Caution:</strong> a <code>curl</code> or <code>wget</code> test pointed at anything other than
-<code>localhost</code> produces <strong>no probes at all</strong> — silently. Use <code>localhost</code>, write
-the check as a non-HTTP command, or set the probes yourself.</p>
-</blockquote>
-<p><strong><code>env</code></strong> is merged over compose <code>environment</code>. A literal <code>value</code> is written
-into the manifest, so <strong>do not put secrets there</strong> if the manifests are visible
-to others. Values compose could not resolve (the bare <code>- SOME_VAR</code> form, with
-nothing set locally) are dropped rather than set empty.</p>
-<pre><code class="language-yaml">x-minienv-k8s-service:
-  env:
-    - name: EXAMPLE_VAR
-      value: example-value
-    - name: EXAMPLE_FROM_VAR
-      valueFrom:
-        secretKeyRef:
-          name: example-secret
-          key: example-key
-</code></pre>
-<p><strong><code>skip</code></strong> leaves a service out of image builds and out of the deploy, for the
-ones that only make sense locally. <code>destroy</code> does not check it, so a service you
-deployed and later marked skipped is still uninstalled.</p>
-<p><strong>Each entry in <code>service.ports[]</code></strong> requires all three fields:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Field</th><th>Type</th><th>Description</th></tr>
-</thead>
-<tbody>
-<tr><td><code>containerPortName</code></td><td>string</td><td>Name of the port, on the container and Service</td></tr>
-<tr><td><code>containerPort</code></td><td>integer</td><td>Port the container listens on</td></tr>
-<tr><td><code>protocol</code></td><td>string</td><td><code>TCP</code> or <code>UDP</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>Ports derived from compose take the container side of the mapping, are named
-<code>p&lt;port&gt;</code> — <code>p8080</code> for container port 8080 — and default to protocol <code>TCP</code>.</p>
-<p><strong><code>configMapFrom</code></strong> names files, relative to the compose project directory,
-whose contents become a ConfigMap named after the service. Each file’s base name
-is a key and the file’s content is its value. Mount it with <code>volumes</code> and
-<code>volumeMounts</code>:</p>
+<h4 id="configmapfrom"><a class="header" href="#configmapfrom"><code>configMapFrom</code></a></h4>
+<p>Each file’s base name is a key and its content is the value. Mount the
+ConfigMap with <code>volumes</code> and <code>volumeMounts</code>:</p>
 <pre><code class="language-yaml">services:
   postgres:
     image: postgres:15
@@ -929,9 +901,24 @@ is a key and the file’s content is its value. Mount it with <code>volumes</cod
 Two entries may not share a base name. A change to any file’s content replaces
 the pods on the next deploy. A file under <code>manifests</code> must not also produce a
 ConfigMap named after the service, since the two would collide in the release.</p>
-<p><strong><code>manifests</code></strong> names files, relative to the compose project directory, that are
-deployed as part of the service’s release — a ConfigMap or Secret behind a
-<code>volumes</code> entry, an Ingress, a PVC, a Traefik <code>IngressRoute</code>:</p>
+<h4 id="env"><a class="header" href="#env"><code>env</code></a></h4>
+<p>Merged over compose <code>environment</code> by <code>name</code>. A literal <code>value</code> is written into
+the manifest, so <strong>do not put secrets there</strong> if the manifests are visible to
+others. Values compose could not resolve (the bare <code>- SOME_VAR</code> form, with
+nothing set locally) are dropped rather than set empty.</p>
+<pre><code class="language-yaml">x-minienv-k8s-service:
+  env:
+    - name: EXAMPLE_VAR
+      value: example-value
+    - name: EXAMPLE_FROM_VAR
+      valueFrom:
+        secretKeyRef:
+          name: example-secret
+          key: example-key
+</code></pre>
+<h4 id="manifests"><a class="header" href="#manifests"><code>manifests</code></a></h4>
+<p>Files deployed as part of the service’s release — a ConfigMap or Secret behind
+a <code>volumes</code> entry, an Ingress, a PVC, a Traefik <code>IngressRoute</code>:</p>
 <pre><code class="language-yaml">services:
   api:
     image: myorg/api:latest
@@ -971,51 +958,65 @@ rather than failing.</p>
 <p>A manifest is created and removed with its service’s release. Two services must
 not declare manifests producing the same object — the second release to reach it
 fails on ownership, and the order between them is not fixed.</p>
-<p><strong><code>ngrok.*</code></strong> requires <code>NGROK_AUTHTOKEN</code>; without it the whole block is ignored.
-Ignored for <code>deploymentType: job</code> and for a service marked <code>skip</code>, since neither
-has a k8s Service for an endpoint to route to. See
-<a href="#exposing-services">Exposing Services</a>.</p>
-<p><strong><code>recreate</code></strong> exists because Helm only restarts pods when something in the
-release actually changed. A service whose image tag is fixed — <code>latest</code>, or any
-tag you rebuild in place — keeps running the old image after a redeploy, because
-from Helm’s point of view nothing about the release moved.</p>
-<pre><code class="language-yaml">services:
-  api:
-    image: myorg/api:latest
-    x-minienv-k8s-service:
-      recreate: true
+<h4 id="probes"><a class="header" href="#probes">Probes</a></h4>
+<p><code>livenessProbe</code>, <code>readinessProbe</code> and <code>startupProbe</code> are derived from a compose
+<code>healthcheck</code>. A <code>curl</code> or <code>wget</code> test against <code>http://localhost[:port][/path]</code>
+becomes an HTTP probe on the <strong>container</strong> port; anything else becomes an exec
+probe. <code>disable: true</code>, an empty <code>test</code>, or <code>test: ["NONE"]</code> produces none.</p>
+<p>Set any of the three to write it yourself. The ones you leave unset still come
+from the compose <code>healthcheck</code>:</p>
+<pre><code class="language-yaml">x-minienv-k8s-service:
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
 </code></pre>
-<p>The alternative is to make the tag change instead, with <code>+git</code> — see
-<a href="#images-and-builds">Images and Builds</a>. It applies to the whole release,
-not just the pods: any resource that cannot be patched in place is replaced,
-including one named in <code>manifests</code>.</p>
+<blockquote>
+<p><strong>Caution:</strong> a <code>curl</code> or <code>wget</code> test pointed at anything other than
+<code>localhost</code> produces <strong>no probes at all</strong> — silently. Use <code>localhost</code>, write
+the check as a non-HTTP command, or set the probes yourself.</p>
+</blockquote>
+<h4 id="serviceports"><a class="header" href="#serviceports"><code>service.ports</code></a></h4>
+<p>Each entry requires all three fields:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>containerPortName</code></td><td>string</td><td>Name of the port, on the container and Service</td></tr>
+<tr><td><code>containerPort</code></td><td>integer</td><td>Port the container listens on</td></tr>
+<tr><td><code>protocol</code></td><td>string</td><td><code>TCP</code> or <code>UDP</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Ports derived from compose take the container side of the mapping, are named
+<code>p&lt;port&gt;</code> — <code>p8080</code> for container port 8080 — and default to protocol <code>TCP</code>.</p>
 <h2 id="x-minienv-docker-service"><a class="header" href="#x-minienv-docker-service"><code>x-minienv-docker-service</code></a></h2>
 <p>Under <code>services.&lt;name&gt;</code>. All fields are optional.</p>
-<p>The field set is small because compose is already the deployment format:
-replicas, commands, environment, resources, health checks and volumes stay on
-the compose service and are passed through untouched.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>copy[].containerPath</code></td><td>string</td><td>—</td><td>Absolute path inside the container to mount the copied path at</td></tr>
-<tr><td><code>copy[].hostPath</code></td><td>string</td><td>—</td><td>Path, relative to the compose project directory, of a file or directory to copy</td></tr>
+<tr><td><a href="#copy"><code>copy[].containerPath</code></a></td><td>string</td><td>—</td><td>Absolute path inside the container to mount the copied path at</td></tr>
+<tr><td><a href="#copy"><code>copy[].hostPath</code></a></td><td>string</td><td>—</td><td>Path, relative to the compose project directory, of a file or directory to copy</td></tr>
 <tr><td><code>image.platforms</code></td><td>list of strings</td><td><code>["linux/amd64"]</code></td><td>Platforms to build and push</td></tr>
 <tr><td><code>image.repository</code></td><td>string</td><td>from compose <code>image</code></td><td>Image repository</td></tr>
 <tr><td><code>image.tag</code></td><td>string</td><td>from compose <code>image</code></td><td>Image tag. <code>+git</code> expands to the short commit SHA</td></tr>
-<tr><td><code>ngrok.port</code></td><td>integer</td><td>—</td><td>Container port to expose publicly. Use the <strong>container</strong> side of a compose mapping</td></tr>
+<tr><td><code>ngrok.port</code></td><td>integer</td><td>—</td><td>Container port to expose publicly — the <strong>container</strong> side of a compose mapping. Ignored for a skipped service and when <code>NGROK_AUTHTOKEN</code> is unset. See <a href="#exposing-services">Exposing Services</a></td></tr>
 <tr><td><code>ngrok.trafficPolicy</code></td><td>string</td><td>inherits top level</td><td>ngrok <code>on_http_request</code> policy</td></tr>
 <tr><td><code>ngrok.url</code></td><td>string</td><td>random</td><td>Reserved domain for a stable endpoint</td></tr>
 <tr><td><code>skip</code></td><td>bool</td><td><code>false</code></td><td>Excludes the service from image builds and deploys</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="notes-1"><a class="header" href="#notes-1">Notes</a></h3>
-<p><strong><code>copy</code></strong> names files and directories, relative to the compose project
-directory, that are sent to the remote host and bind mounted into the container
-— a config file, a TLS certificate, a seed dataset, a directory of fixtures:</p>
+<h4 id="copy"><a class="header" href="#copy"><code>copy</code></a></h4>
+<p>Files and directories sent to the remote host and bind mounted into the
+container — a config file, a TLS certificate, a seed dataset, a directory of
+fixtures:</p>
 <pre><code class="language-yaml">services:
   api:
     image: myorg/api:latest
@@ -1032,79 +1033,13 @@ are all rejected. <code>containerPath</code> must be absolute, and two entries o
 service cannot name the same one.</p>
 <p>The copied paths land under the deployment’s own directory on the remote host,
 each keeping the relative path it was declared with, so two files that share a
-base name stay apart. Two services naming the same <code>hostPath</code> share one copy.</p>
+base name stay apart. Two services naming the same <code>hostPath</code> share one copy. A
+service marked <code>skip</code> is not deployed, so nothing it declares is copied.</p>
 <blockquote>
 <p><strong>The whole set is replaced on every deploy.</strong> An entry you remove or rename
 takes its remote copy with it on the next deploy, and <code>minienv destroy</code>
 removes the deployment directory that holds all of them.</p>
 </blockquote>
-<p>A service marked <code>skip</code> is not deployed, so nothing it declares is copied.</p>
-<p><strong><code>ngrok.*</code></strong> requires <code>NGROK_AUTHTOKEN</code>; without it the whole block is ignored.
-Ignored for a service marked <code>skip</code>, since it is never deployed. See
-<a href="#exposing-services">Exposing Services</a>.</p>
-<p><strong><code>skip</code></strong> leaves a service out of image builds and out of the deploy, for the
-ones that only make sense locally.</p>
-<p><strong>Compose <code>environment</code></strong> reaches the remote host already interpolated, so
-<code>${DB_HOST}</code> arrives as the value it had on your machine. To keep a value off
-the remote entirely, use the bare <code>- SOME_VAR</code> form: with nothing set locally it
-stays unresolved, and the remote host supplies it from its own environment.</p>
-<h3 id="what-the-rewrite-changes"><a class="header" href="#what-the-rewrite-changes">What the rewrite changes</a></h3>
-<p>Before the project reaches the remote host, minienv:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Change</th><th>Why</th></tr>
-</thead>
-<tbody>
-<tr><td>Renames the project to <code>namespace</code></td><td>Keeps two environments on one host from colliding</td></tr>
-<tr><td>Drops services marked <code>skip</code></td><td>Along with any <code>depends_on</code> edge pointing at them</td></tr>
-<tr><td>Clears <code>build:</code></td><td>Images are built locally and pulled by tag on the remote</td></tr>
-<tr><td>Clears <code>ports:</code></td><td>Nothing is published to the remote host’s network</td></tr>
-<tr><td>Drops bind mounts</td><td>The host paths do not exist there. Named volumes are kept</td></tr>
-<tr><td>Adds a bind mount per <code>copy</code> entry</td><td>Pointed at where that entry is copied on the host</td></tr>
-<tr><td>Drops <code>env_file</code> and <code>label_file</code></td><td>Their values are already in <code>environment</code> and <code>labels</code></td></tr>
-<tr><td>Pins <code>image:</code></td><td>To the repository and tag resolved for this run</td></tr>
-<tr><td>Injects an <code>ngrok</code> service</td><td>Only when something publishes</td></tr>
-</tbody>
-</table>
-</div>
-<p>Everything else — <code>environment</code>, <code>healthcheck</code>, <code>command</code>, <code>depends_on</code>,
-<code>networks</code>, named <code>volumes</code> — is passed through as written, already fully
-interpolated.</p>
-<h2 id="generated-resources"><a class="header" href="#generated-resources">Generated resources</a></h2>
-<h3 id="kubernetes-2"><a class="header" href="#kubernetes-2">Kubernetes</a></h3>
-<p>Per compose service, minienv creates:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Resource</th><th>When</th></tr>
-</thead>
-<tbody>
-<tr><td>Deployment</td><td><code>deploymentType: service</code> (the default)</td></tr>
-<tr><td>Job</td><td><code>deploymentType: job</code></td></tr>
-<tr><td>Service</td><td><code>deploymentType: service</code> and <code>service.create</code> is true</td></tr>
-<tr><td>ServiceAccount</td><td><code>serviceAccount.create</code> is true</td></tr>
-<tr><td>ConfigMap</td><td><code>configMapFrom</code> names at least one file</td></tr>
-</tbody>
-</table>
-</div>
-<p>And once per namespace, not per service:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Resource</th><th>When</th></tr>
-</thead>
-<tbody>
-<tr><td><code>ngrok</code> release: Deployment, ConfigMap, Secret, ServiceAccount</td><td>any service publishes via ngrok</td></tr>
-</tbody>
-</table>
-</div>
-<p>The target namespace is created on deploy if it does not already exist.</p>
-<p>Nothing else is derived from the compose file — no Ingress,
-PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
-compose <code>environment</code> is rendered inline rather than into a ConfigMap or
-Secret. Anything else a service needs is declared explicitly, with
-<code>configMapFrom</code> or <code>manifests</code>.</p>
 <h2 id="machine-readable-schema"><a class="header" href="#machine-readable-schema">Machine-readable schema</a></h2>
 <p>The authoritative schema lives at <code>schema/schema.json</code> in the repository. It
 wraps the official compose spec and adds the three extension fields
@@ -1126,7 +1061,40 @@ maintain in your repository.</p>
     namespace: my-branch
 </code></pre>
 <p>Per-service overrides go under <code>x-minienv-k8s-service</code>.</p>
-<h2 id="docker-3"><a class="header" href="#docker-3">Docker</a></h2>
+<h3 id="generated-resources"><a class="header" href="#generated-resources">Generated resources</a></h3>
+<p>Per compose service:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Resource</th><th>When</th></tr>
+</thead>
+<tbody>
+<tr><td>Deployment</td><td><code>deploymentType: service</code> (the default)</td></tr>
+<tr><td>Job</td><td><code>deploymentType: job</code></td></tr>
+<tr><td>Service</td><td><code>deploymentType: service</code> and <code>service.create</code> is true</td></tr>
+<tr><td>ServiceAccount</td><td><code>serviceAccount.create</code> is true</td></tr>
+<tr><td>ConfigMap</td><td><code>configMapFrom</code> names at least one file</td></tr>
+</tbody>
+</table>
+</div>
+<p>Once per namespace:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Resource</th><th>When</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ngrok</code> release: Deployment, ConfigMap, Secret, ServiceAccount</td><td>any service publishes via ngrok</td></tr>
+</tbody>
+</table>
+</div>
+<p>The target namespace is created on deploy if it does not already exist.</p>
+<p>Nothing else is derived from the compose file — no Ingress,
+PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
+compose <code>environment</code> is rendered inline rather than into a ConfigMap or
+Secret. Anything else a service needs is declared explicitly, with
+<code>configMapFrom</code> or <code>manifests</code>.</p>
+<h2 id="docker-4"><a class="header" href="#docker-4">Docker</a></h2>
 <p>Deploys the whole project to a single remote host as one <code>docker compose</code>
 project, over a transport.</p>
 <p>Needs an SSH-reachable host running <code>docker</code> and its compose plugin:</p>
@@ -1139,6 +1107,29 @@ project, over a transport.</p>
         identity: ~/.ssh/id_ed25519
 </code></pre>
 <p>Per-service overrides go under <code>x-minienv-docker-service</code>.</p>
+<h3 id="what-reaches-the-remote-host"><a class="header" href="#what-reaches-the-remote-host">What reaches the remote host</a></h3>
+<p>Before the project is sent, minienv:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Change</th><th>Why</th></tr>
+</thead>
+<tbody>
+<tr><td>Renames the project to <code>namespace</code></td><td>Keeps two environments on one host from colliding</td></tr>
+<tr><td>Drops services marked <code>skip</code></td><td>Along with any <code>depends_on</code> edge pointing at them</td></tr>
+<tr><td>Clears <code>build:</code></td><td>Images are built locally and pulled by tag on the remote</td></tr>
+<tr><td>Clears <code>ports:</code></td><td>Nothing is published to the remote host’s network</td></tr>
+<tr><td>Drops bind mounts</td><td>The host paths do not exist there. Named volumes are kept</td></tr>
+<tr><td>Adds a bind mount per <code>copy</code> entry</td><td>Pointed at where that entry is copied on the host</td></tr>
+<tr><td>Drops <code>env_file</code> and <code>label_file</code></td><td>Their values are already in <code>environment</code> and <code>labels</code></td></tr>
+<tr><td>Pins <code>image:</code></td><td>To the repository and tag resolved for this run</td></tr>
+<tr><td>Injects an <code>ngrok</code> service</td><td>Only when something publishes</td></tr>
+</tbody>
+</table>
+</div>
+<p>Everything else — <code>environment</code>, <code>healthcheck</code>, <code>command</code>, <code>depends_on</code>,
+<code>networks</code>, named <code>volumes</code> — is passed through as written, already fully
+interpolated.</p>
 <p>Every field of both blocks is listed in
 <a href="#x-minienv">Configuration Reference</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>

@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4b6cf39e.js";
+            window.path_to_searchindex_js = "searchindex-60954e9e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -181,6 +181,9 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="images-and-builds"><a class="header" href="#images-and-builds">Images and Builds</a></h1>
+<p>Every service resolves to one image: a repository and a tag. The <code>image</code> fields
+below are the same under <code>x-minienv-k8s-service</code> and <code>x-minienv-docker-service</code>;
+the examples use the first.</p>
 <h2 id="building-from-source"><a class="header" href="#building-from-source">Building from source</a></h2>
 <p>Any service with a <code>build:</code> section is built and pushed before the deploy
 starts:</p>
@@ -194,14 +197,14 @@ starts:</p>
 </code></pre>
 <h2 id="where-the-image-name-comes-from"><a class="header" href="#where-the-image-name-comes-from">Where the image name comes from</a></h2>
 <p>minienv needs a repository and a tag. The extension fields win, and compose
-<code>image:</code> supplies whichever of them you leave unset:</p>
-<p>So this is enough for a service you are not building:</p>
+<code>image:</code> supplies whichever of them you leave unset, so this is enough for a
+service you are not building:</p>
 <pre><code class="language-yaml">services:
   db:
     image: postgres:15 # repository: postgres, tag: 15
 </code></pre>
-<p>An untagged <code>image: myapp</code> resolves to <code>myapp:latest</code>, so it inherits the stale
-image problem described under <a href="#pull-policy">Pull policy</a>.</p>
+<p>An untagged <code>image: myapp</code> resolves to <code>myapp:latest</code> — see
+<a href="#fixed-tags">Fixed tags</a>.</p>
 <blockquote>
 <p><strong>A digest reference is rejected.</strong> <code>image: myapp@sha256:...</code> fails the
 deploy — set <code>image.repository</code> and <code>image.tag</code> in the extension instead.</p>
@@ -218,7 +221,8 @@ SHA:</p>
 built instead of a cached one. It works as a suffix too — <code>tag: v1-+git</code>
 produces something like <code>v1-a1b2c3d</code>.</p>
 <h2 id="platforms"><a class="header" href="#platforms">Platforms</a></h2>
-<p>Override when your cluster nodes differ from your laptop, or when you need both:</p>
+<p>Override when the target’s architecture differs from your laptop, or when you
+need both:</p>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   image:
     repository: myorg/api
@@ -227,20 +231,38 @@ produces something like <code>v1-a1b2c3d</code>.</p>
       - linux/amd64
       - linux/arm64/v8
 </code></pre>
-<h2 id="pull-policy"><a class="header" href="#pull-policy">Pull policy</a></h2>
-<p>On a fixed tag like <code>latest</code>, set <code>Always</code> — otherwise the cluster keeps running
-a stale cached image:</p>
+<h2 id="fixed-tags"><a class="header" href="#fixed-tags">Fixed tags</a></h2>
+<p>A tag rebuilt in place — <code>latest</code>, <code>dev</code> — names an image the target may
+already hold, so a redeploy can keep running the old one. <code>+git</code> sidesteps this
+by changing the tag every commit. Where it is not an option:</p>
+<h3 id="kubernetes"><a class="header" href="#kubernetes">Kubernetes</a></h3>
+<p>Set the pull policy to <code>Always</code>:</p>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   image:
     pullPolicy: Always
 </code></pre>
+<p>Or set <code>recreate: true</code>, which replaces the pods on every deploy even when
+nothing in the release changed.</p>
+<h3 id="docker"><a class="header" href="#docker">Docker</a></h3>
+<p>The remote host pulls with <code>docker compose up -d</code>, which by default keeps an
+image it already has. Set compose <code>pull_policy</code> on the service; it reaches the
+host as written:</p>
+<pre><code class="language-yaml">services:
+  api:
+    image: myorg/api:latest
+    pull_policy: always
+</code></pre>
 <h2 id="private-registries"><a class="header" href="#private-registries">Private registries</a></h2>
+<h3 id="kubernetes-1"><a class="header" href="#kubernetes-1">Kubernetes</a></h3>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   imagePullSecrets:
     - name: my-registry-creds
 </code></pre>
 <p>The secret must already exist in the target namespace; minienv does not create
 it.</p>
+<h3 id="docker-1"><a class="header" href="#docker-1">Docker</a></h3>
+<p>The remote host’s Docker daemon pulls the image, so it must already be logged
+in to the registry. minienv does not log it in.</p>
 
                     </main>
 

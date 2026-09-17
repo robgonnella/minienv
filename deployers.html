@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4b6cf39e.js";
+            window.path_to_searchindex_js = "searchindex-60954e9e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -193,6 +193,39 @@ maintain in your repository.</p>
     namespace: my-branch
 </code></pre>
 <p>Per-service overrides go under <code>x-minienv-k8s-service</code>.</p>
+<h3 id="generated-resources"><a class="header" href="#generated-resources">Generated resources</a></h3>
+<p>Per compose service:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Resource</th><th>When</th></tr>
+</thead>
+<tbody>
+<tr><td>Deployment</td><td><code>deploymentType: service</code> (the default)</td></tr>
+<tr><td>Job</td><td><code>deploymentType: job</code></td></tr>
+<tr><td>Service</td><td><code>deploymentType: service</code> and <code>service.create</code> is true</td></tr>
+<tr><td>ServiceAccount</td><td><code>serviceAccount.create</code> is true</td></tr>
+<tr><td>ConfigMap</td><td><code>configMapFrom</code> names at least one file</td></tr>
+</tbody>
+</table>
+</div>
+<p>Once per namespace:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Resource</th><th>When</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ngrok</code> release: Deployment, ConfigMap, Secret, ServiceAccount</td><td>any service publishes via ngrok</td></tr>
+</tbody>
+</table>
+</div>
+<p>The target namespace is created on deploy if it does not already exist.</p>
+<p>Nothing else is derived from the compose file — no Ingress,
+PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
+compose <code>environment</code> is rendered inline rather than into a ConfigMap or
+Secret. Anything else a service needs is declared explicitly, with
+<code>configMapFrom</code> or <code>manifests</code>.</p>
 <h2 id="docker"><a class="header" href="#docker">Docker</a></h2>
 <p>Deploys the whole project to a single remote host as one <code>docker compose</code>
 project, over a transport.</p>
@@ -206,6 +239,29 @@ project, over a transport.</p>
         identity: ~/.ssh/id_ed25519
 </code></pre>
 <p>Per-service overrides go under <code>x-minienv-docker-service</code>.</p>
+<h3 id="what-reaches-the-remote-host"><a class="header" href="#what-reaches-the-remote-host">What reaches the remote host</a></h3>
+<p>Before the project is sent, minienv:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Change</th><th>Why</th></tr>
+</thead>
+<tbody>
+<tr><td>Renames the project to <code>namespace</code></td><td>Keeps two environments on one host from colliding</td></tr>
+<tr><td>Drops services marked <code>skip</code></td><td>Along with any <code>depends_on</code> edge pointing at them</td></tr>
+<tr><td>Clears <code>build:</code></td><td>Images are built locally and pulled by tag on the remote</td></tr>
+<tr><td>Clears <code>ports:</code></td><td>Nothing is published to the remote host’s network</td></tr>
+<tr><td>Drops bind mounts</td><td>The host paths do not exist there. Named volumes are kept</td></tr>
+<tr><td>Adds a bind mount per <code>copy</code> entry</td><td>Pointed at where that entry is copied on the host</td></tr>
+<tr><td>Drops <code>env_file</code> and <code>label_file</code></td><td>Their values are already in <code>environment</code> and <code>labels</code></td></tr>
+<tr><td>Pins <code>image:</code></td><td>To the repository and tag resolved for this run</td></tr>
+<tr><td>Injects an <code>ngrok</code> service</td><td>Only when something publishes</td></tr>
+</tbody>
+</table>
+</div>
+<p>Everything else — <code>environment</code>, <code>healthcheck</code>, <code>command</code>, <code>depends_on</code>,
+<code>networks</code>, named <code>volumes</code> — is passed through as written, already fully
+interpolated.</p>
 <p>Every field of both blocks is listed in
 <a href="./configuration-reference.html#x-minienv">Configuration Reference</a>.</p>
 
