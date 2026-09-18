@@ -1,3 +1,9 @@
+# [0.4.0](https://github.com/robgonnella/minienv/compare/v0.3.0...v0.4.0) - 2026-09-18
+
+### 🚀 Features
+
+- adds support for docker compose "include" fields [_(881c1f2)_](https://github.com/robgonnella/minienv/commit/881c1f2cfccbfd683f45f17e214d272e49e01b32)
+
 # [0.3.0](https://github.com/robgonnella/minienv/compare/v0.2.1...v0.3.0) - 2026-09-18
 
 ### 🚀 Features
