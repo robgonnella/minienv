@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bb820e8e.js";
+            window.path_to_searchindex_js = "searchindex-5fb2b97d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -237,7 +237,7 @@ files are not supported.</p>
 <tbody>
 <tr><td><code>affinity</code></td><td>k8s schema</td><td>—</td><td>Passed through to the pod spec</td></tr>
 <tr><td><code>command</code></td><td>list of strings</td><td>compose <code>command</code></td><td>Container command</td></tr>
-<tr><td><a href="#configmapfrom"><code>configMapFrom</code></a></td><td>list of strings</td><td>—</td><td>Files, relative to the compose project directory, that become one ConfigMap named after the service</td></tr>
+<tr><td><a href="#configmapfrom"><code>configMapFrom</code></a></td><td>list of strings</td><td>—</td><td>Files, relative to the directory of the compose file that declares them, that become one ConfigMap named after the service</td></tr>
 <tr><td><code>deploymentTimeout</code></td><td>duration</td><td>inherits top level</td><td>Helm timeout for this service</td></tr>
 <tr><td><code>deploymentType</code></td><td><code>service</code> | <code>job</code></td><td><code>service</code></td><td>Deploy as a Deployment or a run-to-completion Job</td></tr>
 <tr><td><a href="#env"><code>env</code></a></td><td>k8s schema</td><td>—</td><td>Container env vars as <code>EnvVar</code> entries, merged over compose <code>environment</code> by <code>name</code></td></tr>
@@ -248,7 +248,7 @@ files are not supported.</p>
 <tr><td><code>image.tag</code></td><td>string</td><td>from compose <code>image</code></td><td>Image tag. <code>+git</code> expands to the short commit SHA</td></tr>
 <tr><td><code>imagePullSecrets[].name</code></td><td>string</td><td>—</td><td>Existing pull secret in the namespace. See <a href="./images-and-builds.html#private-registries">Private registries</a></td></tr>
 <tr><td><a href="#probes"><code>livenessProbe</code></a></td><td>k8s schema</td><td>from compose <code>healthcheck</code></td><td>Passed through to the container spec</td></tr>
-<tr><td><a href="#manifests"><code>manifests</code></a></td><td>list of strings</td><td>—</td><td>Paths, relative to the compose project directory, to extra manifests rendered into this service’s release</td></tr>
+<tr><td><a href="#manifests"><code>manifests</code></a></td><td>list of strings</td><td>—</td><td>Paths, relative to the directory of the compose file that declares them, to extra manifests rendered into this service’s release</td></tr>
 <tr><td><code>ngrok.port</code></td><td>integer</td><td>—</td><td>Container port to expose publicly — the <strong>container</strong> side of a compose mapping. Ignored for a job, a skipped service, and when <code>NGROK_AUTHTOKEN</code> is unset. See <a href="./exposing-services.html">Exposing Services</a></td></tr>
 <tr><td><code>ngrok.trafficPolicy</code></td><td>string</td><td>inherits top level</td><td>ngrok <code>on_http_request</code> policy</td></tr>
 <tr><td><code>ngrok.url</code></td><td>string</td><td>random</td><td>Reserved domain for a stable endpoint</td></tr>
@@ -333,6 +333,8 @@ a <code>volumes</code> entry, an Ingress, a PVC, a Traefik <code>IngressRoute</c
         - name: config
           mountPath: /etc/api
 </code></pre>
+<p>Two entries may not share a base name; a file may hold several resources
+separated by <code>---</code>.</p>
 <p>Each file is a Helm template. <code>.Values</code>, <code>.Release</code> and <code>.Chart</code> are in scope,
 alongside the chart’s <code>generated.name</code>, <code>generated.fullname</code>, <code>generated.chart</code>,
 <code>generated.labels</code>, <code>generated.selectorLabels</code> and
@@ -402,7 +404,7 @@ the check as a non-HTTP command, or set the probes yourself.</p>
 </thead>
 <tbody>
 <tr><td><a href="#copy"><code>copy[].containerPath</code></a></td><td>string</td><td>—</td><td>Absolute path inside the container to mount the copied path at</td></tr>
-<tr><td><a href="#copy"><code>copy[].hostPath</code></a></td><td>string</td><td>—</td><td>Path, relative to the compose project directory, of a file or directory to copy</td></tr>
+<tr><td><a href="#copy"><code>copy[].hostPath</code></a></td><td>string</td><td>—</td><td>Path, relative to the directory of the compose file that declares it, of a file or directory to copy</td></tr>
 <tr><td><code>image.platforms</code></td><td>list of strings</td><td><code>["linux/amd64"]</code></td><td>Platforms to build and push</td></tr>
 <tr><td><code>image.repository</code></td><td>string</td><td>from compose <code>image</code></td><td>Image repository</td></tr>
 <tr><td><code>image.tag</code></td><td>string</td><td>from compose <code>image</code></td><td>Image tag. <code>+git</code> expands to the short commit SHA</td></tr>
@@ -427,14 +429,17 @@ fixtures:</p>
         - hostPath: seed
           containerPath: /var/lib/seed
 </code></pre>
-<p>A directory is copied recursively. <code>hostPath</code> must stay inside the project — an
-absolute path, a path climbing out with <code>..</code>, and the project directory itself
-are all rejected. <code>containerPath</code> must be absolute, and two entries on one
-service cannot name the same one.</p>
+<p>A directory is copied recursively. <code>hostPath</code> is resolved against the directory
+of the compose file that declares it, so a service pulled in through <code>include</code>
+resolves its paths against its own file. It must stay inside that directory —
+an absolute path, a path climbing out with <code>..</code>, and the directory itself are
+all rejected. <code>containerPath</code> must be absolute, and two entries on one service
+cannot name the same one.</p>
 <p>The copied paths land under the deployment’s own directory on the remote host,
-each keeping the relative path it was declared with, so two files that share a
-base name stay apart. Two services naming the same <code>hostPath</code> share one copy. A
-service marked <code>skip</code> is not deployed, so nothing it declares is copied.</p>
+in a directory per service, each keeping the relative path it was declared
+with, so two files that share a base name stay apart and two services naming
+the same <code>hostPath</code> do not overwrite each other. A service marked <code>skip</code> is not
+deployed, so nothing it declares is copied.</p>
 <blockquote>
 <p><strong>The whole set is replaced on every deploy.</strong> An entry you remove or rename
 takes its remote copy with it on the next deploy, and <code>minienv destroy</code>
