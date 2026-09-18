@@ -1,3 +1,9 @@
+# [0.3.0](https://github.com/robgonnella/minienv/compare/v0.2.1...v0.3.0) - 2026-09-18
+
+### 🚀 Features
+
+- adds ability to configure removal of k8s namespace on destroy [_(2c1981c)_](https://github.com/robgonnella/minienv/commit/2c1981ca5c72ed6f8e1c62e87c89f460cc745364)
+
 # [0.2.1](https://github.com/robgonnella/minienv/compare/v0.2.0...v0.2.1) - 2026-09-17
 
 ### 🐛 Bug Fixes
