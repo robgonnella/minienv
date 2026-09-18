@@ -24,12 +24,13 @@ const ngrokReleaseName = "ngrok"
 
 // Chart file names and value keys the templates agree on.
 const (
-	nameKey            = "name"
 	valuesFile         = "values.yaml"
 	templatesDir       = "templates"
 	serviceAccountFile = "templates/serviceaccount.yaml"
 	deploymentFile     = "templates/deployment.yaml"
 	configMapFile      = "templates/configmap.yaml"
+	jobFile            = "templates/job.yaml"
+	secretFile         = "templates/secret.yaml"
 )
 
 // Manifests nest here so one named deployment.yaml cannot replace the
@@ -155,7 +156,8 @@ func (b *ChartBuilder) NgrokValues(
 
 	values["volumeMounts"] = []map[string]any{
 		{
-			nameKey:     config.NgrokConfigMapName,
+			//nolint:goconst
+			"name":      config.NgrokConfigMapName,
 			"mountPath": config.NgrokConfigVolMountPath,
 		},
 	}
@@ -163,7 +165,7 @@ func (b *ChartBuilder) NgrokValues(
 	values["envFrom"] = []map[string]any{
 		{
 			"secretRef": map[string]any{
-				nameKey: config.NgrokSecretName,
+				"name": config.NgrokSecretName,
 			},
 		},
 	}
@@ -225,9 +227,9 @@ func (b *ChartBuilder) jobChart(
 func ngrokVolumeValues() []map[string]any {
 	return []map[string]any{
 		{
-			nameKey: config.NgrokConfigMapName,
+			"name": config.NgrokConfigMapName,
 			"configMap": map[string]any{
-				nameKey: config.NgrokConfigMapName,
+				"name": config.NgrokConfigMapName,
 				"items": []map[string]any{
 					{
 						"key":  config.NgrokConfigKey,
@@ -409,7 +411,7 @@ func (b *ChartBuilder) jobFiles(
 			Data: []byte(serviceAccountTmpl),
 		},
 		{
-			Name: "templates/job.yaml",
+			Name: jobFile,
 			Data: []byte(jobTmpl),
 		},
 		{
@@ -440,7 +442,7 @@ func (b *ChartBuilder) ngrokFiles() []*helmloader.BufferedFile {
 			Data: []byte(ngrokConfigMapTmpl),
 		},
 		{
-			Name: "templates/secret.yaml",
+			Name: secretFile,
 			Data: []byte(helmNgrokSecretTmpl(b.ngrokAuthToken)),
 		},
 	})
