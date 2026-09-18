@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"path/filepath"
 	"strconv"
 
 	"github.com/compose-spec/compose-go/v2/types"
@@ -330,6 +331,46 @@ var _ = Describe("Helm", func() {
 
 			Expect(subject.InitProject(context.Background(), project)).
 				To(Succeed())
+		})
+	})
+
+	Describe("service directories", func() {
+		var (
+			project  config.ComposeProject
+			svcDir   string
+			declared config.ComposeService
+		)
+
+		BeforeEach(func() {
+			svcDir = GinkgoT().TempDir()
+			declared = config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
+			declared.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"manifests": []string{"k8s/missing.yaml"},
+				},
+			}
+			project = config.ComposeProject{
+				Name:     "test-project",
+				Services: types.Services{"hello": declared},
+			}
+		})
+
+		It("reads a service's files from the directory it is mapped to", func() {
+			subject = helm.New(helm.Options{
+				K8sExt:      k8sExt,
+				ServiceDirs: map[string]string{"hello": svcDir},
+				ImageClient: mockImage,
+				GitClient:   mockGit,
+			})
+
+			Expect(subject.InitProject(context.Background(), project)).To(Succeed())
+
+			err := subject.DeployService(context.Background(), declared)
+
+			Expect(err).To(MatchError(helm.ErrManifestRead))
+			Expect(err.Error()).To(ContainSubstring(
+				filepath.Join(svcDir, "k8s/missing.yaml"),
+			))
 		})
 	})
 

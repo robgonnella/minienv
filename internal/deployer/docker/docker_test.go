@@ -235,18 +235,19 @@ services:
 				Return(nil).
 				Maybe()
 
-			subject := docker.New(docker.Options{
-				DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
-				Transport:   mockTransport,
-				ImageClient: mockImage,
-			})
-
 			project := projectOnDiskWith(copyCompose, map[string]string{
 				"conf/app.yml":        "declared: yes",
 				"conf/worker.yml":     "declared: yes",
 				"nested/deep/app.yml": "declared: yes",
 			})
 			workDir = project.WorkingDir
+
+			subject := docker.New(docker.Options{
+				DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
+				ServiceDirs: map[string]string{"api": workDir, "worker": workDir},
+				Transport:   mockTransport,
+				ImageClient: mockImage,
+			})
 
 			Expect(subject.Init(context.Background(), project)).To(Succeed())
 
@@ -255,16 +256,16 @@ services:
 			copies = copied
 		})
 
-		It("mounts each declared path under the copies directory", func() {
+		It("mounts each declared path under the service's copies directory", func() {
 			Expect(rendered).To(ContainSubstring(
-				"source: " + remoteDir + "/copies/conf/app.yml",
+				"source: " + remoteDir + "/copies/api/conf/app.yml",
 			))
 			Expect(rendered).To(ContainSubstring("target: /etc/app/app.yml"))
 		})
 
 		It("keeps a nested path's directories apart", func() {
 			Expect(rendered).To(ContainSubstring(
-				"source: " + remoteDir + "/copies/nested/deep/app.yml",
+				"source: " + remoteDir + "/copies/api/nested/deep/app.yml",
 			))
 		})
 
@@ -275,11 +276,11 @@ services:
 		It("copies each declared path from the project directory", func() {
 			Expect(copies).To(HaveKeyWithValue(
 				filepath.Join(workDir, "conf/app.yml"),
-				remoteDir+"/copies/conf/app.yml",
+				remoteDir+"/copies/api/conf/app.yml",
 			))
 			Expect(copies).To(HaveKeyWithValue(
 				filepath.Join(workDir, "nested/deep/app.yml"),
-				remoteDir+"/copies/nested/deep/app.yml",
+				remoteDir+"/copies/api/nested/deep/app.yml",
 			))
 		})
 
@@ -288,6 +289,81 @@ services:
 				filepath.Join(workDir, "conf/worker.yml"),
 			))
 			Expect(rendered).ToNot(ContainSubstring("/etc/worker.yml"))
+		})
+	})
+
+	Describe("copy paths of a service mapped to its own directory", func() {
+		const copyCompose = `
+name: test-project
+services:
+  api:
+    image: repo/api:v1
+    x-minienv-docker-service:
+      copy:
+        - hostPath: conf/app.yml
+          containerPath: /etc/app/app.yml
+  db:
+    image: repo/db:v1
+    x-minienv-docker-service:
+      copy:
+        - hostPath: conf/app.yml
+          containerPath: /etc/db/app.yml
+`
+
+		var (
+			rendered string
+			copies   copiedPaths
+			apiDir   string
+			dbDir    string
+		)
+
+		BeforeEach(func() {
+			mockTransport := transportmocks.NewMockClient(GinkgoT())
+			mockImage := imagemocks.NewMockClient(GinkgoT())
+
+			mockImage.
+				EXPECT().
+				BuildAndPush(mock.Anything, mock.Anything).
+				Return(nil).
+				Maybe()
+
+			apiDir = GinkgoT().TempDir()
+			dbDir = GinkgoT().TempDir()
+
+			subject := docker.New(docker.Options{
+				DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
+				ServiceDirs: map[string]string{"api": apiDir, "db": dbDir},
+				Transport:   mockTransport,
+				ImageClient: mockImage,
+			})
+
+			project := projectOnDiskWith(copyCompose, nil)
+
+			Expect(subject.Init(context.Background(), project)).To(Succeed())
+
+			files, copied := captureDeployAndCopies(subject, mockTransport)
+			rendered = files.get("compose.yml")
+			copies = copied
+		})
+
+		It("copies each service's path from its own directory", func() {
+			Expect(copies).To(HaveKeyWithValue(
+				filepath.Join(apiDir, "conf/app.yml"),
+				remoteDir+"/copies/api/conf/app.yml",
+			))
+			Expect(copies).To(HaveKeyWithValue(
+				filepath.Join(dbDir, "conf/app.yml"),
+				remoteDir+"/copies/db/conf/app.yml",
+			))
+		})
+
+		It("keeps two services' identical hostPaths apart on the remote", func() {
+			Expect(rendered).To(ContainSubstring(
+				"source: " + remoteDir + "/copies/api/conf/app.yml",
+			))
+			Expect(rendered).To(ContainSubstring(
+				"source: " + remoteDir + "/copies/db/conf/app.yml",
+			))
 		})
 	})
 

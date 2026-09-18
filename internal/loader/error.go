@@ -13,4 +13,8 @@ const (
 	ErrNoActiveDeployer         errs.Kind = "loader.no_active_deployer"
 	ErrMultipleDockerTransports errs.Kind = "loader.multiple_docker_transports"
 	ErrNoActiveDockerTransport  errs.Kind = "loader.no_active_docker_transport"
+	ErrIncludeModel             errs.Kind = "loader.include_model"
+	ErrIncludeDecode            errs.Kind = "loader.include_decode"
+	ErrIncludeCycle             errs.Kind = "loader.include_cycle"
+	ErrServiceDirMissing        errs.Kind = "loader.service_dir_missing"
 )

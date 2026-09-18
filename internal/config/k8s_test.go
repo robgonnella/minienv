@@ -816,6 +816,21 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			Entry("a path climbing out after cleaning", "k8s/../../cm.yaml"),
 		)
 
+		It("rejects two files sharing a base name", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"manifests": []any{
+						"k8s/configmap.yaml",
+						"other/configmap.yaml",
+					},
+				},
+			}
+
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(config.ErrManifestPath))
+		})
+
 		// These name chart files rather than chart values, so leaking one into
 		// the values map would put an unknown key in front of every template.
 		It("keeps them out of the chart values", func() {

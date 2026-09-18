@@ -48,7 +48,7 @@ Under `services.<name>`. All fields are optional.
 | --------------------------------- | ----------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `affinity`                        | k8s schema              | —                            | Passed through to the pod spec                                                                                                                                                                              |
 | `command`                         | list of strings         | compose `command`            | Container command                                                                                                                                                                                           |
-| [`configMapFrom`](#configmapfrom) | list of strings         | —                            | Files, relative to the compose project directory, that become one ConfigMap named after the service                                                                                                         |
+| [`configMapFrom`](#configmapfrom) | list of strings         | —                            | Files, relative to the directory of the compose file that declares them, that become one ConfigMap named after the service                                                                                  |
 | `deploymentTimeout`               | duration                | inherits top level           | Helm timeout for this service                                                                                                                                                                               |
 | `deploymentType`                  | `service` \| `job`      | `service`                    | Deploy as a Deployment or a run-to-completion Job                                                                                                                                                           |
 | [`env`](#env)                     | k8s schema              | —                            | Container env vars as `EnvVar` entries, merged over compose `environment` by `name`                                                                                                                         |
@@ -59,7 +59,7 @@ Under `services.<name>`. All fields are optional.
 | `image.tag`                       | string                  | from compose `image`         | Image tag. `+git` expands to the short commit SHA                                                                                                                                                           |
 | `imagePullSecrets[].name`         | string                  | —                            | Existing pull secret in the namespace. See [Private registries](./images-and-builds.md#private-registries)                                                                                                  |
 | [`livenessProbe`](#probes)        | k8s schema              | from compose `healthcheck`   | Passed through to the container spec                                                                                                                                                                        |
-| [`manifests`](#manifests)         | list of strings         | —                            | Paths, relative to the compose project directory, to extra manifests rendered into this service's release                                                                                                   |
+| [`manifests`](#manifests)         | list of strings         | —                            | Paths, relative to the directory of the compose file that declares them, to extra manifests rendered into this service's release                                                                            |
 | `ngrok.port`                      | integer                 | —                            | Container port to expose publicly — the **container** side of a compose mapping. Ignored for a job, a skipped service, and when `NGROK_AUTHTOKEN` is unset. See [Exposing Services](./exposing-services.md) |
 | `ngrok.trafficPolicy`             | string                  | inherits top level           | ngrok `on_http_request` policy                                                                                                                                                                              |
 | `ngrok.url`                       | string                  | random                       | Reserved domain for a stable endpoint                                                                                                                                                                       |
@@ -156,6 +156,9 @@ services:
           mountPath: /etc/api
 ```
 
+Two entries may not share a base name; a file may hold several resources
+separated by `---`.
+
 Each file is a Helm template. `.Values`, `.Release` and `.Chart` are in scope,
 alongside the chart's `generated.name`, `generated.fullname`, `generated.chart`,
 `generated.labels`, `generated.selectorLabels` and
@@ -228,7 +231,7 @@ Under `services.<name>`. All fields are optional.
 | Field                           | Type            | Default              | Description                                                                                                                                                                                         |
 | ------------------------------- | --------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`copy[].containerPath`](#copy) | string          | —                    | Absolute path inside the container to mount the copied path at                                                                                                                                      |
-| [`copy[].hostPath`](#copy)      | string          | —                    | Path, relative to the compose project directory, of a file or directory to copy                                                                                                                     |
+| [`copy[].hostPath`](#copy)      | string          | —                    | Path, relative to the directory of the compose file that declares it, of a file or directory to copy                                                                                                |
 | `image.platforms`               | list of strings | `["linux/amd64"]`    | Platforms to build and push                                                                                                                                                                         |
 | `image.repository`              | string          | from compose `image` | Image repository                                                                                                                                                                                    |
 | `image.tag`                     | string          | from compose `image` | Image tag. `+git` expands to the short commit SHA                                                                                                                                                   |
@@ -255,15 +258,18 @@ services:
           containerPath: /var/lib/seed
 ```
 
-A directory is copied recursively. `hostPath` must stay inside the project — an
-absolute path, a path climbing out with `..`, and the project directory itself
-are all rejected. `containerPath` must be absolute, and two entries on one
-service cannot name the same one.
+A directory is copied recursively. `hostPath` is resolved against the directory
+of the compose file that declares it, so a service pulled in through `include`
+resolves its paths against its own file. It must stay inside that directory —
+an absolute path, a path climbing out with `..`, and the directory itself are
+all rejected. `containerPath` must be absolute, and two entries on one service
+cannot name the same one.
 
 The copied paths land under the deployment's own directory on the remote host,
-each keeping the relative path it was declared with, so two files that share a
-base name stay apart. Two services naming the same `hostPath` share one copy. A
-service marked `skip` is not deployed, so nothing it declares is copied.
+in a directory per service, each keeping the relative path it was declared
+with, so two files that share a base name stay apart and two services naming
+the same `hostPath` do not overwrite each other. A service marked `skip` is not
+deployed, so nothing it declares is copied.
 
 > **The whole set is replaced on every deploy.** An entry you remove or rename
 > takes its remote copy with it on the next deploy, and `minienv destroy`

@@ -50,7 +50,12 @@ func (l *Loader) LoadCore(ctx context.Context) (*core.Core, error) {
 		return nil, err
 	}
 
-	deployer, err := l.loadActiveDeployer(ext)
+	serviceDirs, err := l.loadServiceDirs(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+
+	deployer, err := l.loadActiveDeployer(ext, serviceDirs)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +98,37 @@ func (l *Loader) loadComposeProject(
 	return project, nil
 }
 
+// compose merges included files and drops which one declared each service.
+// Extension paths resolve against that file, so the walk recovers it.
+func (l *Loader) loadServiceDirs(
+	ctx context.Context,
+	project *config.ComposeProject,
+) (deployer.ServiceDirs, error) {
+	walk := newServiceDirWalk(project.Name)
+
+	if err := walk.visit(
+		ctx,
+		project.ComposeFiles,
+		project.WorkingDir,
+		project.Environment,
+		nil,
+	); err != nil {
+		return nil, err
+	}
+
+	for name := range project.Services {
+		if _, ok := walk.dirs[name]; !ok {
+			return nil, errs.Errorf(
+				ErrServiceDirMissing,
+				"failed to find the compose file declaring service %s",
+				name,
+			)
+		}
+	}
+
+	return walk.dirs, nil
+}
+
 func (l *Loader) loadMainExtensionConfig(
 	project *config.ComposeProject,
 ) (*config.XMiniEnv, error) {
@@ -126,6 +162,7 @@ func (l *Loader) loadMainExtensionConfig(
 // would complain about first.
 func (l *Loader) loadActiveDeployer(
 	ext *config.XMiniEnv,
+	serviceDirs deployer.ServiceDirs,
 ) (deployer.Deployer, error) {
 	configured := 0
 
@@ -150,6 +187,7 @@ func (l *Loader) loadActiveDeployer(
 	case ext.K8s != nil:
 		return helm.New(helm.Options{
 			K8sExt:         *ext.K8s,
+			ServiceDirs:    serviceDirs,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,
 			PublishClient:  l.opts.PublishClient,
@@ -165,6 +203,7 @@ func (l *Loader) loadActiveDeployer(
 
 		return docker.New(docker.Options{
 			DockerExt:      *ext.Docker,
+			ServiceDirs:    serviceDirs,
 			Transport:      transport,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,

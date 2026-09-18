@@ -5,7 +5,6 @@ import (
 	goos "os"
 
 	"github.com/robgonnella/minienv/internal/core"
-	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
 	"github.com/robgonnella/minienv/internal/loader"
@@ -110,21 +109,5 @@ func loadProject(
 		return nil, err
 	}
 
-	minienv, err := loader.New(loaderOpts).LoadCore(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Standing in the project directory is what makes an x-minienv path resolve
-	// the way compose resolves build contexts and env files.
-	if err := goos.Chdir(minienv.WorkingDir()); err != nil {
-		return nil, errs.Errorf(
-			ErrWorkingDir,
-			"failed to enter the project directory %s: %w",
-			minienv.WorkingDir(),
-			err,
-		)
-	}
-
-	return minienv, nil
+	return loader.New(loaderOpts).LoadCore(ctx)
 }

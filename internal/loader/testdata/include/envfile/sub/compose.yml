@@ -1,0 +1,6 @@
+include:
+  - ${DEEPER}/compose.yml
+
+services:
+  sub:
+    image: reg/sub:v1

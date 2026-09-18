@@ -1,0 +1,3 @@
+services:
+  job:
+    image: reg/job:v1

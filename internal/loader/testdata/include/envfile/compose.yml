@@ -1,0 +1,12 @@
+x-minienv:
+  k8s:
+    context: test-context
+    namespace: test-namespace
+
+include:
+  - path: sub/compose.yml
+    env_file: sub/vars.env
+
+services:
+  web:
+    image: reg/web:v1

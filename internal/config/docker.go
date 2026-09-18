@@ -55,7 +55,7 @@ func (x *XMiniEnvDockerTransport) ConfigFields() []string {
 // bind mounts are intentionally discarded making this config the override
 // escape hatch when needed.
 type XMiniEnvDockerCopy struct {
-	// The path, relative to the project directory, of the file or directory to be copied
+	// The path, relative to the directory of the compose file that declares it, of the file or directory to be copied
 	HostPath string `json:"hostPath" mapstructure:"hostPath"`
 	// The absolute path inside the container to mount the file or directory
 	ContainerPath string `json:"containerPath" mapstructure:"containerPath"`

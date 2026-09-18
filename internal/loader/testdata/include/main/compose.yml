@@ -1,0 +1,15 @@
+x-minienv:
+  k8s:
+    context: test-context
+    namespace: test-namespace
+
+include:
+  - ../other/compose.yml
+  - path: ../nested/compose.yml
+    project_directory: ../nested/base
+
+services:
+  web:
+    image: reg/web:v1
+    ports:
+      - "3000:8080"
