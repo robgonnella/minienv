@@ -221,7 +221,7 @@ func (d *Docker) Destroy(_ context.Context) error {
 	}
 
 	if d.dryRun {
-		log.Warn().Msg("dry-run mode: skipping destroy")
+		log.Warn().Msg("dry-run: skipping destroy")
 		return nil
 	}
 
@@ -347,7 +347,7 @@ func (d *Docker) writeRemoteFiles(content *remoteContent) error {
 // Paths only: the rendered compose file is fully interpolated by this point, so
 // its body carries whatever the project's own ${VAR}s resolved to.
 func (d *Docker) logRemoteFilesDryRun() {
-	log.Warn().Msg("dry-run mode: skipping deploy")
+	log.Warn().Msg("dry-run: skipping deploy")
 	log.
 		Warn().
 		Msgf("would have created compose config: %s", d.remotePaths.composeFile)

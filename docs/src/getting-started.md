@@ -70,11 +70,12 @@ minienv deploy --dry-run
 It is not entirely offline. Images are still built locally with `buildx` — they
 are simply not pushed.
 
-**Kubernetes.** The cluster is still contacted, read-only: reachability checks,
-API discovery, and reading existing release state. Nothing is applied.
+**Kubernetes.** The cluster is not contacted. Each release, the namespace, and
+its removal are logged as what would happen, and the kubeconfig context only
+has to exist.
 
-> **A `k8s` dry run needs a reachable cluster.** It changes nothing, but it is
-> not a way to check a config without one.
+> **A `k8s` dry run does not render the charts.** Files under `manifests` are
+> read, but a template error in one of them only shows up on a real deploy.
 
 **Docker.** Nothing remote happens at all. minienv logs the paths it would write
 and opens no SSH session.

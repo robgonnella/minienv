@@ -127,6 +127,8 @@ type XMiniEnvK8s struct {
 	Context string `json:"context" mapstructure:"context"`
 	// Targets a specific namespace when deploying
 	Namespace string `json:"namespace" mapstructure:"namespace"`
+	// Deletes the defined namespace on destroy. Default is false to prevent removing pre-configured namespaces
+	RemoveNamespaceOnDestroy bool `json:"removeNamespaceOnDestroy,omitempty" jsonschema:"default=false" mapstructure:"removeNamespaceOnDestroy,omitempty"`
 	// Controls the Helm timeout. This is applied to all services but can be
 	// overridden using the service-level extension
 	DeploymentTimeout string `json:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`

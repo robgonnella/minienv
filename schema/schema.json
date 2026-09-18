@@ -284,6 +284,11 @@
           "type": "string",
           "description": "Targets a specific namespace when deploying"
         },
+        "removeNamespaceOnDestroy": {
+          "type": "boolean",
+          "description": "Deletes the defined namespace on destroy. Default is false to prevent removing pre-configured namespaces",
+          "default": false
+        },
         "deploymentTimeout": {
           "type": "string",
           "description": "Controls the Helm timeout. This is applied to all services but can be\noverridden using the service-level extension"
