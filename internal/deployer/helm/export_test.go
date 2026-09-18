@@ -5,6 +5,7 @@ import (
 
 	"github.com/robgonnella/minienv/internal/config"
 	helmaction "helm.sh/helm/v3/pkg/action"
+	"k8s.io/client-go/kubernetes"
 )
 
 // SetActionConfig installs an in-process action config. Init only ever builds
@@ -12,6 +13,25 @@ import (
 // from a test binary.
 func (h *Helm) SetActionConfig(cfg *helmaction.Configuration) {
 	h.actionConfig = cfg
+}
+
+// SetKubernetesClientSet installs a clientset directly. The action config
+// otherwise derives one from a kubeconfig, so the namespace calls are
+// unreachable from a test binary without this.
+func (h *Helm) SetKubernetesClientSet(cs kubernetes.Interface) {
+	h.clientset = cs
+}
+
+// CreateNamespaceIfNotExists exposes the namespace step Deploy runs before
+// any release is touched.
+func (h *Helm) CreateNamespaceIfNotExists(ctx context.Context) error {
+	return h.createNamespaceIfNotExists(ctx)
+}
+
+// DestroyNamespace exposes the step Destroy runs last, and only when the
+// extension opts in.
+func (h *Helm) DestroyNamespace(ctx context.Context) error {
+	return h.destroyNamespace(ctx)
 }
 
 // UninstallChart exposes the per-release teardown step that both Destroy and

@@ -4,6 +4,7 @@ x-minienv:
   k8s:
     context: minikube
     namespace: $MINIENV_NAMESPACE
+    removeNamespaceOnDestroy: true
 
 services:
   hello:

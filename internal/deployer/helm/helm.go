@@ -24,6 +24,7 @@ import (
 	k8sv1 "k8s.io/api/core/v1"
 	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // bounds concurrent helm releases; each one waits on rollout.
@@ -62,6 +63,7 @@ type Helm struct {
 	ngrokAuthToken    string
 	helmDriver        string
 	dryRun            bool
+	clientset         kubernetes.Interface
 }
 
 func New(opts Options) *Helm {
@@ -157,7 +159,15 @@ func (h *Helm) Destroy(ctx context.Context) error {
 		return err
 	}
 
-	return h.uninstallNgrokChart(ctx)
+	if err := h.uninstallChart(ctx, ngrokReleaseName); err != nil {
+		return err
+	}
+
+	if h.k8sExt.RemoveNamespaceOnDestroy {
+		return h.destroyNamespace(ctx)
+	}
+
+	return nil
 }
 
 // PublishedServiceUrls returns an empty map rather than a nil one when nothing
@@ -436,6 +446,14 @@ func (h *Helm) installChart(
 	values map[string]any,
 	timeout time.Duration,
 ) error {
+	if h.dryRun {
+		log.Warn().
+			Str("chart", chart.Name()).
+			Msg("dry-run: would install chart")
+
+		return nil
+	}
+
 	client := helmaction.NewInstall(h.actionConfig)
 	client.ReleaseName = chart.Name()
 	client.Namespace = h.k8sExt.Namespace
@@ -472,6 +490,14 @@ func (h *Helm) upgradeChart(
 	timeout time.Duration,
 	restart bool,
 ) error {
+	if h.dryRun {
+		log.Warn().
+			Str("chart", chart.Name()).
+			Msg("dry-run: would upgrade chart")
+
+		return nil
+	}
+
 	client := helmaction.NewUpgrade(h.actionConfig)
 	client.Namespace = h.k8sExt.Namespace
 	client.Atomic = true
@@ -512,6 +538,12 @@ func (h *Helm) upgradeChart(
 }
 
 func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
+	if h.dryRun {
+		log.Warn().Str("chart", svcName).Msg("dry-run: would uninstall chart")
+
+		return nil
+	}
+
 	client := helmaction.NewUninstall(h.actionConfig)
 	client.Wait = true
 	client.IgnoreNotFound = true
@@ -546,22 +578,35 @@ func (h *Helm) uninstallChart(_ context.Context, svcName string) error {
 	return nil
 }
 
-func (h *Helm) createNamespaceIfNotExists(ctx context.Context) error {
-	if h.dryRun {
-		log.Warn().
-			Str("namespace", h.k8sExt.Namespace).
-			Msg("dry-run mode: skipping namespace creation")
-
-		return nil
+func (h *Helm) kubernetesClientSet() (kubernetes.Interface, error) {
+	if h.clientset != nil {
+		return h.clientset, nil
 	}
 
 	clientset, err := h.actionConfig.KubernetesClientSet()
 	if err != nil {
-		return errs.Errorf(
+		return nil, errs.Errorf(
 			ErrK8sNamespace,
 			"failed to build kubernetes client: %w",
 			err,
 		)
+	}
+
+	return clientset, nil
+}
+
+func (h *Helm) createNamespaceIfNotExists(ctx context.Context) error {
+	if h.dryRun {
+		log.Warn().
+			Str("namespace", h.k8sExt.Namespace).
+			Msg("dry-run: would create namespace if necessary")
+
+		return nil
+	}
+
+	clientset, err := h.kubernetesClientSet()
+	if err != nil {
+		return err
 	}
 
 	namespaces := clientset.CoreV1().Namespaces()
@@ -596,11 +641,53 @@ func (h *Helm) createNamespaceIfNotExists(ctx context.Context) error {
 	return nil
 }
 
+func (h *Helm) destroyNamespace(ctx context.Context) error {
+	if h.dryRun {
+		log.Warn().
+			Str("namespace", h.k8sExt.Namespace).
+			Msg("dry-run: would remove namespace")
+
+		return nil
+	}
+
+	clientset, err := h.kubernetesClientSet()
+	if err != nil {
+		return err
+	}
+
+	namespaces := clientset.CoreV1().Namespaces()
+
+	if err = namespaces.Delete(
+		ctx,
+		h.k8sExt.Namespace,
+		k8smetav1.DeleteOptions{},
+	); err != nil {
+		if k8s_errors.IsNotFound(err) {
+			log.Warn().
+				Str("namespace", h.k8sExt.Namespace).
+				Msg("destroy: namespace not found")
+
+			return nil
+		}
+
+		return errs.Errorf(
+			ErrK8sNamespace,
+			"failed to destroy namespace: %s: %w",
+			h.k8sExt.Namespace,
+			err,
+		)
+	}
+
+	log.Info().Str("namespace", h.k8sExt.Namespace).Msg("removed namespace")
+
+	return nil
+}
+
 // Deleting the last ngrok block has to uninstall the release, or it keeps
 // serving endpoints the project no longer declares.
 func (h *Helm) installNgrokChart(ctx context.Context) error {
 	if len(h.servicesToPublish) == 0 {
-		return h.uninstallNgrokChart(ctx)
+		return h.uninstallChart(ctx, ngrokReleaseName)
 	}
 
 	chart, err := h.chartBuilder.BuildNgrok()
@@ -619,13 +706,15 @@ func (h *Helm) installNgrokChart(ctx context.Context) error {
 	)
 }
 
-// Unconditional: the current ngrok config may no longer mention what was
-// installed, and uninstallChart tolerates a missing release.
-func (h *Helm) uninstallNgrokChart(ctx context.Context) error {
-	return h.uninstallChart(ctx, ngrokReleaseName)
-}
-
 func (h *Helm) serviceReleaseExists(name string) bool {
+	if h.dryRun {
+		log.Warn().
+			Str("release", name).
+			Msg("dry-run: would check if release exists: defaulting to false")
+
+		return false
+	}
+
 	client := helmaction.NewGet(h.actionConfig)
 	release, _ := client.Run(name)
 

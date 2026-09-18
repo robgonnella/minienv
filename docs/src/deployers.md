@@ -37,7 +37,10 @@ Once per namespace:
 | -------------------------------------------------------------- | ------------------------------- |
 | `ngrok` release: Deployment, ConfigMap, Secret, ServiceAccount | any service publishes via ngrok |
 
-The target namespace is created on deploy if it does not already exist.
+The target namespace is created on deploy if it does not already exist. On
+destroy it is left in place, unless `removeNamespaceOnDestroy` is `true` — then
+the whole namespace is deleted, including anything in it that minienv did not
+create.
 
 Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and

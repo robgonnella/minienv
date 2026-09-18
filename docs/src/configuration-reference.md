@@ -10,12 +10,13 @@ configuring more than one is an error.
 
 ### `k8s`
 
-| Field                     | Type     | Required | Default | Description                                                                       |
-| ------------------------- | -------- | -------- | ------- | --------------------------------------------------------------------------------- |
-| `k8s.context`             | string   | **yes**  | —       | Targets a specific cluster when deploying                                         |
-| `k8s.namespace`           | string   | **yes**  | —       | Targets a specific namespace when deploying                                       |
-| `k8s.deploymentTimeout`   | duration | no       | `60s`   | Helm timeout for all services; overridable per service                            |
-| `k8s.ngrok.trafficPolicy` | string   | no       | `""`    | ngrok `on_http_request` policy applied to every service that does not set its own |
+| Field                          | Type     | Required | Default | Description                                                                                                                              |
+| ------------------------------ | -------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `k8s.context`                  | string   | **yes**  | —       | Targets a specific cluster when deploying                                                                                                |
+| `k8s.namespace`                | string   | **yes**  | —       | Targets a specific namespace when deploying                                                                                              |
+| `k8s.removeNamespaceOnDestroy` | bool     | no       | `false` | Delete the namespace, and everything in it, on destroy. Off by default so a namespace that existed before the first deploy is left alone |
+| `k8s.deploymentTimeout`        | duration | no       | `60s`   | Helm timeout for all services; overridable per service                                                                                   |
+| `k8s.ngrok.trafficPolicy`      | string   | no       | `""`    | ngrok `on_http_request` policy applied to every service that does not set its own                                                        |
 
 ### `docker`
 
