@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/robgonnella/minienv/internal/config"
+	"github.com/robgonnella/minienv/internal/deployer"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
 	"github.com/robgonnella/minienv/internal/loader"
@@ -27,15 +28,30 @@ var _ = Describe("Loader", func() {
 
 	// ProjectDirectory is pinned to testdata so the repo's own .env cannot leak
 	// into these specs.
-	newLoader := func(files ...string) *loader.Loader {
+	newLoaderIn := func(dir string, files ...string) *loader.Loader {
 		return loader.New(&loader.LoaderOpts{
 			Files:            files,
-			ProjectDirectory: testdataDir,
+			ProjectDirectory: dir,
 			ProjectName:      "test-project",
 			DryRun:           true,
 			ImageClient:      mockImage,
 			GitClient:        mockGit,
 		})
+	}
+
+	newLoader := func(files ...string) *loader.Loader {
+		return newLoaderIn(testdataDir, files...)
+	}
+
+	absFixture := func(parts ...string) string {
+		GinkgoHelper()
+
+		abs, err := filepath.Abs(filepath.Join(
+			append([]string{testdataDir}, parts...)...,
+		))
+		Expect(err).ShouldNot(HaveOccurred())
+
+		return abs
 	}
 
 	BeforeEach(func() {
@@ -147,6 +163,121 @@ var _ = Describe("Loader", func() {
 			k8s := ext["k8s"].(map[string]any)
 
 			Expect(k8s["namespace"]).To(Equal("alice"))
+		})
+	})
+
+	Describe("service directories", func() {
+		includeDir := filepath.Join(testdataDir, "include")
+
+		serviceDirs := func(dir, file string) deployer.ServiceDirs {
+			GinkgoHelper()
+
+			subject := newLoaderIn(dir, file)
+
+			project, err := subject.LoadComposeProject(context.Background())
+			Expect(err).ShouldNot(HaveOccurred())
+
+			dirs, err := subject.LoadServiceDirs(context.Background(), project)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			return dirs
+		}
+
+		It("maps every service to the project directory without include", func() {
+			dirs := serviceDirs(testdataDir, fixture("valid.compose.yml"))
+
+			Expect(dirs).To(Equal(deployer.ServiceDirs{
+				"hello": absFixture(),
+			}))
+		})
+
+		Context("with included files", func() {
+			var dirs map[string]string
+
+			BeforeEach(func() {
+				dirs = serviceDirs(
+					filepath.Join(includeDir, "main"),
+					filepath.Join(includeDir, "main", "compose.yml"),
+				)
+			})
+
+			It("maps a top-level service to the project directory", func() {
+				Expect(dirs).To(HaveKeyWithValue(
+					"web", absFixture("include", "main"),
+				))
+			})
+
+			It("maps an included service to the included file's directory", func() {
+				Expect(dirs).To(HaveKeyWithValue(
+					"api", absFixture("include", "other"),
+				))
+			})
+
+			It("follows an include nested inside an included file", func() {
+				Expect(dirs).To(HaveKeyWithValue(
+					"worker", absFixture("include", "other", "deeper"),
+				))
+			})
+
+			It("honours an include's project_directory", func() {
+				Expect(dirs).To(HaveKeyWithValue(
+					"job", absFixture("include", "nested", "base"),
+				))
+			})
+
+			It("covers every service compose loaded", func() {
+				Expect(dirs).To(HaveLen(4))
+			})
+		})
+
+		It("attributes a service declared in both files to the includer", func() {
+			dirs := serviceDirs(
+				filepath.Join(includeDir, "override"),
+				filepath.Join(includeDir, "override", "compose.yml"),
+			)
+
+			Expect(dirs).To(HaveKeyWithValue(
+				"api", absFixture("include", "override"),
+			))
+			Expect(dirs).To(HaveKeyWithValue(
+				"worker", absFixture("include", "other", "deeper"),
+			))
+		})
+
+		It("interpolates an included file with the include's env_file", func() {
+			dirs := serviceDirs(
+				filepath.Join(includeDir, "envfile"),
+				filepath.Join(includeDir, "envfile", "compose.yml"),
+			)
+
+			Expect(dirs).To(Equal(deployer.ServiceDirs{
+				"web":  absFixture("include", "envfile"),
+				"sub":  absFixture("include", "envfile", "sub"),
+				"leaf": absFixture("include", "envfile", "sub", "deeper"),
+			}))
+		})
+
+		It("errors for a service the walk never saw", func() {
+			subject := newLoader(fixture("valid.compose.yml"))
+
+			project, err := subject.LoadComposeProject(context.Background())
+			Expect(err).ShouldNot(HaveOccurred())
+
+			project.Services["ghost"] = config.ComposeService{Name: "ghost"}
+
+			_, err = subject.LoadServiceDirs(context.Background(), project)
+
+			Expect(err).To(MatchError(loader.ErrServiceDirMissing))
+		})
+
+		It("builds a core from a project with included files", func() {
+			core, err := newLoaderIn(
+				filepath.Join(includeDir, "main"),
+				filepath.Join(includeDir, "main", "compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(core).ToNot(BeNil())
 		})
 	})
 })

@@ -44,10 +44,12 @@ type remoteContent struct {
 type serviceTuple struct {
 	compose   config.ComposeService
 	extension config.XMiniEnvDockerService
+	dir       string
 }
 
 type Options struct {
 	DockerExt      config.XMiniEnvDocker
+	ServiceDirs    deployer.ServiceDirs
 	Transport      transport.Client
 	ImageClient    image.Client
 	GitClient      git.Client
@@ -58,6 +60,7 @@ type Options struct {
 
 type Docker struct {
 	dockerExt         config.XMiniEnvDocker
+	serviceDirs       deployer.ServiceDirs
 	project           config.ComposeProject
 	services          map[string]serviceTuple
 	servicesToPublish []config.NgrokEndpointConfig
@@ -85,6 +88,7 @@ func New(opts Options) *Docker {
 
 	return &Docker{
 		dockerExt:      opts.DockerExt,
+		serviceDirs:    opts.ServiceDirs,
 		transport:      opts.Transport,
 		imageClient:    opts.ImageClient,
 		gitClient:      opts.GitClient,
@@ -128,7 +132,11 @@ func (d *Docker) Init(
 			return err
 		}
 
-		services[svc.Name] = serviceTuple{compose: svc, extension: *svcExt}
+		services[svc.Name] = serviceTuple{
+			compose:   svc,
+			extension: *svcExt,
+			dir:       d.serviceDirs.Dir(svc.Name),
+		}
 
 		// Port is zero unless ngrok is configured and usable.
 		if svcExt.Ngrok.Port != 0 {
@@ -359,8 +367,8 @@ func (d *Docker) logRemoteFilesDryRun() {
 				Str("service", name).
 				Msgf(
 					"would have copied %s to %s",
-					d.copyLocalPath(c),
-					d.copyRemotePath(c),
+					d.copyLocalPath(name, c),
+					d.copyRemotePath(name, c),
 				)
 		}
 	}
@@ -498,12 +506,21 @@ func (d *Docker) ngrokConfigContent() ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-func (d *Docker) copyLocalPath(c config.XMiniEnvDockerCopy) string {
-	return filepath.Join(d.project.WorkingDir, c.HostPath)
+func (d *Docker) copyLocalPath(
+	name string,
+	c config.XMiniEnvDockerCopy,
+) string {
+	return filepath.Join(d.services[name].dir, c.HostPath)
 }
 
-func (d *Docker) copyRemotePath(c config.XMiniEnvDockerCopy) string {
-	return d.remotePaths.copiesDir + "/" + filepath.ToSlash(c.HostPath)
+// Per service: two services may declare the same hostPath from different
+// directories.
+func (d *Docker) copyRemotePath(
+	name string,
+	c config.XMiniEnvDockerCopy,
+) string {
+	return d.remotePaths.copiesDir + "/" + name + "/" +
+		filepath.ToSlash(c.HostPath)
 }
 
 // Sorted: an unstable order rewrites compose.yml on an unchanged deploy.
@@ -532,7 +549,7 @@ func (d *Docker) bindCopies(project *config.ComposeProject) {
 			compose.BindVolume(
 				project,
 				name,
-				d.copyRemotePath(c),
+				d.copyRemotePath(name, c),
 				c.ContainerPath,
 			)
 		}
@@ -551,8 +568,8 @@ func (d *Docker) copyFiles() error {
 	for _, name := range d.copyableServices() {
 		for _, c := range d.services[name].extension.Copy {
 			if err := d.transport.CopyPath(
-				d.copyLocalPath(c),
-				d.copyRemotePath(c),
+				d.copyLocalPath(name, c),
+				d.copyRemotePath(name, c),
 			); err != nil {
 				return err
 			}

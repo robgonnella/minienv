@@ -281,25 +281,21 @@ func (b *ChartBuilder) loadManifests(
 
 	files := make([]*helmloader.BufferedFile, 0, len(manifests))
 
-	for _, declared := range manifests {
+	for _, p := range manifests {
 		// #nosec G304 -- validated as a project-relative path in config.
-		data, err := os.ReadFile(declared)
+		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, errs.Errorf(
 				ErrManifestRead,
 				"failed to read manifest %s: %w",
-				declared,
+				p,
 				err,
 			)
 		}
 
 		// path, not filepath: helm routes templates on a "/"-separated prefix.
 		files = append(files, &helmloader.BufferedFile{
-			Name: path.Join(
-				templatesDir,
-				manifestsDir,
-				filepath.ToSlash(declared),
-			),
+			Name: path.Join(templatesDir, manifestsDir, filepath.Base(p)),
 			Data: data,
 		})
 	}
@@ -316,14 +312,14 @@ func (b *ChartBuilder) loadConfigMapFiles(
 
 	files := make([]*helmloader.BufferedFile, 0, len(paths))
 
-	for _, declared := range paths {
+	for _, p := range paths {
 		// #nosec G304 -- validated as a project-relative path in config.
-		data, err := os.ReadFile(declared)
+		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, errs.Errorf(
 				ErrConfigMapFileRead,
 				"failed to read configMapFrom file %s: %w",
-				declared,
+				p,
 				err,
 			)
 		}
@@ -332,12 +328,12 @@ func (b *ChartBuilder) loadConfigMapFiles(
 			return nil, errs.Errorf(
 				ErrConfigMapFileEncoding,
 				"configMapFrom file %s is not UTF-8 text",
-				declared,
+				p,
 			)
 		}
 
 		files = append(files, &helmloader.BufferedFile{
-			Name: path.Join(configMapFilesDir, filepath.Base(declared)),
+			Name: path.Join(configMapFilesDir, filepath.Base(p)),
 			Data: data,
 		})
 	}

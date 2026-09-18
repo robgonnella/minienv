@@ -222,7 +222,7 @@
       "properties": {
         "hostPath": {
           "type": "string",
-          "description": "The path, relative to the project directory, of the file or directory to be copied"
+          "description": "The path, relative to the directory of the compose file that declares it, of the file or directory to be copied"
         },
         "containerPath": {
           "type": "string",
@@ -449,14 +449,14 @@
             "type": "string"
           },
           "type": "array",
-          "description": "Paths to Kubernetes manifest files, relative to the project directory, rendered as part of this service's chart"
+          "description": "Paths to Kubernetes manifest files, relative to the directory of the compose file that declares them, rendered as part of this service's chart"
         },
         "configMapFrom": {
           "items": {
             "type": "string"
           },
           "type": "array",
-          "description": "Paths to files, relative to the project directory, whose contents become this service's ConfigMap keyed by file name"
+          "description": "Paths to files, relative to the directory of the compose file that declares them, whose contents become this service's ConfigMap keyed by file name"
         }
       },
       "additionalProperties": false,

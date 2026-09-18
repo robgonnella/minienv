@@ -1,0 +1,9 @@
+include:
+  - deeper/compose.yml
+
+services:
+  api:
+    image: reg/api:v1
+    x-minienv-k8s-service:
+      manifests:
+        - k8s/configmap.yaml

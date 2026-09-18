@@ -8,6 +8,12 @@ import (
 	"github.com/robgonnella/minienv/internal/config"
 )
 
+type ServiceDirs map[string]string
+
+func (s ServiceDirs) Dir(name string) string {
+	return s[name]
+}
+
 type Deployer interface {
 	String() string
 	Init(ctx context.Context, project config.ComposeProject) error

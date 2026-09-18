@@ -157,9 +157,9 @@ type XMiniEnvK8sService struct {
 	DeploymentType K8sDeploymentType `json:"deploymentType,omitempty" jsonschema:"enum=service,enum=job,default=service" mapstructure:"deploymentType,omitempty"`
 	// Controls the Helm timeout for deploying the targeted service
 	DeploymentTimeout string `json:"deploymentTimeout,omitempty" mapstructure:"deploymentTimeout,omitempty"`
-	// Paths to Kubernetes manifest files, relative to the project directory, rendered as part of this service's chart
+	// Paths to Kubernetes manifest files, relative to the directory of the compose file that declares them, rendered as part of this service's chart
 	Manifests []string `json:"manifests,omitempty" mapstructure:"manifests,omitempty"`
-	// Paths to files, relative to the project directory, whose contents become this service's ConfigMap keyed by file name
+	// Paths to files, relative to the directory of the compose file that declares them, whose contents become this service's ConfigMap keyed by file name
 	ConfigMapFrom []string `json:"configMapFrom,omitempty" mapstructure:"configMapFrom,omitempty"`
 }
 
@@ -685,6 +685,8 @@ func (s *XMiniEnvK8sService) resolveDeploymentType() error {
 // A declared path names the chart file it becomes, so one climbing out of the
 // project has no name to take.
 func (s *XMiniEnvK8sService) resolveManifests() error {
+	names := map[string]bool{}
+
 	for i, declared := range s.Manifests {
 		cleaned := filepath.Clean(declared)
 
@@ -696,6 +698,17 @@ func (s *XMiniEnvK8sService) resolveManifests() error {
 			)
 		}
 
+		name := filepath.Base(cleaned)
+
+		if names[name] {
+			return errs.Errorf(
+				ErrManifestPath,
+				"manifest file name is already used by this service: %s",
+				name,
+			)
+		}
+
+		names[name] = true
 		s.Manifests[i] = cleaned
 	}
 

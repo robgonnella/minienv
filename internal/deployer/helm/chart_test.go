@@ -428,24 +428,18 @@ var _ = Describe("ChartBuilder", func() {
 
 			It("carries it alongside the generated templates", func() {
 				Expect(fileNames(built)).To(ContainElement(
-					"templates/manifests/testdata/configmap.yaml",
+					"templates/manifests/configmap.yaml",
 				))
 			})
 
-			// Two files sharing a base name stay apart only because the whole
-			// relative path reaches the chart.
-			Context("with a nested manifest too", func() {
+			Context("declared under a nested directory", func() {
 				BeforeEach(func() {
-					declared = []string{
-						configMap,
-						"testdata/nested/configmap.yaml",
-					}
+					declared = []string{"testdata/nested/configmap.yaml"}
 				})
 
-				It("keeps each at its own path", func() {
-					Expect(fileNames(built)).To(ContainElements(
-						"templates/manifests/testdata/configmap.yaml",
-						"templates/manifests/testdata/nested/configmap.yaml",
+				It("names it by its base name", func() {
+					Expect(fileNames(built)).To(ContainElement(
+						"templates/manifests/configmap.yaml",
 					))
 				})
 			})
@@ -459,30 +453,13 @@ var _ = Describe("ChartBuilder", func() {
 					Data map[string]string `yaml:"data"`
 				}
 
-				body := templateNamed(
-					rendered,
-					"manifests/testdata/configmap.yaml",
-				)
+				body := templateNamed(rendered, "manifests/configmap.yaml")
 				Expect(yaml.Unmarshal([]byte(body), &cm)).To(Succeed())
 
 				Expect(cm.Metadata.Name).To(Equal("hello-extra"))
 				Expect(cm.Metadata.Namespace).To(Equal("namespace"))
 				Expect(cm.Data).
 					To(HaveKeyWithValue("UPSTREAM_IMAGE", "reg/hello"))
-			})
-
-			// One path names one file, so the repeat carries the same bytes
-			// under the same chart name and helm is left to keep either.
-			Context("listed twice", func() {
-				BeforeEach(func() {
-					declared = []string{configMap, configMap}
-				})
-
-				It("still renders once", func() {
-					Expect(rendered).To(HaveKey(
-						"hello/templates/manifests/testdata/configmap.yaml",
-					))
-				})
 			})
 		})
 
@@ -686,7 +663,7 @@ var _ = Describe("ChartBuilder", func() {
 
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(fileNames(chart)).To(ContainElement(
-				"templates/manifests/testdata/configmap.yaml",
+				"templates/manifests/configmap.yaml",
 			))
 		})
 

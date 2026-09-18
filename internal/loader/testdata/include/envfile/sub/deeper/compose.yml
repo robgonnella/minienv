@@ -1,0 +1,3 @@
+services:
+  leaf:
+    image: reg/leaf:v1

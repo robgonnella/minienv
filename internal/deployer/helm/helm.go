@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -38,10 +39,12 @@ type deployFn func(ctx context.Context, svc config.ComposeService) error
 type serviceTuple struct {
 	compose   config.ComposeService
 	extension config.XMiniEnvK8sService
+	dir       string
 }
 
 type Options struct {
 	K8sExt         config.XMiniEnvK8s
+	ServiceDirs    deployer.ServiceDirs
 	ImageClient    image.Client
 	GitClient      git.Client
 	PublishClient  publishing.Client
@@ -52,6 +55,7 @@ type Options struct {
 
 type Helm struct {
 	k8sExt            config.XMiniEnvK8s
+	serviceDirs       deployer.ServiceDirs
 	project           config.ComposeProject
 	services          map[string]serviceTuple
 	servicesToPublish []config.NgrokEndpointConfig
@@ -69,6 +73,7 @@ type Helm struct {
 func New(opts Options) *Helm {
 	return &Helm{
 		k8sExt:         opts.K8sExt,
+		serviceDirs:    opts.ServiceDirs,
 		actionConfig:   nil,
 		imageClient:    opts.ImageClient,
 		gitClient:      opts.GitClient,
@@ -218,7 +223,11 @@ func (h *Helm) initProject(
 			return err
 		}
 
-		services[svc.Name] = serviceTuple{compose: svc, extension: *svcExt}
+		services[svc.Name] = serviceTuple{
+			compose:   svc,
+			extension: *svcExt,
+			dir:       h.serviceDirs.Dir(svc.Name),
+		}
 
 		// Port is zero unless ngrok is configured and usable.
 		if svcExt.Ngrok.Port != 0 {
@@ -259,6 +268,15 @@ func (h *Helm) initProject(
 	h.project = project
 
 	return nil
+}
+
+func joinAll(dir string, paths []string) []string {
+	joined := make([]string, 0, len(paths))
+	for _, p := range paths {
+		joined = append(joined, filepath.Join(dir, p))
+	}
+
+	return joined
 }
 
 func (h *Helm) k8sExtensionOptions(
@@ -316,8 +334,8 @@ func (h *Helm) deployService(
 	chart, err := h.chartBuilder.Build(
 		svc.Name,
 		internalService.extension.DeploymentType,
-		internalService.extension.Manifests,
-		internalService.extension.ConfigMapFrom,
+		joinAll(internalService.dir, internalService.extension.Manifests),
+		joinAll(internalService.dir, internalService.extension.ConfigMapFrom),
 	)
 	if err != nil {
 		return err

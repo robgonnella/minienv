@@ -1,0 +1,11 @@
+x-minienv:
+  k8s:
+    context: test-context
+    namespace: test-namespace
+
+include:
+  - ../other/compose.yml
+
+services:
+  api:
+    image: reg/api:v2
