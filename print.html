@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-60954e9e.js";
+            window.path_to_searchindex_js = "searchindex-bb820e8e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -297,11 +297,12 @@ services:
 </code></pre>
 <p>It is not entirely offline. Images are still built locally with <code>buildx</code> — they
 are simply not pushed.</p>
-<p><strong>Kubernetes.</strong> The cluster is still contacted, read-only: reachability checks,
-API discovery, and reading existing release state. Nothing is applied.</p>
+<p><strong>Kubernetes.</strong> The cluster is not contacted. Each release, the namespace, and
+its removal are logged as what would happen, and the kubeconfig context only
+has to exist.</p>
 <blockquote>
-<p><strong>A <code>k8s</code> dry run needs a reachable cluster.</strong> It changes nothing, but it is
-not a way to check a config without one.</p>
+<p><strong>A <code>k8s</code> dry run does not render the charts.</strong> Files under <code>manifests</code> are
+read, but a template error in one of them only shows up on a real deploy.</p>
 </blockquote>
 <p><strong>Docker.</strong> Nothing remote happens at all. minienv logs the paths it would write
 and opens no SSH session.</p>
@@ -796,6 +797,7 @@ configuring more than one is an error.</p>
 <tbody>
 <tr><td><code>k8s.context</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Targets a specific cluster when deploying</td></tr>
 <tr><td><code>k8s.namespace</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Targets a specific namespace when deploying</td></tr>
+<tr><td><code>k8s.removeNamespaceOnDestroy</code></td><td>bool</td><td>no</td><td><code>false</code></td><td>Delete the namespace, and everything in it, on destroy. Off by default so a namespace that existed before the first deploy is left alone</td></tr>
 <tr><td><code>k8s.deploymentTimeout</code></td><td>duration</td><td>no</td><td><code>60s</code></td><td>Helm timeout for all services; overridable per service</td></tr>
 <tr><td><code>k8s.ngrok.trafficPolicy</code></td><td>string</td><td>no</td><td><code>""</code></td><td>ngrok <code>on_http_request</code> policy applied to every service that does not set its own</td></tr>
 </tbody>
@@ -1088,7 +1090,10 @@ maintain in your repository.</p>
 </tbody>
 </table>
 </div>
-<p>The target namespace is created on deploy if it does not already exist.</p>
+<p>The target namespace is created on deploy if it does not already exist. On
+destroy it is left in place, unless <code>removeNamespaceOnDestroy</code> is <code>true</code> — then
+the whole namespace is deleted, including anything in it that minienv did not
+create.</p>
 <p>Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
 compose <code>environment</code> is rendered inline rather than into a ConfigMap or

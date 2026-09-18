@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-60954e9e.js";
+            window.path_to_searchindex_js = "searchindex-bb820e8e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -232,11 +232,12 @@ services:
 </code></pre>
 <p>It is not entirely offline. Images are still built locally with <code>buildx</code> — they
 are simply not pushed.</p>
-<p><strong>Kubernetes.</strong> The cluster is still contacted, read-only: reachability checks,
-API discovery, and reading existing release state. Nothing is applied.</p>
+<p><strong>Kubernetes.</strong> The cluster is not contacted. Each release, the namespace, and
+its removal are logged as what would happen, and the kubeconfig context only
+has to exist.</p>
 <blockquote>
-<p><strong>A <code>k8s</code> dry run needs a reachable cluster.</strong> It changes nothing, but it is
-not a way to check a config without one.</p>
+<p><strong>A <code>k8s</code> dry run does not render the charts.</strong> Files under <code>manifests</code> are
+read, but a template error in one of them only shows up on a real deploy.</p>
 </blockquote>
 <p><strong>Docker.</strong> Nothing remote happens at all. minienv logs the paths it would write
 and opens no SSH session.</p>

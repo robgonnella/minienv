@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-60954e9e.js";
+            window.path_to_searchindex_js = "searchindex-bb820e8e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -220,7 +220,10 @@ maintain in your repository.</p>
 </tbody>
 </table>
 </div>
-<p>The target namespace is created on deploy if it does not already exist.</p>
+<p>The target namespace is created on deploy if it does not already exist. On
+destroy it is left in place, unless <code>removeNamespaceOnDestroy</code> is <code>true</code> — then
+the whole namespace is deleted, including anything in it that minienv did not
+create.</p>
 <p>Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
 compose <code>environment</code> is rendered inline rather than into a ConfigMap or
