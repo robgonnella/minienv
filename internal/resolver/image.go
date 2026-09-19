@@ -1,4 +1,4 @@
-package config
+package resolver
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/robgonnella/minienv/internal/compose"
+	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 )
@@ -16,7 +18,7 @@ const defaultImagePlatform = "linux/amd64"
 // one run embeds the same sha.
 func expandGitTag(
 	ctx context.Context,
-	svcExtImage *ServiceImage,
+	svcExtImage *config.ServiceImage,
 	gitClient git.Client,
 ) error {
 	sha, err := gitClient.ShortSha(ctx)
@@ -61,8 +63,8 @@ func parseImageRef(ref string) (string, string, error) {
 
 func resolveServiceImage(
 	ctx context.Context,
-	svcExtImage *ServiceImage,
-	svc ComposeService,
+	svcExtImage *config.ServiceImage,
+	svc compose.Service,
 	gitClient git.Client,
 ) error {
 	svcImageRepo, svcImageTag, err := parseImageRef(svc.Image)
@@ -115,8 +117,8 @@ func resolveServiceImage(
 }
 
 func resolveNgrok(
-	topLevel *NgrokTopLevel,
-	serviceLevel *NgrokServiceLevel,
+	topLevel *config.NgrokTopLevel,
+	serviceLevel *config.NgrokServiceLevel,
 	containerPorts []uint16,
 	ngrokEnabled bool,
 ) error {

@@ -11,12 +11,14 @@ import (
 	"time"
 
 	composegraph "github.com/compose-spec/compose-go/v2/graph"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
 	"github.com/robgonnella/minienv/internal/publishing"
+	"github.com/robgonnella/minienv/internal/resolver"
 	"github.com/rs/zerolog/log"
 	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
@@ -34,18 +36,17 @@ const maxDeployConcurrency = 5
 const ngrokDeploymentTimeout = time.Minute
 
 // Injected so the dependency-ordered walk is drivable without a cluster.
-type deployFn func(ctx context.Context, svc config.ComposeService) error
+type deployFn func(ctx context.Context, svc compose.Service) error
 
 type serviceTuple struct {
-	compose   config.ComposeService
-	extension config.XMiniEnvK8sService
+	compose   compose.Service
+	extension resolver.K8sService
 	dir       string
 }
 
 type Options struct {
 	K8sExt         config.XMiniEnvK8s
-	ServiceDirs    deployer.ServiceDirs
-	HostEnv        deployer.HostEnv
+	Source         compose.Source
 	ImageClient    image.Client
 	GitClient      git.Client
 	PublishClient  publishing.Client
@@ -56,9 +57,8 @@ type Options struct {
 
 type Helm struct {
 	k8sExt            config.XMiniEnvK8s
-	serviceDirs       deployer.ServiceDirs
-	hostEnv           deployer.HostEnv
-	project           config.ComposeProject
+	source            compose.Source
+	project           compose.Project
 	services          map[string]serviceTuple
 	servicesToPublish []config.NgrokEndpointConfig
 	chartBuilder      *ChartBuilder
@@ -75,8 +75,7 @@ type Helm struct {
 func New(opts Options) *Helm {
 	return &Helm{
 		k8sExt:         opts.K8sExt,
-		serviceDirs:    opts.ServiceDirs,
-		hostEnv:        opts.HostEnv,
+		source:         opts.Source,
 		actionConfig:   nil,
 		imageClient:    opts.ImageClient,
 		gitClient:      opts.GitClient,
@@ -92,15 +91,27 @@ func (h *Helm) String() string {
 	return "Helm"
 }
 
-func (h *Helm) Init(
-	ctx context.Context,
-	project config.ComposeProject,
-) error {
+func (h *Helm) Init(ctx context.Context) error {
 	if err := h.validateExtension(); err != nil {
 		return err
 	}
 
-	if err := h.initProject(ctx, project); err != nil {
+	project, err := compose.Load(ctx, h.source)
+	if err != nil {
+		return err
+	}
+
+	dirs, err := compose.LoadServiceDirs(ctx, project)
+	if err != nil {
+		return err
+	}
+
+	raw, err := compose.LoadRawServices(ctx, project)
+	if err != nil {
+		return err
+	}
+
+	if err := h.initProject(ctx, *project, dirs, raw); err != nil {
 		return err
 	}
 
@@ -155,7 +166,7 @@ func (h *Helm) Destroy(ctx context.Context) error {
 
 	destroyService := func(
 		ctx context.Context,
-		svc config.ComposeService,
+		svc compose.Service,
 	) error {
 		return h.uninstallChart(ctx, svc.Name)
 	}
@@ -212,16 +223,21 @@ func (h *Helm) validateExtension() error {
 // than one service midway.
 func (h *Helm) initProject(
 	ctx context.Context,
-	project config.ComposeProject,
+	project compose.Project,
+	dirs compose.ServiceDirs,
+	raw compose.RawServices,
 ) error {
 	services := map[string]serviceTuple{}
 	servicesToPublish := []config.NgrokEndpointConfig{}
 
 	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvK8sService(
-			ctx,
-			h.k8sExtensionOptions(svc),
-		)
+		svcExt, err := resolver.NewK8sService(ctx, resolver.K8sServiceOptions{
+			K8sExt:       h.k8sExt,
+			Service:      svc,
+			Raw:          raw.Get(svc.Name),
+			GitClient:    h.gitClient,
+			NgrokEnabled: h.ngrokAuthToken != "",
+		})
 		if err != nil {
 			return err
 		}
@@ -229,7 +245,7 @@ func (h *Helm) initProject(
 		services[svc.Name] = serviceTuple{
 			compose:   svc,
 			extension: *svcExt,
-			dir:       h.serviceDirs.Dir(svc.Name),
+			dir:       dirs.Dir(svc.Name),
 		}
 
 		// Port is zero unless ngrok is configured and usable.
@@ -282,21 +298,9 @@ func joinAll(dir string, paths []string) []string {
 	return joined
 }
 
-func (h *Helm) k8sExtensionOptions(
-	svc config.ComposeService,
-) config.XMiniEnvK8sServiceOptions {
-	return config.XMiniEnvK8sServiceOptions{
-		K8sExt:       h.k8sExt,
-		Service:      svc,
-		GitClient:    h.gitClient,
-		NgrokEnabled: h.ngrokAuthToken != "",
-		HostEnvKeys:  h.hostEnv.Keys(svc.Name),
-	}
-}
-
 func (h *Helm) deployService(
 	ctx context.Context,
-	svc config.ComposeService,
+	svc compose.Service,
 ) error {
 	internalService, ok := h.services[svc.Name]
 	if !ok {
@@ -316,7 +320,7 @@ func (h *Helm) deployService(
 		return nil
 	}
 
-	values, err := internalService.extension.ToChartValuesMap()
+	values, err := internalService.extension.ChartValues()
 	if err != nil {
 		return err
 	}
@@ -390,7 +394,7 @@ func (h *Helm) deployInDependencyOrder(
 	if err := composegraph.InDependencyOrder(
 		ctx,
 		&h.project,
-		func(ctx context.Context, _ string, svc config.ComposeService) error {
+		func(ctx context.Context, _ string, svc compose.Service) error {
 			return deploy(ctx, svc)
 		},
 		composegraph.WithMaxConcurrency(maxDeployConcurrency),
@@ -416,7 +420,7 @@ func (h *Helm) destroyInReverseDependencyOrder(
 	if err := composegraph.InDependencyOrder(
 		ctx,
 		&h.project,
-		func(ctx context.Context, _ string, svc config.ComposeService) error {
+		func(ctx context.Context, _ string, svc compose.Service) error {
 			return uninstall(ctx, svc)
 		},
 		composegraph.InReverseOrder,

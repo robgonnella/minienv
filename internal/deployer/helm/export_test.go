@@ -3,7 +3,9 @@ package helm
 import (
 	"context"
 
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
+	"github.com/robgonnella/minienv/internal/resolver"
 	helmaction "helm.sh/helm/v3/pkg/action"
 	"k8s.io/client-go/kubernetes"
 )
@@ -40,27 +42,30 @@ func (h *Helm) UninstallChart(ctx context.Context, name string) error {
 	return h.uninstallChart(ctx, name)
 }
 
-// InitProject exposes the half of Init that needs no cluster. Init itself
+// InitProject exposes the half of Init that needs neither a compose file on
+// disk nor a cluster. Init itself loads the project from a Source and then
 // builds a helm action config against a live one, so this is the only way to
-// populate h.services in a test binary.
+// hand a spec-built project to the deployer and populate h.services.
 func (h *Helm) InitProject(
 	ctx context.Context,
-	project config.ComposeProject,
+	project compose.Project,
+	dirs compose.ServiceDirs,
+	raw compose.RawServices,
 ) error {
-	return h.initProject(ctx, project)
+	return h.initProject(ctx, project, dirs, raw)
 }
 
 // SetProject caches the project without resolving any extension. The walk's
 // fixtures are deliberately unresolvable, so they cannot go through
 // InitProject.
-func (h *Helm) SetProject(project config.ComposeProject) {
+func (h *Helm) SetProject(project compose.Project) {
 	h.project = project
 }
 
 // ServiceExtension exposes what initProject resolved for one service. The
 // per-service options only meet the extension inside initProject, so this is
 // the only place to assert that they arrived.
-func (h *Helm) ServiceExtension(name string) config.XMiniEnvK8sService {
+func (h *Helm) ServiceExtension(name string) resolver.K8sService {
 	return h.services[name].extension
 }
 
@@ -80,7 +85,7 @@ func (h *Helm) BuildAndPushServiceImages(ctx context.Context) error {
 // Deploy reaches the real step only after Init has built a cluster connection.
 func (h *Helm) DeployInDependencyOrder(
 	ctx context.Context,
-	deploy func(ctx context.Context, svc config.ComposeService) error,
+	deploy func(ctx context.Context, svc compose.Service) error,
 ) error {
 	return h.deployInDependencyOrder(ctx, deploy)
 }
@@ -88,7 +93,7 @@ func (h *Helm) DeployInDependencyOrder(
 // DestroyInReverseDependencyOrder is the teardown counterpart.
 func (h *Helm) DestroyInReverseDependencyOrder(
 	ctx context.Context,
-	uninstall func(ctx context.Context, svc config.ComposeService) error,
+	uninstall func(ctx context.Context, svc compose.Service) error,
 ) error {
 	return h.destroyInReverseDependencyOrder(ctx, uninstall)
 }
@@ -98,7 +103,7 @@ func (h *Helm) DestroyInReverseDependencyOrder(
 // reachable without a cluster.
 func (h *Helm) DeployService(
 	ctx context.Context,
-	svc config.ComposeService,
+	svc compose.Service,
 ) error {
 	return h.deployService(ctx, svc)
 }

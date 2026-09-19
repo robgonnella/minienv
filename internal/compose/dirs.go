@@ -1,9 +1,10 @@
-package loader
+package compose
 
 import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	composeloader "github.com/compose-spec/compose-go/v2/loader"
@@ -11,23 +12,97 @@ import (
 	"github.com/robgonnella/minienv/internal/errs"
 )
 
-type serviceDirWalk struct {
-	projectName string
-	visited     map[string]bool
-	dirs        map[string]string
-	rawEnv      map[string]any
+type ServiceDirs map[string]string
+
+func (s ServiceDirs) Dir(name string) string {
+	return s[name]
 }
 
-func newServiceDirWalk(projectName string) *serviceDirWalk {
-	return &serviceDirWalk{
-		projectName: projectName,
-		visited:     map[string]bool{},
-		dirs:        map[string]string{},
-		rawEnv:      map[string]any{},
+type RawService struct {
+	Environment any
+	Extensions  map[string]any
+}
+
+type RawServices map[string]RawService
+
+func (r RawServices) Get(name string) RawService {
+	return r[name]
+}
+
+const extensionPrefix = "x-"
+
+// LoadServiceDirs recovers which compose file declared each service: compose
+// merges included files and drops the directory context. This makes it
+// available again
+func LoadServiceDirs(
+	ctx context.Context,
+	project *Project,
+) (ServiceDirs, error) {
+	walk, err := walkServices(ctx, project, false)
+	if err != nil {
+		return nil, err
 	}
+
+	return walk.dirs, nil
 }
 
-func (w *serviceDirWalk) visit(
+func LoadRawServices(
+	ctx context.Context,
+	project *Project,
+) (RawServices, error) {
+	walk, err := walkServices(ctx, project, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return walk.raw, nil
+}
+
+type serviceWalk struct {
+	projectName string
+	withRaw     bool
+	visited     map[string]bool
+	dirs        ServiceDirs
+	raw         RawServices
+}
+
+func walkServices(
+	ctx context.Context,
+	project *Project,
+	withRaw bool,
+) (*serviceWalk, error) {
+	walk := &serviceWalk{
+		projectName: project.Name,
+		withRaw:     withRaw,
+		visited:     map[string]bool{},
+		dirs:        ServiceDirs{},
+		raw:         RawServices{},
+	}
+
+	if err := walk.visit(
+		ctx,
+		project.ComposeFiles,
+		project.WorkingDir,
+		project.Environment,
+		nil,
+	); err != nil {
+		return nil, err
+	}
+
+	for name := range project.Services {
+		if _, ok := walk.dirs[name]; !ok {
+			return nil, errs.Errorf(
+				ErrServiceDirMissing,
+				"failed to find the compose file declaring service %s",
+				name,
+			)
+		}
+	}
+
+	return walk, nil
+}
+
+func (w *serviceWalk) visit(
 	ctx context.Context,
 	files []string,
 	dir string,
@@ -59,9 +134,9 @@ func (w *serviceDirWalk) visit(
 		return err
 	}
 
-	w.claim(model, dir)
+	w.claimDirs(model, dir)
 
-	if err := w.claimRawEnv(ctx, files, dir); err != nil {
+	if err := w.claimRaw(ctx, files, dir); err != nil {
 		return err
 	}
 
@@ -92,7 +167,7 @@ func (w *serviceDirWalk) visit(
 
 // The includer is visited before its includes, and compose lets the includer
 // override on conflict, so the first claim wins.
-func (w *serviceDirWalk) claim(model map[string]any, dir string) {
+func (w *serviceWalk) claimDirs(model map[string]any, dir string) {
 	services, ok := model["services"].(map[string]any)
 	if !ok {
 		return
@@ -105,29 +180,27 @@ func (w *serviceDirWalk) claim(model map[string]any, dir string) {
 	}
 }
 
-func (w *serviceDirWalk) claimRawEnv(
+func (w *serviceWalk) claimRaw(
 	ctx context.Context,
 	files []string,
 	dir string,
 ) error {
-	raw, err := w.loadRawModel(ctx, files, dir)
+	if !w.withRaw {
+		return nil
+	}
+
+	model, err := w.loadRawModel(ctx, files, dir)
 	if err != nil {
 		return err
 	}
 
-	w.claimEnv(raw)
-
-	return nil
-}
-
-func (w *serviceDirWalk) claimEnv(model map[string]any) {
 	services, ok := model["services"].(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 
 	for name, svc := range services {
-		if _, claimed := w.rawEnv[name]; claimed {
+		if _, claimed := w.raw[name]; claimed {
 			continue
 		}
 
@@ -136,8 +209,25 @@ func (w *serviceDirWalk) claimEnv(model map[string]any) {
 			continue
 		}
 
-		w.rawEnv[name] = body["environment"]
+		w.raw[name] = RawService{
+			Environment: body["environment"],
+			Extensions:  extensionsOf(body),
+		}
 	}
+
+	return nil
+}
+
+func extensionsOf(body map[string]any) map[string]any {
+	extensions := map[string]any{}
+
+	for key, value := range body {
+		if strings.HasPrefix(key, extensionPrefix) {
+			extensions[key] = value
+		}
+	}
+
+	return extensions
 }
 
 // compose-go leaves include paths relative in the model, so they are joined
@@ -187,7 +277,7 @@ func absoluteTo(dir, path string) string {
 	return filepath.Join(dir, path)
 }
 
-func (w *serviceDirWalk) loadModel(
+func (w *serviceWalk) loadModel(
 	ctx context.Context,
 	files []string,
 	dir string,
@@ -236,7 +326,7 @@ func (w *serviceDirWalk) loadModel(
 	return model, nil
 }
 
-func (w *serviceDirWalk) loadRawModel(
+func (w *serviceWalk) loadRawModel(
 	ctx context.Context,
 	files []string,
 	dir string,
@@ -260,7 +350,7 @@ func (w *serviceDirWalk) loadRawModel(
 	)
 	if err != nil {
 		return nil, errs.Errorf(
-			ErrHostEnvModel,
+			ErrRawModel,
 			"failed to load uninterpolated compose file %s: %w",
 			files[0],
 			err,

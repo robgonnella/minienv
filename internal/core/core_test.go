@@ -9,7 +9,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/core"
 	deployermocks "github.com/robgonnella/minienv/internal/deployer/mocks"
 )
@@ -21,7 +20,6 @@ var errBoom = errors.New("boom")
 var _ = Describe("Core", func() {
 	var (
 		mockDeployer     *deployermocks.MockDeployer
-		project          config.ComposeProject
 		subject          *core.Core
 		testPublishedURL *url.URL
 	)
@@ -33,16 +31,15 @@ var _ = Describe("Core", func() {
 		testPublishedURL = publishedURL
 
 		mockDeployer = deployermocks.NewMockDeployer(GinkgoT())
-		project = config.ComposeProject{Name: "test-project"}
-		subject = core.New(project, mockDeployer)
+		subject = core.New(mockDeployer)
 
 		// Every Deploy/Destroy path logs the deployer name at least once.
 		mockDeployer.EXPECT().String().Return("MockDeployer").Maybe()
 	})
 
 	Describe("Deploy", func() {
-		It("initializes the deployer then deploys the loaded project", func() {
-			initCall := mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+		It("initializes the deployer then deploys", func() {
+			initCall := mockDeployer.EXPECT().Init(mock.Anything).Return(nil).Once()
 			deployCall := mockDeployer.
 				EXPECT().
 				Deploy(mock.Anything).
@@ -60,7 +57,7 @@ var _ = Describe("Core", func() {
 		})
 
 		It("prints nothing when no service is published", func() {
-			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything).Return(nil).Once()
 			mockDeployer.EXPECT().Deploy(mock.Anything).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
@@ -73,7 +70,7 @@ var _ = Describe("Core", func() {
 
 		// The environment is already up by this point.
 		It("succeeds when the published urls cannot be read", func() {
-			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything).Return(nil).Once()
 			mockDeployer.EXPECT().Deploy(mock.Anything).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
@@ -87,7 +84,7 @@ var _ = Describe("Core", func() {
 		It("returns a core error and never deploys when Init fails", func() {
 			mockDeployer.
 				EXPECT().
-				Init(mock.Anything, project).
+				Init(mock.Anything).
 				Return(errBoom).
 				Once()
 
@@ -99,7 +96,7 @@ var _ = Describe("Core", func() {
 		})
 
 		It("returns a core error when the deploy itself fails", func() {
-			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
 				Deploy(mock.Anything).
@@ -113,8 +110,8 @@ var _ = Describe("Core", func() {
 	})
 
 	Describe("Destroy", func() {
-		It("initializes the deployer then destroys the loaded project", func() {
-			initCall := mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+		It("initializes the deployer then destroys", func() {
+			initCall := mockDeployer.EXPECT().Init(mock.Anything).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
 				Destroy(mock.Anything).
@@ -128,7 +125,7 @@ var _ = Describe("Core", func() {
 		It("returns a core error and never destroys when Init fails", func() {
 			mockDeployer.
 				EXPECT().
-				Init(mock.Anything, project).
+				Init(mock.Anything).
 				Return(errBoom).
 				Once()
 
@@ -140,7 +137,7 @@ var _ = Describe("Core", func() {
 		})
 
 		It("returns a core error when the destroy itself fails", func() {
-			mockDeployer.EXPECT().Init(mock.Anything, project).Return(nil).Once()
+			mockDeployer.EXPECT().Init(mock.Anything).Return(nil).Once()
 			mockDeployer.
 				EXPECT().
 				Destroy(mock.Anything).

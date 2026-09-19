@@ -11,6 +11,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer/helm"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
@@ -22,7 +23,7 @@ var errStep = errors.New("step blew up")
 
 // Required matters: compose-go silently drops a dependency that is both
 // unknown and not required, so an optional one would never reach that branch.
-func dependent(name string, deps ...string) config.ComposeService {
+func dependent(name string, deps ...string) compose.Service {
 	dependsOn := types.DependsOnConfig{}
 
 	for _, dep := range deps {
@@ -32,7 +33,7 @@ func dependent(name string, deps ...string) config.ComposeService {
 		}
 	}
 
-	return config.ComposeService{Name: name, DependsOn: dependsOn}
+	return compose.Service{Name: name, DependsOn: dependsOn}
 }
 
 // recorder logs the order the walk visited services in. The walk runs services
@@ -54,7 +55,7 @@ func newRecorder(cancel context.CancelFunc) *recorder {
 	}
 }
 
-func (r *recorder) visit(_ context.Context, svc config.ComposeService) error {
+func (r *recorder) visit(_ context.Context, svc compose.Service) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -104,13 +105,13 @@ var _ = Describe("Helm", func() {
 
 	Describe("deployInDependencyOrder", func() {
 		var (
-			project config.ComposeProject
+			project compose.Project
 			rec     *recorder
 		)
 
 		BeforeEach(func() {
 			_, cancel := context.WithCancel(context.Background())
-			project = config.ComposeProject{Name: "test-project"}
+			project = compose.Project{Name: "test-project"}
 			rec = newRecorder(cancel)
 		})
 
@@ -180,7 +181,7 @@ var _ = Describe("Helm", func() {
 				bothIn   = make(chan struct{})
 			)
 
-			deploy := func(ctx context.Context, _ config.ComposeService) error {
+			deploy := func(ctx context.Context, _ compose.Service) error {
 				mu.Lock()
 
 				inFlight++
@@ -271,14 +272,14 @@ var _ = Describe("Helm", func() {
 
 	Describe("destroyInReverseDependencyOrder", func() {
 		var (
-			project config.ComposeProject
+			project compose.Project
 			rec     *recorder
 		)
 
 		BeforeEach(func() {
 			_, cancel := context.WithCancel(context.Background())
 			rec = newRecorder(cancel)
-			project = config.ComposeProject{
+			project = compose.Project{
 				Name: "test-project",
 				Services: types.Services{
 					"api":   dependent("api", "cache"),
@@ -325,15 +326,15 @@ var _ = Describe("Helm", func() {
 	Describe("deployService", func() {
 		It("omits a service flagged skip", func() {
 			ctx := context.Background()
-			svc := config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
+			svc := compose.Service{Name: "hello", Image: "reg/hello:v1"}
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{"skip": true},
 			}
 
-			Expect(subject.InitProject(context.Background(), config.ComposeProject{
+			Expect(subject.InitProject(context.Background(), compose.Project{
 				Name:     "test-project",
 				Services: types.Services{"hello": svc},
-			})).To(Succeed())
+			}, nil, nil)).To(Succeed())
 
 			// mockImage and mockGit carry no EXPECT(), so reaching any client
 			// fails this spec on cleanup — as would reaching helm, since Init was
@@ -346,11 +347,11 @@ var _ = Describe("Helm", func() {
 		It("errors for a service that was never resolved by Init", func() {
 			ctx := context.Background()
 
-			Expect(subject.InitProject(context.Background(), config.ComposeProject{
+			Expect(subject.InitProject(context.Background(), compose.Project{
 				Name: "test-project",
-			})).To(Succeed())
+			}, nil, nil)).To(Succeed())
 
-			err := subject.DeployService(ctx, config.ComposeService{Name: "hello"})
+			err := subject.DeployService(ctx, compose.Service{Name: "hello"})
 
 			Expect(err).To(MatchError(helm.ErrMissingService))
 		})

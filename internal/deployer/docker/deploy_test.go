@@ -14,12 +14,14 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer/docker"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	"github.com/robgonnella/minienv/internal/image"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
 	publishingmocks "github.com/robgonnella/minienv/internal/publishing/mocks"
+	"github.com/robgonnella/minienv/internal/resolver"
 	transportmocks "github.com/robgonnella/minienv/internal/transport/mocks"
 	"github.com/stretchr/testify/mock"
 )
@@ -40,8 +42,8 @@ const testAuthToken = "2abcTESTTOKENvalue_do_not_log"
 func exposedService(
 	name string,
 	containerPort, publishedPort int,
-) config.ComposeService {
-	return config.ComposeService{
+) compose.Service {
+	return compose.Service{
 		Name:  name,
 		Image: "reg/" + name + ":v1",
 		Ports: []types.ServicePortConfig{
@@ -59,17 +61,26 @@ func exposedService(
 }
 
 // Deploy reloads from disk, so specs reaching it need real files.
-func projectOnDisk(content string) config.ComposeProject {
+func projectOnDisk(content string) compose.Project {
 	GinkgoHelper()
 
 	return projectOnDiskWith(content, nil)
+}
+
+// Init loads from a Source rather than taking a project, so the one spec
+// driving it end to end points at the same files projectOnDisk wrote.
+func sourceOf(project compose.Project) compose.Source {
+	return compose.Source{
+		Files:            project.ComposeFiles,
+		ProjectDirectory: project.WorkingDir,
+	}
 }
 
 // Keys are project-relative, written alongside the compose file.
 func projectOnDiskWith(
 	content string,
 	files map[string]string,
-) config.ComposeProject {
+) compose.Project {
 	GinkgoHelper()
 
 	dir := GinkgoT().TempDir()
@@ -208,7 +219,7 @@ var _ = Describe("Docker deploy", func() {
 	})
 
 	Describe("which side of a port mapping ngrok.port names", func() {
-		var svc config.ComposeService
+		var svc compose.Service
 
 		BeforeEach(func() {
 			ngrokToken = testAuthToken
@@ -220,10 +231,10 @@ var _ = Describe("Docker deploy", func() {
 				"ngrok": map[string]any{"port": port},
 			}
 
-			return subject.Init(context.Background(), config.ComposeProject{
+			return subject.InitProject(context.Background(), compose.Project{
 				Name:     "test-project",
 				Services: types.Services{"alpha": svc},
-			})
+			}, nil)
 		}
 
 		It("accepts the container side", func() {
@@ -232,16 +243,16 @@ var _ = Describe("Docker deploy", func() {
 
 		It("rejects the published side", func() {
 			Expect(initWithNgrokPort(8080)).
-				To(MatchError(config.ErrNgrokPortMismatch))
+				To(MatchError(resolver.ErrNgrokPortMismatch))
 		})
 	})
 
 	Describe("PublishedServiceUrls", func() {
-		var project config.ComposeProject
+		var project compose.Project
 
 		BeforeEach(func() {
 			ngrokToken = testAuthToken
-			project = config.ComposeProject{
+			project = compose.Project{
 				Name: "test-project",
 				Services: types.Services{
 					"alpha": exposedService("alpha", 8080, 8080),
@@ -250,7 +261,8 @@ var _ = Describe("Docker deploy", func() {
 		})
 
 		JustBeforeEach(func() {
-			Expect(subject.Init(context.Background(), project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project, nil)).
+				To(Succeed())
 		})
 
 		It("asks only about the endpoints it exposed", func() {
@@ -292,7 +304,7 @@ var _ = Describe("Docker deploy", func() {
 	})
 
 	Describe("building images", func() {
-		var project config.ComposeProject
+		var project compose.Project
 
 		BeforeEach(func() {
 			project = projectOnDisk(`
@@ -307,7 +319,8 @@ services:
 		})
 
 		JustBeforeEach(func() {
-			Expect(subject.Init(context.Background(), project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project, nil)).
+				To(Succeed())
 		})
 
 		It("translates a buildable service into image properties", func() {
@@ -402,7 +415,7 @@ services:
 	})
 
 	Describe("Deploy", func() {
-		var project config.ComposeProject
+		var project compose.Project
 
 		BeforeEach(func() {
 			project = projectOnDisk(`
@@ -419,7 +432,8 @@ services:
 		})
 
 		JustBeforeEach(func() {
-			Expect(subject.Init(context.Background(), project)).To(Succeed())
+			Expect(subject.InitProject(context.Background(), project, nil)).
+				To(Succeed())
 		})
 
 		Context("with nothing to publish", func() {
@@ -540,7 +554,7 @@ services:
 				ImageClient: mockImage,
 			})
 
-			Expect(subject.Init(context.Background(), projectOnDiskWith(`
+			Expect(subject.InitProject(context.Background(), projectOnDiskWith(`
 name: test-project
 services:
   api:
@@ -549,7 +563,7 @@ services:
       copy:
         - hostPath: conf/app.yml
           containerPath: /etc/app.yml
-`, map[string]string{"conf/app.yml": "declared: yes"}))).To(Succeed())
+`, map[string]string{"conf/app.yml": "declared: yes"}), nil)).To(Succeed())
 
 			var issued []string
 
@@ -595,7 +609,7 @@ services:
 					DryRun:      true,
 				})
 
-				Expect(subject.Init(context.Background(), projectOnDiskWith(`
+				Expect(subject.InitProject(context.Background(), projectOnDiskWith(`
 name: test-project
 services:
   api:
@@ -604,7 +618,7 @@ services:
       copy:
         - hostPath: conf/app.yml
           containerPath: /etc/app.yml
-`, map[string]string{"conf/app.yml": "declared: yes"}))).To(Succeed())
+`, map[string]string{"conf/app.yml": "declared: yes"}), nil)).To(Succeed())
 
 				Expect(subject.Deploy(context.Background())).To(Succeed())
 			})
@@ -615,12 +629,12 @@ services:
 		var issued string
 
 		JustBeforeEach(func() {
-			Expect(subject.Init(context.Background(), config.ComposeProject{
+			Expect(subject.InitProject(context.Background(), compose.Project{
 				Name: "test-project",
 				Services: types.Services{
 					"alpha": exposedService("alpha", 8080, 8080),
 				},
-			})).To(Succeed())
+			}, nil)).To(Succeed())
 		})
 
 		runDestroy := func() {

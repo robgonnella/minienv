@@ -1,4 +1,4 @@
-package config_test
+package resolver_test
 
 import (
 	"context"
@@ -10,8 +10,10 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
+	"github.com/robgonnella/minienv/internal/resolver"
 )
 
 func duration(d time.Duration) *types.Duration {
@@ -30,27 +32,27 @@ func makeK8sExt() config.XMiniEnvK8s {
 // resolveServiceImage preserved the cause.
 var errNotARepo = errors.New("not a repo")
 
-var _ = Describe("XMiniEnvK8sService", func() {
+var _ = Describe("K8sService", func() {
 	var (
 		k8sExt       config.XMiniEnvK8s
-		svc          config.ComposeService
+		svc          compose.Service
+		raw          compose.RawService
 		mockGit      *gitmocks.MockClient
 		ngrokEnabled bool
-		hostEnvKeys  []string
 	)
 
 	// Options are assembled lazily rather than in BeforeEach because specs
 	// mutate k8sExt, svc and ngrokEnabled in their own bodies before
 	// resolving.
-	newSvcExt := func() (*config.XMiniEnvK8sService, error) {
-		return config.NewXMiniEnvK8sService(
+	newSvcExt := func() (*resolver.K8sService, error) {
+		return resolver.NewK8sService(
 			context.Background(),
-			config.XMiniEnvK8sServiceOptions{
+			resolver.K8sServiceOptions{
 				K8sExt:       k8sExt,
 				Service:      svc,
+				Raw:          raw,
 				GitClient:    mockGit,
 				NgrokEnabled: ngrokEnabled,
-				HostEnvKeys:  hostEnvKeys,
 			})
 	}
 
@@ -58,8 +60,8 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		k8sExt = makeK8sExt()
 		mockGit = gitmocks.NewMockClient(GinkgoT())
 		ngrokEnabled = false
-		hostEnvKeys = nil
-		svc = config.ComposeService{
+		raw = compose.RawService{}
+		svc = compose.Service{
 			Name:  "test-service",
 			Image: "reg/test-service:v1",
 		}
@@ -68,22 +70,22 @@ var _ = Describe("XMiniEnvK8sService", func() {
 	Describe("required configuration", func() {
 		It("returns a config error if k8s is not configured", func() {
 			k8sExt = config.XMiniEnvK8s{}
-			svc = config.ComposeService{Name: "test-service"}
+			svc = compose.Service{Name: "test-service"}
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrK8sNotConfigured))
+			Expect(err).To(MatchError(resolver.ErrK8sNotConfigured))
 		})
 
 		It("errors if the service has neither an image nor an extension", func() {
-			svc = config.ComposeService{Name: "test-service"}
+			svc = compose.Service{Name: "test-service"}
 
 			_, err := newSvcExt()
 
 			// resolveServiceImage accumulates both failures with errors.Join;
 			// errors.Is walks the join, so this asserts both were collected.
-			Expect(err).To(MatchError(config.ErrImageRepositoryMissing))
-			Expect(err).To(MatchError(config.ErrImageTagMissing))
+			Expect(err).To(MatchError(resolver.ErrImageRepositoryMissing))
+			Expect(err).To(MatchError(resolver.ErrImageTagMissing))
 		})
 	})
 
@@ -147,7 +149,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.ErrGitShortSha))
+				Expect(err).To(MatchError(resolver.ErrGitShortSha))
 				Expect(err).To(MatchError(errNotARepo))
 			})
 		})
@@ -200,7 +202,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrInvalidPort))
+			Expect(err).To(MatchError(resolver.ErrInvalidPort))
 		})
 
 		It("uses container port for a mapping with no published port", func() {
@@ -267,6 +269,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			svc.Environment = types.MappingWithEquals{
 				"FOO": new("bar"),
 			}
+			raw.Environment = []any{"FOO=bar"}
 
 			result, err := newSvcExt()
 
@@ -284,6 +287,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				"FOO": new("from-compose"),
 				"BAZ": new("qux"),
 			}
+			raw.Environment = []any{"FOO=from-compose", "BAZ=qux"}
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{
 					"env": []map[string]any{
@@ -315,6 +319,11 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				"CHARLIE": new("3"),
 				"ALPHA":   new("1"),
 				"BRAVO":   new("2"),
+			}
+			raw.Environment = map[string]any{
+				"CHARLIE": "3",
+				"ALPHA":   "1",
+				"BRAVO":   "2",
 			}
 
 			result, err := newSvcExt()
@@ -391,6 +400,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				"FOO":      nil,
 				"RESOLVED": new("value"),
 			}
+			raw.Environment = []any{"FOO", "RESOLVED=value"}
 
 			result, err := newSvcExt()
 
@@ -403,30 +413,36 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			}))
 		})
 
-		It("writes no secret values without host-sourced keys", func() {
+		It("writes no secret values when every value is literal", func() {
 			svc.Environment = types.MappingWithEquals{
 				"FOO": new("bar"),
 			}
+			raw.Environment = []any{"FOO=bar"}
 
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.SecretEnv).To(BeEmpty())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).ToNot(HaveKey("secretEnv"))
 		})
 
-		Context("with host-sourced keys", func() {
+		Context("with a list-form environment taking a value from the host", func() {
 			BeforeEach(func() {
-				hostEnvKeys = []string{"DB_PASSWORD", "MISSING"}
 				svc.Environment = types.MappingWithEquals{
 					"DB_PASSWORD": new("hunter2"),
 					"LOG_LEVEL":   new("debug"),
 					"MISSING":     nil,
 				}
+				raw.Environment = []any{
+					"DB_PASSWORD=${DB_PASSWORD}",
+					"LOG_LEVEL=debug",
+					"MISSING",
+				}
 			})
 
-			It("moves them out of env and into the secret values", func() {
+			It("moves it out of env and into the secret values", func() {
 				result, err := newSvcExt()
 				Expect(err).ShouldNot(HaveOccurred())
 				Expect(result.Env).To(Equal([]map[string]any{
@@ -435,15 +451,18 @@ var _ = Describe("XMiniEnvK8sService", func() {
 						"value": "debug",
 					},
 				}))
+				Expect(result.SecretEnv).To(Equal(map[string]string{
+					"DB_PASSWORD": "hunter2",
+				}))
 
-				values, err := result.ToChartValuesMap()
+				values, err := result.ChartValues()
 				Expect(err).ShouldNot(HaveOccurred())
 				Expect(values["secretEnv"]).To(Equal(map[string]string{
 					"DB_PASSWORD": "hunter2",
 				}))
 			})
 
-			It("lets the extension env win over a host-sourced value", func() {
+			It("moves an extension value of that name into the secret", func() {
 				svc.Extensions = types.Extensions{
 					config.K8sServiceExtension: map[string]any{
 						"env": []map[string]any{
@@ -454,24 +473,198 @@ var _ = Describe("XMiniEnvK8sService", func() {
 						},
 					},
 				}
+				raw.Extensions = map[string]any{
+					config.K8sServiceExtension: map[string]any{
+						"env": []any{
+							map[string]any{
+								"name":  "DB_PASSWORD",
+								"value": "${OTHER_SECRET}",
+							},
+						},
+					},
+				}
+
+				result, err := newSvcExt()
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(result.Env).To(Equal([]map[string]any{
+					{
+						"name":  "LOG_LEVEL",
+						"value": "debug",
+					},
+				}))
+				Expect(result.SecretEnv).To(Equal(map[string]string{
+					"DB_PASSWORD": "from-extension",
+				}))
+			})
+
+			It("keeps a literal extension value of that name inline", func() {
+				svc.Extensions = types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"env": []map[string]any{
+							{
+								"name":  "DB_PASSWORD",
+								"value": "not-a-secret",
+							},
+						},
+					},
+				}
+				raw.Extensions = map[string]any{
+					config.K8sServiceExtension: map[string]any{
+						"env": []any{
+							map[string]any{
+								"name":  "DB_PASSWORD",
+								"value": "not-a-secret",
+							},
+						},
+					},
+				}
 
 				result, err := newSvcExt()
 				Expect(err).ShouldNot(HaveOccurred())
 				Expect(result.Env).To(Equal([]map[string]any{
 					{
 						"name":  "DB_PASSWORD",
-						"value": "from-extension",
+						"value": "not-a-secret",
 					},
 					{
 						"name":  "LOG_LEVEL",
 						"value": "debug",
 					},
 				}))
+				Expect(result.SecretEnv).To(BeEmpty())
+			})
 
-				values, err := result.ToChartValuesMap()
+			It("passes an extension valueFrom of that name through", func() {
+				ref := map[string]any{
+					"secretKeyRef": map[string]any{
+						"name": "other",
+						"key":  "token",
+					},
+				}
+				svc.Extensions = types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"env": []map[string]any{
+							{
+								"name":      "DB_PASSWORD",
+								"valueFrom": ref,
+							},
+						},
+					},
+				}
+				raw.Extensions = map[string]any{
+					config.K8sServiceExtension: map[string]any{
+						"env": []any{
+							map[string]any{
+								"name":      "DB_PASSWORD",
+								"valueFrom": ref,
+							},
+						},
+					},
+				}
+
+				result, err := newSvcExt()
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(result.Env).To(Equal([]map[string]any{
+					{
+						"name":      "DB_PASSWORD",
+						"valueFrom": ref,
+					},
+					{
+						"name":  "LOG_LEVEL",
+						"value": "debug",
+					},
+				}))
+				Expect(result.SecretEnv).To(BeEmpty())
+
+				values, err := result.ChartValues()
 				Expect(err).ShouldNot(HaveOccurred())
 				Expect(values).ToNot(HaveKey("secretEnv"))
 			})
+		})
+
+		It("moves a map-form value taken from the host into the secret", func() {
+			svc.Environment = types.MappingWithEquals{
+				"TOKEN":     new("from-host"),
+				"PORT":      new("8080"),
+				"INHERITED": new("yes"),
+			}
+			raw.Environment = map[string]any{
+				"TOKEN":     "${TOKEN}",
+				"PORT":      8080,
+				"INHERITED": nil,
+			}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Env).To(Equal([]map[string]any{
+				{"name": "PORT", "value": "8080"},
+			}))
+			Expect(result.SecretEnv).To(Equal(map[string]string{
+				"INHERITED": "yes",
+				"TOKEN":     "from-host",
+			}))
+		})
+
+		It("moves a value declared nowhere in the file into the secret", func() {
+			svc.Environment = types.MappingWithEquals{
+				"FROM_FILE": new("file-value"),
+				"LITERAL":   new("plain"),
+			}
+			raw.Environment = []any{"LITERAL=plain"}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Env).To(Equal([]map[string]any{
+				{"name": "LITERAL", "value": "plain"},
+			}))
+			Expect(result.SecretEnv).To(Equal(map[string]string{
+				"FROM_FILE": "file-value",
+			}))
+		})
+
+		It("moves an extension-only value taken from the host into the secret", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"env": []map[string]any{
+						{
+							"name":  "API_KEY",
+							"value": "from-host",
+						},
+					},
+				},
+			}
+			raw.Extensions = map[string]any{
+				config.K8sServiceExtension: map[string]any{
+					"env": []any{
+						map[string]any{
+							"name":  "API_KEY",
+							"value": "${API_KEY}",
+						},
+					},
+				},
+			}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.Env).To(BeEmpty())
+			Expect(result.SecretEnv).To(Equal(map[string]string{
+				"API_KEY": "from-host",
+			}))
+
+			values, err := result.ChartValues()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(values["secretEnv"]).To(Equal(map[string]string{
+				"API_KEY": "from-host",
+			}))
+		})
+
+		It("writes no env values without compose or extension environment", func() {
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ChartValues()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(values).ToNot(HaveKey("env"))
 		})
 	})
 
@@ -686,7 +879,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(result.Volumes).To(BeEmpty())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).ToNot(HaveKey("ngrok"))
 		})
@@ -727,7 +920,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
+				Expect(err).To(MatchError(resolver.ErrNgrokPortMismatch))
 			})
 
 			It("accepts a port matching a mapped container port", func() {
@@ -752,7 +945,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
+				Expect(err).To(MatchError(resolver.ErrNgrokPortMismatch))
 			})
 		})
 	})
@@ -794,7 +987,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrInvalidDeploymentType))
+			Expect(err).To(MatchError(resolver.ErrInvalidDeploymentType))
 		})
 	})
 
@@ -883,7 +1076,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.ErrManifestPath))
+				Expect(err).To(MatchError(resolver.ErrManifestPath))
 			},
 			Entry("an absolute path", "/etc/k8s/configmap.yaml"),
 			Entry("a path climbing out", "../configmap.yaml"),
@@ -902,7 +1095,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrManifestPath))
+			Expect(err).To(MatchError(resolver.ErrManifestPath))
 		})
 
 		// These name chart files rather than chart values, so leaking one into
@@ -917,7 +1110,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).ToNot(HaveKey("manifests"))
 		})
@@ -966,7 +1159,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.ErrConfigMapFromPath))
+				Expect(err).To(MatchError(resolver.ErrConfigMapFromPath))
 			},
 			Entry("an absolute path", []string{"/etc/init.sql"}),
 			Entry("a path climbing out", []string{"../init.sql"}),
@@ -988,13 +1181,13 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).ToNot(HaveKey("configMapFrom"))
 		})
 	})
 
-	Describe("ToChartValuesMap", func() {
+	Describe("chart values", func() {
 		It("decodes service ports into the nested chart shape", func() {
 			svc.Ports = []types.ServicePortConfig{
 				{Target: 8080, Published: "3000"},
@@ -1003,7 +1196,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 
 			svcValues, ok := values["service"].(map[string]any)
@@ -1029,7 +1222,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values["imagePullSecrets"]).To(Equal([]map[string]any{
 				{"name": "regcred"},
@@ -1046,7 +1239,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).To(HaveKeyWithValue("replicas", uint8(3)))
 		})
@@ -1057,7 +1250,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).To(HaveKeyWithValue(
 				"command",
@@ -1071,7 +1264,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 
 			svcValues, ok := values["service"].(map[string]any)
@@ -1093,7 +1286,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 
 			svcValues, ok := values["service"].(map[string]any)
@@ -1118,7 +1311,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 			result, err := newSvcExt()
 			Expect(err).ShouldNot(HaveOccurred())
 
-			values, err := result.ToChartValuesMap()
+			values, err := result.ChartValues()
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(values).ToNot(HaveKey("deploymentType"))
 		})
@@ -1137,7 +1330,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		})
 
 		It("does not require an image when skipped", func() {
-			svc = config.ComposeService{
+			svc = compose.Service{
 				Name: "test-service",
 				Extensions: types.Extensions{
 					config.K8sServiceExtension: map[string]any{"skip": true},

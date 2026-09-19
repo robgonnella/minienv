@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	composecli "github.com/compose-spec/compose-go/v2/cli"
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/core"
 	"github.com/robgonnella/minienv/internal/deployer"
@@ -40,7 +40,13 @@ func New(opts *LoaderOpts) *Loader {
 }
 
 func (l *Loader) LoadCore(ctx context.Context) (*core.Core, error) {
-	project, err := l.loadComposeProject(ctx)
+	source := compose.Source{
+		Files:            l.opts.Files,
+		ProjectDirectory: l.opts.ProjectDirectory,
+		ProjectName:      l.opts.ProjectName,
+	}
+
+	project, err := compose.Load(ctx, source)
 	if err != nil {
 		return nil, err
 	}
@@ -50,117 +56,16 @@ func (l *Loader) LoadCore(ctx context.Context) (*core.Core, error) {
 		return nil, err
 	}
 
-	walk, err := l.walkServices(ctx, project)
+	deployer, err := l.loadActiveDeployer(ext, source)
 	if err != nil {
 		return nil, err
 	}
 
-	deployer, err := l.loadActiveDeployer(
-		ext,
-		walk.dirs,
-		walk.hostEnv(project),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return core.New(*project, deployer), nil
-}
-
-func (l *Loader) loadComposeProject(
-	ctx context.Context,
-) (*config.ComposeProject, error) {
-	// Same option set the compose CLI builds in its own toProjectOptions, so
-	// project name, .env loading, COMPOSE_FILE and default config-file discovery
-	// all resolve exactly the way `docker compose` resolves them.
-	projectOpts, err := composecli.NewProjectOptions(
-		l.opts.Files,
-		composecli.WithWorkingDirectory(l.opts.ProjectDirectory),
-		composecli.WithOsEnv,
-		composecli.WithDotEnv,
-		composecli.WithConfigFileEnv,
-		composecli.WithDefaultConfigPath,
-		composecli.WithName(l.opts.ProjectName),
-	)
-	if err != nil {
-		return nil, errs.Errorf(
-			ErrProjectOptions,
-			"failed to create compose project options: %w",
-			err,
-		)
-	}
-
-	project, err := projectOpts.LoadProject(ctx)
-	if err != nil {
-		return nil, errs.Errorf(
-			ErrProjectLoad,
-			"failed to load compose project: %w",
-			err,
-		)
-	}
-
-	return project, nil
-}
-
-// compose merges included files and drops which one declared each service.
-// Extension paths resolve against that file, so the walk recovers it.
-func (l *Loader) walkServices(
-	ctx context.Context,
-	project *config.ComposeProject,
-) (*serviceDirWalk, error) {
-	walk := newServiceDirWalk(project.Name)
-
-	if err := walk.visit(
-		ctx,
-		project.ComposeFiles,
-		project.WorkingDir,
-		project.Environment,
-		nil,
-	); err != nil {
-		return nil, err
-	}
-
-	for name := range project.Services {
-		if _, ok := walk.dirs[name]; !ok {
-			return nil, errs.Errorf(
-				ErrServiceDirMissing,
-				"failed to find the compose file declaring service %s",
-				name,
-			)
-		}
-	}
-
-	return walk, nil
-}
-
-// only exists to facilitate testing.
-func (l *Loader) loadServiceDirs(
-	ctx context.Context,
-	project *config.ComposeProject,
-) (deployer.ServiceDirs, error) {
-	walk, err := l.walkServices(ctx, project)
-	if err != nil {
-		return nil, err
-	}
-
-	return walk.dirs, nil
-}
-
-// only exists to facilitate testing.
-func (l *Loader) loadHostEnv(
-	ctx context.Context,
-	project *config.ComposeProject,
-) (deployer.HostEnv, error) {
-	walk, err := l.walkServices(ctx, project)
-	if err != nil {
-		return nil, err
-	}
-
-	return walk.hostEnv(project), nil
+	return core.New(deployer), nil
 }
 
 func (l *Loader) loadMainExtensionConfig(
-	project *config.ComposeProject,
+	project *compose.Project,
 ) (*config.XMiniEnv, error) {
 	ex, ok := project.Extensions[config.TopLevelExtension]
 	if !ok {
@@ -192,8 +97,7 @@ func (l *Loader) loadMainExtensionConfig(
 // would complain about first.
 func (l *Loader) loadActiveDeployer(
 	ext *config.XMiniEnv,
-	serviceDirs deployer.ServiceDirs,
-	hostEnv deployer.HostEnv,
+	source compose.Source,
 ) (deployer.Deployer, error) {
 	configured := 0
 
@@ -218,8 +122,7 @@ func (l *Loader) loadActiveDeployer(
 	case ext.K8s != nil:
 		return helm.New(helm.Options{
 			K8sExt:         *ext.K8s,
-			ServiceDirs:    serviceDirs,
-			HostEnv:        hostEnv,
+			Source:         source,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,
 			PublishClient:  l.opts.PublishClient,
@@ -235,7 +138,7 @@ func (l *Loader) loadActiveDeployer(
 
 		return docker.New(docker.Options{
 			DockerExt:      *ext.Docker,
-			ServiceDirs:    serviceDirs,
+			Source:         source,
 			Transport:      transport,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,

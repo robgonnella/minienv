@@ -1,0 +1,6 @@
+services:
+  sub:
+    image: reg/sub:v1
+    environment:
+      - SUB_SECRET=${HOST_VALUE}
+      - SUB_LITERAL=plain

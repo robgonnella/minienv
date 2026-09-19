@@ -21,6 +21,7 @@ import (
 	"github.com/robgonnella/minienv/internal/git"
 	"github.com/robgonnella/minienv/internal/image"
 	"github.com/robgonnella/minienv/internal/publishing"
+	"github.com/robgonnella/minienv/internal/resolver"
 	"github.com/robgonnella/minienv/internal/transport"
 	"github.com/rs/zerolog/log"
 )
@@ -42,14 +43,14 @@ type remoteContent struct {
 }
 
 type serviceTuple struct {
-	compose   config.ComposeService
-	extension config.XMiniEnvDockerService
+	compose   compose.Service
+	extension resolver.DockerService
 	dir       string
 }
 
 type Options struct {
 	DockerExt      config.XMiniEnvDocker
-	ServiceDirs    deployer.ServiceDirs
+	Source         compose.Source
 	Transport      transport.Client
 	ImageClient    image.Client
 	GitClient      git.Client
@@ -60,8 +61,8 @@ type Options struct {
 
 type Docker struct {
 	dockerExt         config.XMiniEnvDocker
-	serviceDirs       deployer.ServiceDirs
-	project           config.ComposeProject
+	source            compose.Source
+	project           compose.Project
 	services          map[string]serviceTuple
 	servicesToPublish []config.NgrokEndpointConfig
 	transport         transport.Client
@@ -88,7 +89,7 @@ func New(opts Options) *Docker {
 
 	return &Docker{
 		dockerExt:      opts.DockerExt,
-		serviceDirs:    opts.ServiceDirs,
+		source:         opts.Source,
 		transport:      opts.Transport,
 		imageClient:    opts.ImageClient,
 		gitClient:      opts.GitClient,
@@ -109,69 +110,22 @@ func (d *Docker) String() string {
 	return "Docker"
 }
 
-func (d *Docker) Init(
-	ctx context.Context,
-	project config.ComposeProject,
-) error {
+func (d *Docker) Init(ctx context.Context) error {
 	if err := d.validateExtension(); err != nil {
 		return err
 	}
 
-	services := map[string]serviceTuple{}
-	servicesToPublish := []config.NgrokEndpointConfig{}
-
-	for _, svc := range project.Services {
-		svcExt, err := config.NewXMiniEnvDockerService(
-			ctx,
-			svc,
-			d.dockerExt,
-			d.gitClient,
-			d.ngrokAuthToken != "",
-		)
-		if err != nil {
-			return err
-		}
-
-		services[svc.Name] = serviceTuple{
-			compose:   svc,
-			extension: *svcExt,
-			dir:       d.serviceDirs.Dir(svc.Name),
-		}
-
-		// Port is zero unless ngrok is configured and usable.
-		if svcExt.Ngrok.Port != 0 {
-			// A skipped service is absent from the remote project, so there is
-			// nothing for the endpoint's upstream to route to.
-			switch {
-			case svcExt.Skip:
-				log.
-					Warn().
-					Str("service", svc.Name).
-					Msg("detected skip: not publishing an ngrok endpoint")
-			default:
-				servicesToPublish = append(servicesToPublish, config.NgrokEndpointConfig{
-					Namespace:     d.dockerExt.Namespace,
-					EndpointName:  fmt.Sprintf("%s-%s", d.dockerExt.Namespace, svc.Name),
-					ServiceName:   svc.Name,
-					URL:           svcExt.Ngrok.URL,
-					Port:          svcExt.Ngrok.Port,
-					TrafficPolicy: svcExt.Ngrok.TrafficPolicy,
-				})
-			}
-		}
+	project, err := compose.Load(ctx, d.source)
+	if err != nil {
+		return err
 	}
 
-	// project.Services is a map. An unstable order rewrites ngrok.yml on an
-	// unchanged deploy, replacing the agent and reassigning unreserved URLs.
-	slices.SortFunc(servicesToPublish, func(a, b config.NgrokEndpointConfig) int {
-		return strings.Compare(a.ServiceName, b.ServiceName)
-	})
+	dirs, err := compose.LoadServiceDirs(ctx, project)
+	if err != nil {
+		return err
+	}
 
-	d.services = services
-	d.servicesToPublish = servicesToPublish
-	d.project = project
-
-	return nil
+	return d.initProject(ctx, *project, dirs)
 }
 
 func (d *Docker) Deploy(ctx context.Context) error {
@@ -260,6 +214,70 @@ func (d *Docker) PublishedServiceUrls(
 		ctx,
 		deployer.PublishedNames(d.servicesToPublish),
 	)
+}
+
+// Every extension is resolved before any is stored, so a bad one fails the
+// whole project rather than one service midway.
+func (d *Docker) initProject(
+	ctx context.Context,
+	project compose.Project,
+	dirs compose.ServiceDirs,
+) error {
+	services := map[string]serviceTuple{}
+	servicesToPublish := []config.NgrokEndpointConfig{}
+
+	for _, svc := range project.Services {
+		svcExt, err := resolver.NewDockerService(
+			ctx,
+			svc,
+			d.dockerExt,
+			d.gitClient,
+			d.ngrokAuthToken != "",
+		)
+		if err != nil {
+			return err
+		}
+
+		services[svc.Name] = serviceTuple{
+			compose:   svc,
+			extension: *svcExt,
+			dir:       dirs.Dir(svc.Name),
+		}
+
+		// Port is zero unless ngrok is configured and usable.
+		if svcExt.Ngrok.Port != 0 {
+			// A skipped service is absent from the remote project, so there is
+			// nothing for the endpoint's upstream to route to.
+			switch {
+			case svcExt.Skip:
+				log.
+					Warn().
+					Str("service", svc.Name).
+					Msg("detected skip: not publishing an ngrok endpoint")
+			default:
+				servicesToPublish = append(servicesToPublish, config.NgrokEndpointConfig{
+					Namespace:     d.dockerExt.Namespace,
+					EndpointName:  fmt.Sprintf("%s-%s", d.dockerExt.Namespace, svc.Name),
+					ServiceName:   svc.Name,
+					URL:           svcExt.Ngrok.URL,
+					Port:          svcExt.Ngrok.Port,
+					TrafficPolicy: svcExt.Ngrok.TrafficPolicy,
+				})
+			}
+		}
+	}
+
+	// project.Services is a map. An unstable order rewrites ngrok.yml on an
+	// unchanged deploy, replacing the agent and reassigning unreserved URLs.
+	slices.SortFunc(servicesToPublish, func(a, b config.NgrokEndpointConfig) int {
+		return strings.Compare(a.ServiceName, b.ServiceName)
+	})
+
+	d.services = services
+	d.servicesToPublish = servicesToPublish
+	d.project = project
+
+	return nil
 }
 
 // New normalizes first, so this also catches a namespace that reduces to
@@ -543,7 +561,7 @@ func (d *Docker) copyableServices() []string {
 	return names
 }
 
-func (d *Docker) bindCopies(project *config.ComposeProject) {
+func (d *Docker) bindCopies(project *compose.Project) {
 	for _, name := range d.copyableServices() {
 		for _, c := range d.services[name].extension.Copy {
 			compose.BindVolume(
