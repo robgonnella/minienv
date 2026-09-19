@@ -1,0 +1,27 @@
+x-minienv:
+  k8s:
+    context: test-context
+    namespace: test-namespace
+
+services:
+  api:
+    image: reg/api:v1
+    env_file: hostenv.env
+    environment:
+      - LITERAL=plain
+      - ESCAPED=$$not-a-variable
+      - FROM_HOST=${HOST_VALUE}
+      - WITH_DEFAULT=${HOSTENV_UNSET_VALUE:-fallback}
+      - PASSTHROUGH
+      - HOSTENV_UNSET_PASSTHROUGH
+  worker:
+    image: reg/worker:v1
+    environment:
+      PORT: 8080
+      DEBUG: "true"
+      TOKEN: ${HOST_VALUE}
+      INHERITED:
+  plain:
+    image: reg/plain:v1
+    environment:
+      - ONLY=literal

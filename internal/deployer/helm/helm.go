@@ -45,6 +45,7 @@ type serviceTuple struct {
 type Options struct {
 	K8sExt         config.XMiniEnvK8s
 	ServiceDirs    deployer.ServiceDirs
+	HostEnv        deployer.HostEnv
 	ImageClient    image.Client
 	GitClient      git.Client
 	PublishClient  publishing.Client
@@ -56,6 +57,7 @@ type Options struct {
 type Helm struct {
 	k8sExt            config.XMiniEnvK8s
 	serviceDirs       deployer.ServiceDirs
+	hostEnv           deployer.HostEnv
 	project           config.ComposeProject
 	services          map[string]serviceTuple
 	servicesToPublish []config.NgrokEndpointConfig
@@ -74,6 +76,7 @@ func New(opts Options) *Helm {
 	return &Helm{
 		k8sExt:         opts.K8sExt,
 		serviceDirs:    opts.ServiceDirs,
+		hostEnv:        opts.HostEnv,
 		actionConfig:   nil,
 		imageClient:    opts.ImageClient,
 		gitClient:      opts.GitClient,
@@ -287,6 +290,7 @@ func (h *Helm) k8sExtensionOptions(
 		Service:      svc,
 		GitClient:    h.gitClient,
 		NgrokEnabled: h.ngrokAuthToken != "",
+		HostEnvKeys:  h.hostEnv.Keys(svc.Name),
 	}
 }
 

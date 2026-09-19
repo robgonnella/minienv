@@ -15,6 +15,7 @@ type serviceDirWalk struct {
 	projectName string
 	visited     map[string]bool
 	dirs        map[string]string
+	rawEnv      map[string]any
 }
 
 func newServiceDirWalk(projectName string) *serviceDirWalk {
@@ -22,6 +23,7 @@ func newServiceDirWalk(projectName string) *serviceDirWalk {
 		projectName: projectName,
 		visited:     map[string]bool{},
 		dirs:        map[string]string{},
+		rawEnv:      map[string]any{},
 	}
 }
 
@@ -58,6 +60,10 @@ func (w *serviceDirWalk) visit(
 	}
 
 	w.claim(model, dir)
+
+	if err := w.claimRawEnv(ctx, files, dir); err != nil {
+		return err
+	}
 
 	includes, err := includeConfigs(model["include"])
 	if err != nil {
@@ -96,6 +102,41 @@ func (w *serviceDirWalk) claim(model map[string]any, dir string) {
 		if _, claimed := w.dirs[name]; !claimed {
 			w.dirs[name] = dir
 		}
+	}
+}
+
+func (w *serviceDirWalk) claimRawEnv(
+	ctx context.Context,
+	files []string,
+	dir string,
+) error {
+	raw, err := w.loadRawModel(ctx, files, dir)
+	if err != nil {
+		return err
+	}
+
+	w.claimEnv(raw)
+
+	return nil
+}
+
+func (w *serviceDirWalk) claimEnv(model map[string]any) {
+	services, ok := model["services"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	for name, svc := range services {
+		if _, claimed := w.rawEnv[name]; claimed {
+			continue
+		}
+
+		body, ok := svc.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		w.rawEnv[name] = body["environment"]
 	}
 }
 
@@ -187,6 +228,40 @@ func (w *serviceDirWalk) loadModel(
 		return nil, errs.Errorf(
 			ErrIncludeModel,
 			"failed to load compose file %s: %w",
+			files[0],
+			err,
+		)
+	}
+
+	return model, nil
+}
+
+func (w *serviceDirWalk) loadRawModel(
+	ctx context.Context,
+	files []string,
+	dir string,
+) (map[string]any, error) {
+	details := types.ConfigDetails{
+		WorkingDir:  dir,
+		ConfigFiles: types.ToConfigFiles(files),
+	}
+
+	model, err := composeloader.LoadModelWithContext(
+		ctx,
+		details,
+		func(o *composeloader.Options) {
+			o.SetProjectName(w.projectName, true)
+			o.SkipInclude = true
+			o.SkipNormalization = true
+			o.SkipConsistencyCheck = true
+			o.SkipInterpolation = true
+			o.SkipValidation = true
+		},
+	)
+	if err != nil {
+		return nil, errs.Errorf(
+			ErrHostEnvModel,
+			"failed to load uninterpolated compose file %s: %w",
 			files[0],
 			err,
 		)

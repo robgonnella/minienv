@@ -25,3 +25,13 @@ func (l *Loader) LoadServiceDirs(
 ) (deployer.ServiceDirs, error) {
 	return l.loadServiceDirs(ctx, project)
 }
+
+// LoadHostEnv exposes the host-sourced environment classification on its
+// own. It only reaches the k8s deployer through its options, so nothing else
+// can assert which keys the uninterpolated load attributed to the host.
+func (l *Loader) LoadHostEnv(
+	ctx context.Context,
+	project *config.ComposeProject,
+) (deployer.HostEnv, error) {
+	return l.loadHostEnv(ctx, project)
+}

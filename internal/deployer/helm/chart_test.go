@@ -176,6 +176,55 @@ func configMapNamed(
 	return cm
 }
 
+type renderedSecret struct {
+	Metadata struct {
+		Name string `yaml:"name"`
+	} `yaml:"metadata"`
+	StringData map[string]string `yaml:"stringData"`
+}
+
+func secretNamed(rendered map[string]string, name string) renderedSecret {
+	GinkgoHelper()
+
+	body, ok := rendered[name]
+	Expect(ok).To(BeTrue(), "no rendered template named %s", name)
+
+	var secret renderedSecret
+	Expect(yaml.Unmarshal([]byte(body), &secret)).
+		To(Succeed(), "rendered %s is not valid yaml", name)
+
+	return secret
+}
+
+func envFromSources(
+	rendered map[string]string,
+	template string,
+) []map[string]any {
+	GinkgoHelper()
+
+	var workload struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						EnvFrom []map[string]any `yaml:"envFrom"`
+					} `yaml:"containers"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+
+	Expect(yaml.Unmarshal(
+		[]byte(templateNamed(rendered, template)),
+		&workload,
+	)).To(Succeed(), "rendered %s is not valid yaml", template)
+
+	containers := workload.Spec.Template.Spec.Containers
+	Expect(containers).To(HaveLen(1))
+
+	return containers[0].EnvFrom
+}
+
 func writeTempFile(name string, data []byte) string {
 	GinkgoHelper()
 
@@ -212,7 +261,10 @@ var _ = Describe("ChartBuilder", func() {
 	// Specs render against values production actually produces rather than a
 	// hand-written map, so a key the templates read cannot drift from the one
 	// ToChartValuesMap writes.
-	resolvedValues := func(svc config.ComposeService) map[string]any {
+	resolvedValuesWithHostEnv := func(
+		svc config.ComposeService,
+		hostKeys []string,
+	) map[string]any {
 		GinkgoHelper()
 
 		svcExt, err := config.NewXMiniEnvK8sService(
@@ -222,6 +274,7 @@ var _ = Describe("ChartBuilder", func() {
 				Service:      svc,
 				GitClient:    mockGit,
 				NgrokEnabled: false,
+				HostEnvKeys:  hostKeys,
 			},
 		)
 		Expect(err).ShouldNot(HaveOccurred())
@@ -230,6 +283,12 @@ var _ = Describe("ChartBuilder", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 
 		return values
+	}
+
+	resolvedValues := func(svc config.ComposeService) map[string]any {
+		GinkgoHelper()
+
+		return resolvedValuesWithHostEnv(svc, nil)
 	}
 
 	BeforeEach(func() {
@@ -291,6 +350,7 @@ var _ = Describe("ChartBuilder", func() {
 				"templates/service.yaml",
 				"templates/serviceaccount.yaml",
 				"templates/configmap.yaml",
+				"templates/secret.yaml",
 			))
 		})
 
@@ -628,6 +688,118 @@ var _ = Describe("ChartBuilder", func() {
 				Expect(podTemplateAnnotations(rendered, "deployment.yaml")).
 					ToNot(HaveKey("checksum/configmap"))
 			})
+
+			It("renders no Secret", func() {
+				Expect(strings.TrimSpace(
+					rendered["hello/templates/secret.yaml"],
+				)).To(BeEmpty())
+			})
+
+			It("stamps no secret checksum onto the pod template", func() {
+				Expect(podTemplateAnnotations(rendered, "deployment.yaml")).
+					ToNot(HaveKey("checksum/secret"))
+			})
+		})
+
+		Context("with host-sourced environment", func() {
+			var (
+				svc      config.ComposeService
+				rendered map[string]string
+			)
+
+			hostKeys := []string{"DB_PASSWORD"}
+
+			renderWithHostEnv := func() map[string]string {
+				GinkgoHelper()
+
+				chart, err := subject.Build(
+					"hello",
+					config.K8sServiceDeploymentType,
+					nil,
+					nil,
+				)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				return render(chart, resolvedValuesWithHostEnv(svc, hostKeys))
+			}
+
+			BeforeEach(func() {
+				svc = config.ComposeService{
+					Name:  "hello",
+					Image: "reg/hello:v1",
+					Environment: types.MappingWithEquals{
+						"DB_PASSWORD": new("hunter2"),
+						"LOG_LEVEL":   new("debug"),
+					},
+				}
+			})
+
+			JustBeforeEach(func() {
+				rendered = renderWithHostEnv()
+			})
+
+			It("renders a Secret named after the service", func() {
+				secret := secretNamed(rendered, "hello/templates/secret.yaml")
+
+				Expect(secret.Metadata.Name).To(Equal("hello"))
+				Expect(secret.StringData).To(Equal(map[string]string{
+					"DB_PASSWORD": "hunter2",
+				}))
+			})
+
+			It("keeps the host-sourced value out of the deployment", func() {
+				deployment := templateNamed(rendered, "deployment.yaml")
+
+				Expect(deployment).To(ContainSubstring("name: LOG_LEVEL"))
+				Expect(deployment).ToNot(ContainSubstring("hunter2"))
+			})
+
+			It("attaches the Secret through envFrom", func() {
+				Expect(envFromSources(rendered, "deployment.yaml")).
+					To(Equal([]map[string]any{
+						{"secretRef": map[string]any{"name": "hello"}},
+					}))
+			})
+
+			It("stamps the pod template with a checksum of the secret", func() {
+				Expect(podAnnotation(rendered, "checksum/secret")).To(HaveLen(64))
+			})
+
+			It("keeps the checksum stable across renders", func() {
+				Expect(podAnnotation(renderWithHostEnv(), "checksum/secret")).
+					To(Equal(podAnnotation(rendered, "checksum/secret")))
+			})
+
+			It("changes the checksum when a value changes", func() {
+				svc.Environment["DB_PASSWORD"] = new("rotated")
+
+				Expect(podAnnotation(renderWithHostEnv(), "checksum/secret")).
+					ToNot(Equal(podAnnotation(rendered, "checksum/secret")))
+			})
+
+			Context("alongside extension envFrom sources", func() {
+				BeforeEach(func() {
+					svc.Extensions = types.Extensions{
+						config.K8sServiceExtension: map[string]any{
+							"envFrom": []any{
+								map[string]any{
+									"configMapRef": map[string]any{
+										"name": "app-config",
+									},
+								},
+							},
+						},
+					}
+				})
+
+				It("lists the Secret before them", func() {
+					Expect(envFromSources(rendered, "deployment.yaml")).
+						To(Equal([]map[string]any{
+							{"secretRef": map[string]any{"name": "hello"}},
+							{"configMapRef": map[string]any{"name": "app-config"}},
+						}))
+				})
+			})
 		})
 
 		It("reports a configMapFrom file that is not on disk", func() {
@@ -672,8 +844,8 @@ var _ = Describe("ChartBuilder", func() {
 
 			Expect(err).ShouldNot(HaveOccurred())
 
-			// No service, and no ngrok configmap or secret: a job serves no
-			// traffic, so there is nothing to expose and no token to mount.
+			// No service, and no ngrok configmap: a job serves no traffic, so
+			// there is nothing to expose.
 			Expect(fileNames(chart)).To(ConsistOf(
 				"Chart.yaml",
 				"values.yaml",
@@ -681,6 +853,7 @@ var _ = Describe("ChartBuilder", func() {
 				"templates/serviceaccount.yaml",
 				"templates/job.yaml",
 				"templates/configmap.yaml",
+				"templates/secret.yaml",
 			))
 		})
 
@@ -717,6 +890,43 @@ var _ = Describe("ChartBuilder", func() {
 			Expect(cm.Data).To(HaveKey("01-schema.sql"))
 			Expect(podTemplateAnnotations(rendered, "job.yaml")).
 				To(HaveKey("checksum/configmap"))
+		})
+
+		It("renders host-sourced environment as a Secret on the job", func() {
+			svc := config.ComposeService{
+				Name:  "migrate",
+				Image: "reg/migrate:v1",
+				Environment: types.MappingWithEquals{
+					"DB_PASSWORD": new("hunter2"),
+				},
+				Extensions: types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"deploymentType": "job",
+					},
+				},
+			}
+
+			chart, err := subject.Build(
+				"migrate",
+				config.K8sJobDeploymentType,
+				nil,
+				nil,
+			)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			rendered := render(
+				chart,
+				resolvedValuesWithHostEnv(svc, []string{"DB_PASSWORD"}),
+			)
+			secret := secretNamed(rendered, "migrate/templates/secret.yaml")
+
+			Expect(secret.Metadata.Name).To(Equal("migrate"))
+			Expect(secret.StringData).To(HaveKeyWithValue("DB_PASSWORD", "hunter2"))
+			Expect(envFromSources(rendered, "job.yaml")).To(Equal([]map[string]any{
+				{"secretRef": map[string]any{"name": "migrate"}},
+			}))
+			Expect(podTemplateAnnotations(rendered, "job.yaml")).
+				To(HaveKey("checksum/secret"))
 		})
 
 		It("mounts volumes onto the job pod", func() {

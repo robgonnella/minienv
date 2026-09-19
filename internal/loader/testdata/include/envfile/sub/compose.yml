@@ -4,3 +4,6 @@ include:
 services:
   sub:
     image: reg/sub:v1
+    environment:
+      - DEEPER_PATH=${DEEPER}
+      - LITERAL=plain

@@ -50,12 +50,16 @@ func (l *Loader) LoadCore(ctx context.Context) (*core.Core, error) {
 		return nil, err
 	}
 
-	serviceDirs, err := l.loadServiceDirs(ctx, project)
+	walk, err := l.walkServices(ctx, project)
 	if err != nil {
 		return nil, err
 	}
 
-	deployer, err := l.loadActiveDeployer(ext, serviceDirs)
+	deployer, err := l.loadActiveDeployer(
+		ext,
+		walk.dirs,
+		walk.hostEnv(project),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -100,10 +104,10 @@ func (l *Loader) loadComposeProject(
 
 // compose merges included files and drops which one declared each service.
 // Extension paths resolve against that file, so the walk recovers it.
-func (l *Loader) loadServiceDirs(
+func (l *Loader) walkServices(
 	ctx context.Context,
 	project *config.ComposeProject,
-) (deployer.ServiceDirs, error) {
+) (*serviceDirWalk, error) {
 	walk := newServiceDirWalk(project.Name)
 
 	if err := walk.visit(
@@ -126,7 +130,33 @@ func (l *Loader) loadServiceDirs(
 		}
 	}
 
+	return walk, nil
+}
+
+// only exists to facilitate testing.
+func (l *Loader) loadServiceDirs(
+	ctx context.Context,
+	project *config.ComposeProject,
+) (deployer.ServiceDirs, error) {
+	walk, err := l.walkServices(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+
 	return walk.dirs, nil
+}
+
+// only exists to facilitate testing.
+func (l *Loader) loadHostEnv(
+	ctx context.Context,
+	project *config.ComposeProject,
+) (deployer.HostEnv, error) {
+	walk, err := l.walkServices(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+
+	return walk.hostEnv(project), nil
 }
 
 func (l *Loader) loadMainExtensionConfig(
@@ -163,6 +193,7 @@ func (l *Loader) loadMainExtensionConfig(
 func (l *Loader) loadActiveDeployer(
 	ext *config.XMiniEnv,
 	serviceDirs deployer.ServiceDirs,
+	hostEnv deployer.HostEnv,
 ) (deployer.Deployer, error) {
 	configured := 0
 
@@ -188,6 +219,7 @@ func (l *Loader) loadActiveDeployer(
 		return helm.New(helm.Options{
 			K8sExt:         *ext.K8s,
 			ServiceDirs:    serviceDirs,
+			HostEnv:        hostEnv,
 			ImageClient:    l.opts.ImageClient,
 			GitClient:      l.opts.GitClient,
 			PublishClient:  l.opts.PublishClient,

@@ -118,10 +118,20 @@ ConfigMap named after the service, since the two would collide in the release.
 
 #### `env`
 
-Merged over compose `environment` by `name`. A literal `value` is written into
-the manifest, so **do not put secrets there** if the manifests are visible to
-others. Values compose could not resolve (the bare `- SOME_VAR` form, with
-nothing set locally) are dropped rather than set empty.
+Merged over compose `environment` by `name`. Compose values are placed by where
+they came from: one written literally in the compose file is rendered inline,
+while one taken from the local environment (`${VAR}`, or the bare `- VAR`
+form) or from an `env_file` is written to a Secret named after the service and
+attached with `envFrom`. A change to any value in that Secret replaces the pods
+on the next deploy. Values compose could not resolve (the bare `- SOME_VAR`
+form, with nothing set locally) are dropped rather than set empty.
+
+An entry here replaces the compose variable of the same name wherever it would
+have gone. A literal `value` is written into the manifest, so **do not put
+secrets there** if the manifests are visible to others. Sources under `envFrom`
+are listed after the service's Secret, so a key they also define wins. A file
+under `manifests` must not produce a Secret named after the service, since the
+two would collide in the release.
 
 ```yaml
 x-minienv-k8s-service:
