@@ -161,6 +161,8 @@ type XMiniEnvK8sService struct {
 	Manifests []string `json:"manifests,omitempty" mapstructure:"manifests,omitempty"`
 	// Paths to files, relative to the directory of the compose file that declares them, whose contents become this service's ConfigMap keyed by file name
 	ConfigMapFrom []string `json:"configMapFrom,omitempty" mapstructure:"configMapFrom,omitempty"`
+
+	secretEnv map[string]string
 }
 
 // XMiniEnvK8sServiceOptions carries the runtime inputs needed to properly
@@ -174,6 +176,7 @@ type XMiniEnvK8sServiceOptions struct {
 	GitClient git.Client
 	// NgrokEnabled reports whether an ngrok auth token is available
 	NgrokEnabled bool
+	HostEnvKeys  []string
 }
 
 func NewXMiniEnvK8sService(
@@ -264,6 +267,10 @@ func (s *XMiniEnvK8sService) ToChartValuesMap() (map[string]any, error) {
 		values["imagePullSecrets"] = pullSecrets
 	}
 
+	if len(s.secretEnv) > 0 {
+		values["secretEnv"] = s.secretEnv
+	}
+
 	return values, nil
 }
 
@@ -310,7 +317,7 @@ func (s *XMiniEnvK8sService) resolve(
 
 	s.resolveContainerCommand(opts.Service)
 	s.resolveHealthCheck(opts.Service)
-	s.resolveEnvironment(opts.Service)
+	s.resolveEnvironment(opts.Service, opts.HostEnvKeys)
 
 	// After resolveServicePorts, which it checks the ngrok port against.
 	if err := s.resolveNgrok(opts.K8sExt, opts.NgrokEnabled); err != nil {
@@ -624,9 +631,13 @@ func (s *XMiniEnvK8sService) resolveServicePorts(svc ComposeService) error {
 	return nil
 }
 
-func (s *XMiniEnvK8sService) resolveEnvironment(svc ComposeService) {
+func (s *XMiniEnvK8sService) resolveEnvironment(
+	svc ComposeService,
+	hostKeys []string,
+) {
 	if len(svc.Environment) > 0 {
 		k8sMappings := []map[string]any{}
+		secretEnv := map[string]string{}
 
 		if s.Env != nil {
 			k8sMappings = slices.Clone(s.Env)
@@ -649,6 +660,12 @@ func (s *XMiniEnvK8sService) resolveEnvironment(svc ComposeService) {
 				continue
 			}
 
+			if slices.Contains(hostKeys, key) {
+				secretEnv[key] = *value
+
+				continue
+			}
+
 			k8sMappings = append(k8sMappings, map[string]any{
 				"name":  key,
 				"value": *value,
@@ -656,6 +673,10 @@ func (s *XMiniEnvK8sService) resolveEnvironment(svc ComposeService) {
 		}
 
 		s.Env = k8sMappings
+
+		if len(secretEnv) > 0 {
+			s.secretEnv = secretEnv
+		}
 	}
 }
 

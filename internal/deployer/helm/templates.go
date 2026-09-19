@@ -110,6 +110,7 @@ command: []
 
 env: []
 envFrom: []
+secretEnv: {}
 
 serviceAccount:
   create: true
@@ -174,6 +175,7 @@ podAnnotations: {}
 
 env: []
 envFrom: []
+secretEnv: {}
 volumes: []
 volumeMounts: []
 `
@@ -216,6 +218,21 @@ data:
 {{- end }}
 `
 
+// #nosec G101 -- chart template text; the values arrive at render time.
+const secretEnvTmpl = `
+{{- with .Values.secretEnv }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "generated.fullname" $ }}
+  labels:
+    {{- include "generated.labels" $ | nindent 4 }}
+type: Opaque
+stringData:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+`
+
 const deploymentTmpl = `
 apiVersion: apps/v1
 kind: Deployment
@@ -235,13 +252,16 @@ spec:
   template:
     metadata:
       {{- $files := .Files.Glob "files/configmap/*" }}
-      {{- if or .Values.podAnnotations $files }}
+      {{- if or .Values.podAnnotations $files .Values.secretEnv }}
       annotations:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- if $files }}
         checksum/configmap: {{ $files.AsConfig | sha256sum }}
+        {{- end }}
+        {{- with .Values.secretEnv }}
+        checksum/secret: {{ toYaml . | sha256sum }}
         {{- end }}
       {{- end }}
       labels:
@@ -285,9 +305,15 @@ spec:
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.envFrom }}
+          {{- if or .Values.envFrom .Values.secretEnv }}
           envFrom:
+            {{- if .Values.secretEnv }}
+            - secretRef:
+                name: {{ include "generated.fullname" . }}
+            {{- end }}
+            {{- with .Values.envFrom }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.startupProbe }}
           startupProbe:
@@ -387,6 +413,7 @@ service:
 
 env: []
 envFrom: []
+secretEnv: {}
 
 podAnnotations: {}
 podLabels: {}
@@ -413,13 +440,16 @@ spec:
   template:
     metadata:
       {{- $files := .Files.Glob "files/configmap/*" }}
-      {{- if or .Values.podAnnotations $files }}
+      {{- if or .Values.podAnnotations $files .Values.secretEnv }}
       annotations:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- if $files }}
         checksum/configmap: {{ $files.AsConfig | sha256sum }}
+        {{- end }}
+        {{- with .Values.secretEnv }}
+        checksum/secret: {{ toYaml . | sha256sum }}
         {{- end }}
       {{- end }}
       labels:
@@ -463,9 +493,15 @@ spec:
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.envFrom }}
+          {{- if or .Values.envFrom .Values.secretEnv }}
           envFrom:
+            {{- if .Values.secretEnv }}
+            - secretRef:
+                name: {{ include "generated.fullname" . }}
+            {{- end }}
+            {{- with .Values.envFrom }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.resources }}
           resources:

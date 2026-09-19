@@ -14,6 +14,12 @@ func (s ServiceDirs) Dir(name string) string {
 	return s[name]
 }
 
+type HostEnv map[string][]string
+
+func (h HostEnv) Keys(name string) []string {
+	return h[name]
+}
+
 type Deployer interface {
 	String() string
 	Init(ctx context.Context, project config.ComposeProject) error

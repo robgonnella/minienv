@@ -36,6 +36,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		svc          config.ComposeService
 		mockGit      *gitmocks.MockClient
 		ngrokEnabled bool
+		hostEnvKeys  []string
 	)
 
 	// Options are assembled lazily rather than in BeforeEach because specs
@@ -49,6 +50,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 				Service:      svc,
 				GitClient:    mockGit,
 				NgrokEnabled: ngrokEnabled,
+				HostEnvKeys:  hostEnvKeys,
 			})
 	}
 
@@ -56,6 +58,7 @@ var _ = Describe("XMiniEnvK8sService", func() {
 		k8sExt = makeK8sExt()
 		mockGit = gitmocks.NewMockClient(GinkgoT())
 		ngrokEnabled = false
+		hostEnvKeys = nil
 		svc = config.ComposeService{
 			Name:  "test-service",
 			Image: "reg/test-service:v1",
@@ -398,6 +401,77 @@ var _ = Describe("XMiniEnvK8sService", func() {
 					"value": "value",
 				},
 			}))
+		})
+
+		It("writes no secret values without host-sourced keys", func() {
+			svc.Environment = types.MappingWithEquals{
+				"FOO": new("bar"),
+			}
+
+			result, err := newSvcExt()
+			Expect(err).ShouldNot(HaveOccurred())
+
+			values, err := result.ToChartValuesMap()
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(values).ToNot(HaveKey("secretEnv"))
+		})
+
+		Context("with host-sourced keys", func() {
+			BeforeEach(func() {
+				hostEnvKeys = []string{"DB_PASSWORD", "MISSING"}
+				svc.Environment = types.MappingWithEquals{
+					"DB_PASSWORD": new("hunter2"),
+					"LOG_LEVEL":   new("debug"),
+					"MISSING":     nil,
+				}
+			})
+
+			It("moves them out of env and into the secret values", func() {
+				result, err := newSvcExt()
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(result.Env).To(Equal([]map[string]any{
+					{
+						"name":  "LOG_LEVEL",
+						"value": "debug",
+					},
+				}))
+
+				values, err := result.ToChartValuesMap()
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(values["secretEnv"]).To(Equal(map[string]string{
+					"DB_PASSWORD": "hunter2",
+				}))
+			})
+
+			It("lets the extension env win over a host-sourced value", func() {
+				svc.Extensions = types.Extensions{
+					config.K8sServiceExtension: map[string]any{
+						"env": []map[string]any{
+							{
+								"name":  "DB_PASSWORD",
+								"value": "from-extension",
+							},
+						},
+					},
+				}
+
+				result, err := newSvcExt()
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(result.Env).To(Equal([]map[string]any{
+					{
+						"name":  "DB_PASSWORD",
+						"value": "from-extension",
+					},
+					{
+						"name":  "LOG_LEVEL",
+						"value": "debug",
+					},
+				}))
+
+				values, err := result.ToChartValuesMap()
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(values).ToNot(HaveKey("secretEnv"))
+			})
 		})
 	})
 

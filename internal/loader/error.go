@@ -17,4 +17,5 @@ const (
 	ErrIncludeDecode            errs.Kind = "loader.include_decode"
 	ErrIncludeCycle             errs.Kind = "loader.include_cycle"
 	ErrServiceDirMissing        errs.Kind = "loader.service_dir_missing"
+	ErrHostEnvModel             errs.Kind = "loader.host_env_model"
 )

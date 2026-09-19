@@ -166,6 +166,66 @@ var _ = Describe("Loader", func() {
 		})
 	})
 
+	Describe("host environment", func() {
+		hostEnv := func(dir, file string) deployer.HostEnv {
+			GinkgoHelper()
+
+			subject := newLoaderIn(dir, file)
+
+			project, err := subject.LoadComposeProject(context.Background())
+			Expect(err).ShouldNot(HaveOccurred())
+
+			env, err := subject.LoadHostEnv(context.Background(), project)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			return env
+		}
+
+		BeforeEach(func() {
+			GinkgoT().Setenv("HOST_VALUE", "from-host")
+			GinkgoT().Setenv("PASSTHROUGH", "passed")
+			GinkgoT().Setenv("INHERITED", "yes")
+		})
+
+		Context("with a list-form environment", func() {
+			var env deployer.HostEnv
+
+			BeforeEach(func() {
+				env = hostEnv(testdataDir, fixture("hostenv.compose.yml"))
+			})
+
+			It("attributes interpolated, pass-through and env_file keys to the host", func() {
+				Expect(env.Keys("api")).To(Equal([]string{
+					"FROM_FILE",
+					"FROM_HOST",
+					"PASSTHROUGH",
+					"WITH_DEFAULT",
+				}))
+			})
+
+			It("attributes map-form templates and null entries to the host", func() {
+				Expect(env.Keys("worker")).To(Equal([]string{
+					"INHERITED",
+					"TOKEN",
+				}))
+			})
+
+			It("lists nothing for a service whose values are all literal", func() {
+				Expect(env).ToNot(HaveKey("plain"))
+			})
+		})
+
+		It("classifies a service declared in an included file", func() {
+			includeDir := filepath.Join(testdataDir, "include", "envfile")
+
+			env := hostEnv(includeDir, filepath.Join(includeDir, "compose.yml"))
+
+			Expect(env).To(Equal(deployer.HostEnv{
+				"sub": []string{"DEEPER_PATH"},
+			}))
+		})
+	})
+
 	Describe("service directories", func() {
 		includeDir := filepath.Join(testdataDir, "include")
 

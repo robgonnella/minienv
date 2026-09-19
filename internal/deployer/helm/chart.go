@@ -381,6 +381,10 @@ func (b *ChartBuilder) serviceFiles(
 			Name: configMapFile,
 			Data: []byte(filesConfigMapTmpl),
 		},
+		{
+			Name: secretFile,
+			Data: []byte(secretEnvTmpl),
+		},
 	}, manifestFiles, configMapFiles), nil
 }
 
@@ -417,6 +421,10 @@ func (b *ChartBuilder) jobFiles(
 		{
 			Name: configMapFile,
 			Data: []byte(filesConfigMapTmpl),
+		},
+		{
+			Name: secretFile,
+			Data: []byte(secretEnvTmpl),
 		},
 	}, manifestFiles, configMapFiles), nil
 }

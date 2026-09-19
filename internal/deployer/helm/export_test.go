@@ -57,6 +57,13 @@ func (h *Helm) SetProject(project config.ComposeProject) {
 	h.project = project
 }
 
+// ServiceExtension exposes what initProject resolved for one service. The
+// per-service options only meet the extension inside initProject, so this is
+// the only place to assert that they arrived.
+func (h *Helm) ServiceExtension(name string) config.XMiniEnvK8sService {
+	return h.services[name].extension
+}
+
 // ServicesToPublish exposes what initProject derived. Which services earn an
 // endpoint, and in what order, is decided here rather than in the chart.
 func (h *Helm) ServicesToPublish() []config.NgrokEndpointConfig {
