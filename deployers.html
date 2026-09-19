@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-cc5dbe71.js";
+            window.path_to_searchindex_js = "searchindex-347c7a87.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -206,7 +206,7 @@ maintain in your repository.</p>
 <tr><td>Service</td><td><code>deploymentType: service</code> and <code>service.create</code> is true</td></tr>
 <tr><td>ServiceAccount</td><td><code>serviceAccount.create</code> is true</td></tr>
 <tr><td>ConfigMap</td><td><code>configMapFrom</code> names at least one file</td></tr>
-<tr><td>Secret</td><td>compose <code>environment</code> takes a value from the local environment or an <code>env_file</code></td></tr>
+<tr><td>Secret</td><td>compose <code>environment</code> or an <code>env</code> value takes a value from the local environment or an <code>env_file</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -229,7 +229,9 @@ create.</p>
 literally in the compose file is rendered inline on the container. A value
 taken from the local environment — <code>${VAR}</code>, or the bare <code>- VAR</code> form — or
 from an <code>env_file</code> goes into a Secret named after the service and reaches the
-container through <code>envFrom</code>, so it never appears in the Deployment.</p>
+container through <code>envFrom</code>, so it never appears in the Deployment. An <code>env</code>
+entry under <code>x-minienv-k8s-service</code> whose <code>value</code> is <code>${VAR}</code> is placed the
+same way.</p>
 <p>Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget.
 Anything else a service needs is declared explicitly, with <code>configMapFrom</code> or

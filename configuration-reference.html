@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-cc5dbe71.js";
+            window.path_to_searchindex_js = "searchindex-347c7a87.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -310,11 +310,13 @@ attached with <code>envFrom</code>. A change to any value in that Secret replace
 on the next deploy. Values compose could not resolve (the bare <code>- SOME_VAR</code>
 form, with nothing set locally) are dropped rather than set empty.</p>
 <p>An entry here replaces the compose variable of the same name wherever it would
-have gone. A literal <code>value</code> is written into the manifest, so <strong>do not put
-secrets there</strong> if the manifests are visible to others. Sources under <code>envFrom</code>
-are listed after the service’s Secret, so a key they also define wins. A file
-under <code>manifests</code> must not produce a Secret named after the service, since the
-two would collide in the release.</p>
+have gone, and is placed by the same rule: a <code>value</code> written as <code>${VAR}</code> is
+taken from the local environment and goes into the Secret, while a literal
+<code>value</code> is written into the manifest, so <strong>do not put secrets there</strong> if the
+manifests are visible to others. <code>valueFrom</code> entries are passed through
+untouched. Sources under <code>envFrom</code> are listed after the service’s Secret, so a
+key they also define wins. A file under <code>manifests</code> must not produce a Secret
+named after the service, since the two would collide in the release.</p>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   env:
     - name: EXAMPLE_VAR
