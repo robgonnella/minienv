@@ -3,6 +3,7 @@ package resolver_test
 import (
 	"context"
 	"math"
+	"path/filepath"
 
 	"github.com/compose-spec/compose-go/v2/types"
 
@@ -18,23 +19,43 @@ var _ = Describe("DockerService", func() {
 	var (
 		dockerExt config.XMiniEnvDocker
 		svc       compose.Service
+		dir       string
 		mockGit   *gitmocks.MockClient
 	)
 
-	newSvcExt := func() (*resolver.DockerService, error) {
+	newSvcExtWithNgrok := func(
+		ngrokEnabled bool,
+	) (*resolver.DockerService, error) {
 		return resolver.NewDockerService(
 			context.Background(),
-			svc,
-			dockerExt,
-			mockGit,
-			false,
+			resolver.DockerServiceOptions{
+				DockerExt:    dockerExt,
+				Service:      svc,
+				Dir:          dir,
+				GitClient:    mockGit,
+				NgrokEnabled: ngrokEnabled,
+			},
 		)
+	}
+
+	newSvcExt := func() (*resolver.DockerService, error) {
+		return newSvcExtWithNgrok(false)
 	}
 
 	BeforeEach(func() {
 		dockerExt = config.XMiniEnvDocker{Namespace: "namespace"}
 		mockGit = gitmocks.NewMockClient(GinkgoT())
 		svc = compose.Service{Name: "test-service"}
+		dir = ""
+	})
+
+	It("keeps the compose service it was resolved from", func() {
+		svc.Image = "reg/app:v1"
+
+		svcExt, err := newSvcExt()
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(svcExt.Compose).To(Equal(svc))
 	})
 
 	Describe("resolving the image from the compose service", func() {
@@ -108,13 +129,7 @@ var _ = Describe("DockerService", func() {
 		// ngrok resolves to nothing without a token, so every spec here needs
 		// one; the token-absent case is asserted on its own below.
 		newEnabledSvcExt := func() (*resolver.DockerService, error) {
-			return resolver.NewDockerService(
-				context.Background(),
-				svc,
-				dockerExt,
-				mockGit,
-				true,
-			)
+			return newSvcExtWithNgrok(true)
 		}
 
 		withNgrok := func(ngrok map[string]any) {
@@ -295,6 +310,21 @@ var _ = Describe("DockerService", func() {
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(svcExt.Copy[0].HostPath).To(Equal("conf/app.yml"))
+		})
+
+		It("resolves the local path against the declaring directory", func() {
+			dir = filepath.Join("proj", "api")
+
+			declare(map[string]any{
+				"hostPath":      "conf/app.yml",
+				"containerPath": "/etc/app/app.yml",
+			})
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.CopyLocalPath(svcExt.Copy[0])).
+				To(Equal(filepath.Join("proj", "api", "conf", "app.yml")))
 		})
 
 		DescribeTable(

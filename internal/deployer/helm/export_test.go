@@ -66,7 +66,7 @@ func (h *Helm) SetProject(project compose.Project) {
 // per-service options only meet the extension inside initProject, so this is
 // the only place to assert that they arrived.
 func (h *Helm) ServiceExtension(name string) resolver.K8sService {
-	return h.services[name].extension
+	return h.services[name]
 }
 
 // ServicesToPublish exposes what initProject derived. Which services earn an

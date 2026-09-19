@@ -35,6 +35,7 @@ type K8sServiceOptions struct {
 	K8sExt       config.XMiniEnvK8s
 	Service      compose.Service
 	Raw          compose.RawService
+	Dir          string
 	GitClient    git.Client
 	NgrokEnabled bool
 }
@@ -42,6 +43,8 @@ type K8sServiceOptions struct {
 type K8sService struct {
 	config.XMiniEnvK8sService
 
+	Compose   compose.Service
+	Dir       string
 	SecretEnv map[string]string
 }
 
@@ -65,7 +68,7 @@ func NewK8sService(
 		svcExt = map[string]any{}
 	}
 
-	svcExtConfig := &K8sService{}
+	svcExtConfig := &K8sService{Compose: svc, Dir: opts.Dir}
 	if err := mapstructure.Decode(
 		svcExt,
 		&svcExtConfig.XMiniEnvK8sService,
@@ -144,6 +147,23 @@ func (s *K8sService) ChartValues() (map[string]any, error) {
 	}
 
 	return values, nil
+}
+
+func (s *K8sService) ManifestPaths() []string {
+	return joinAll(s.Dir, s.Manifests)
+}
+
+func (s *K8sService) ConfigMapFromPaths() []string {
+	return joinAll(s.Dir, s.ConfigMapFrom)
+}
+
+func joinAll(dir string, paths []string) []string {
+	joined := make([]string, 0, len(paths))
+	for _, p := range paths {
+		joined = append(joined, filepath.Join(dir, p))
+	}
+
+	return joined
 }
 
 func (s *K8sService) resolve(

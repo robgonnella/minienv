@@ -33,7 +33,7 @@ const extensionPrefix = "x-"
 
 // LoadServiceDirs recovers which compose file declared each service: compose
 // merges included files and drops the directory context. This makes it
-// available again
+// available again.
 func LoadServiceDirs(
 	ctx context.Context,
 	project *Project,

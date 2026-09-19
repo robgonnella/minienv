@@ -3,6 +3,7 @@ package resolver_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -37,6 +38,7 @@ var _ = Describe("K8sService", func() {
 		k8sExt       config.XMiniEnvK8s
 		svc          compose.Service
 		raw          compose.RawService
+		dir          string
 		mockGit      *gitmocks.MockClient
 		ngrokEnabled bool
 	)
@@ -51,6 +53,7 @@ var _ = Describe("K8sService", func() {
 				K8sExt:       k8sExt,
 				Service:      svc,
 				Raw:          raw,
+				Dir:          dir,
 				GitClient:    mockGit,
 				NgrokEnabled: ngrokEnabled,
 			})
@@ -61,6 +64,7 @@ var _ = Describe("K8sService", func() {
 		mockGit = gitmocks.NewMockClient(GinkgoT())
 		ngrokEnabled = false
 		raw = compose.RawService{}
+		dir = ""
 		svc = compose.Service{
 			Name:  "test-service",
 			Image: "reg/test-service:v1",
@@ -87,6 +91,13 @@ var _ = Describe("K8sService", func() {
 			Expect(err).To(MatchError(resolver.ErrImageRepositoryMissing))
 			Expect(err).To(MatchError(resolver.ErrImageTagMissing))
 		})
+	})
+
+	It("keeps the compose service it was resolved from", func() {
+		result, err := newSvcExt()
+
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(result.Compose).To(Equal(svc))
 	})
 
 	Describe("image resolution", func() {
@@ -1065,6 +1076,31 @@ var _ = Describe("K8sService", func() {
 			Expect(result.Manifests).To(Equal([]string{"k8s/configmap.yaml"}))
 		})
 
+		It("resolves each path against the declaring directory", func() {
+			dir = filepath.Join("proj", "api")
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"manifests": []any{"k8s/configmap.yaml"},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.ManifestPaths()).To(Equal([]string{
+				filepath.Join("proj", "api", "k8s", "configmap.yaml"),
+			}))
+		})
+
+		It("resolves no paths when none are declared", func() {
+			dir = filepath.Join("proj", "api")
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.ManifestPaths()).To(BeEmpty())
+		})
+
 		DescribeTable(
 			"rejects a path that leaves the project",
 			func(declared string) {
@@ -1117,6 +1153,22 @@ var _ = Describe("K8sService", func() {
 	})
 
 	Describe("configMapFrom", func() {
+		It("resolves each path against the declaring directory", func() {
+			dir = filepath.Join("proj", "db")
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"configMapFrom": []any{"init/01-schema.sql"},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.ConfigMapFromPaths()).To(Equal([]string{
+				filepath.Join("proj", "db", "init", "01-schema.sql"),
+			}))
+		})
+
 		It("carries each declared path through cleaned", func() {
 			svc.Extensions = types.Extensions{
 				config.K8sServiceExtension: map[string]any{

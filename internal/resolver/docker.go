@@ -14,17 +14,27 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type DockerServiceOptions struct {
+	DockerExt    config.XMiniEnvDocker
+	Service      compose.Service
+	Dir          string
+	GitClient    git.Client
+	NgrokEnabled bool
+}
+
 type DockerService struct {
 	config.XMiniEnvDockerService
+
+	Compose compose.Service
+	Dir     string
 }
 
 func NewDockerService(
 	ctx context.Context,
-	svc compose.Service,
-	dockerExt config.XMiniEnvDocker,
-	gitClient git.Client,
-	ngrokEnabled bool,
+	opts DockerServiceOptions,
 ) (*DockerService, error) {
+	svc := opts.Service
+
 	log.Info().Str("service", svc.Name).Msg("loading service extension")
 
 	rawSvcExt, ok := svc.Extensions[config.DockerServiceExtension]
@@ -32,7 +42,7 @@ func NewDockerService(
 		rawSvcExt = map[string]any{}
 	}
 
-	svcExt := &DockerService{}
+	svcExt := &DockerService{Compose: svc, Dir: opts.Dir}
 	if err := mapstructure.Decode(
 		rawSvcExt,
 		&svcExt.XMiniEnvDockerService,
@@ -46,11 +56,11 @@ func NewDockerService(
 
 	if err := svcExt.resolve(
 		ctx,
-		dockerExt,
+		opts.DockerExt,
 		rawSvcExt,
 		svc,
-		gitClient,
-		ngrokEnabled,
+		opts.GitClient,
+		opts.NgrokEnabled,
 	); err != nil {
 		return nil, err
 	}
@@ -64,6 +74,10 @@ func NewDockerService(
 		)
 
 	return svcExt, nil
+}
+
+func (s *DockerService) CopyLocalPath(c config.XMiniEnvDockerCopy) string {
+	return filepath.Join(s.Dir, c.HostPath)
 }
 
 func (s *DockerService) resolve(
