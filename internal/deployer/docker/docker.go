@@ -42,12 +42,6 @@ type remoteContent struct {
 	dotEnv  []byte
 }
 
-type serviceTuple struct {
-	compose   compose.Service
-	extension resolver.DockerService
-	dir       string
-}
-
 type Options struct {
 	DockerExt      config.XMiniEnvDocker
 	Source         compose.Source
@@ -63,7 +57,7 @@ type Docker struct {
 	dockerExt         config.XMiniEnvDocker
 	source            compose.Source
 	project           compose.Project
-	services          map[string]serviceTuple
+	services          map[string]resolver.DockerService
 	servicesToPublish []config.NgrokEndpointConfig
 	transport         transport.Client
 	imageClient       image.Client
@@ -223,26 +217,25 @@ func (d *Docker) initProject(
 	project compose.Project,
 	dirs compose.ServiceDirs,
 ) error {
-	services := map[string]serviceTuple{}
+	services := map[string]resolver.DockerService{}
 	servicesToPublish := []config.NgrokEndpointConfig{}
 
 	for _, svc := range project.Services {
 		svcExt, err := resolver.NewDockerService(
 			ctx,
-			svc,
-			d.dockerExt,
-			d.gitClient,
-			d.ngrokAuthToken != "",
+			resolver.DockerServiceOptions{
+				DockerExt:    d.dockerExt,
+				Service:      svc,
+				Dir:          dirs.Dir(svc.Name),
+				GitClient:    d.gitClient,
+				NgrokEnabled: d.ngrokAuthToken != "",
+			},
 		)
 		if err != nil {
 			return err
 		}
 
-		services[svc.Name] = serviceTuple{
-			compose:   svc,
-			extension: *svcExt,
-			dir:       dirs.Dir(svc.Name),
-		}
+		services[svc.Name] = *svcExt
 
 		// Port is zero unless ngrok is configured and usable.
 		if svcExt.Ngrok.Port != 0 {
@@ -316,7 +309,7 @@ func (d *Docker) buildAndPushServiceImages(ctx context.Context) error {
 	dockerServices := []image.ServiceProperties{}
 
 	for name, svc := range d.services {
-		if svc.extension.Skip {
+		if svc.Skip {
 			log.
 				Warn().
 				Str("service", name).
@@ -325,10 +318,10 @@ func (d *Docker) buildAndPushServiceImages(ctx context.Context) error {
 			continue
 		}
 
-		if svc.compose.Build != nil {
+		if svc.Compose.Build != nil {
 			dockerServices = append(dockerServices, image.NewServiceProperties(
-				svc.compose,
-				svc.extension.Image,
+				svc.Compose,
+				svc.Image,
 			))
 		}
 	}
@@ -379,13 +372,15 @@ func (d *Docker) logRemoteFilesDryRun() {
 		Msgf("would have created compose config: %s", d.remotePaths.composeFile)
 
 	for _, name := range d.copyableServices() {
-		for _, c := range d.services[name].extension.Copy {
+		svc := d.services[name]
+
+		for _, c := range svc.Copy {
 			log.
 				Warn().
 				Str("service", name).
 				Msgf(
 					"would have copied %s to %s",
-					d.copyLocalPath(name, c),
+					svc.CopyLocalPath(c),
 					d.copyRemotePath(name, c),
 				)
 		}
@@ -432,7 +427,7 @@ func (d *Docker) skippedServices() []string {
 	names := []string{}
 
 	for name, svc := range d.services {
-		if svc.extension.Skip {
+		if svc.Skip {
 			names = append(names, name)
 		}
 	}
@@ -474,7 +469,7 @@ func (d *Docker) modifyComposeContent(
 
 	extensionMap := map[string]config.ServiceImage{}
 	for k, v := range d.services {
-		extensionMap[k] = v.extension.Image
+		extensionMap[k] = v.Image
 	}
 
 	if err := compose.SetImages(project, extensionMap); err != nil {
@@ -524,13 +519,6 @@ func (d *Docker) ngrokConfigContent() ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-func (d *Docker) copyLocalPath(
-	name string,
-	c config.XMiniEnvDockerCopy,
-) string {
-	return filepath.Join(d.services[name].dir, c.HostPath)
-}
-
 // Per service: two services may declare the same hostPath from different
 // directories.
 func (d *Docker) copyRemotePath(
@@ -547,11 +535,11 @@ func (d *Docker) copyableServices() []string {
 
 	for name, svc := range d.services {
 		// Nothing on the remote would mount what a skipped service declares.
-		if svc.extension.Skip {
+		if svc.Skip {
 			continue
 		}
 
-		if len(svc.extension.Copy) > 0 {
+		if len(svc.Copy) > 0 {
 			names = append(names, name)
 		}
 	}
@@ -563,7 +551,7 @@ func (d *Docker) copyableServices() []string {
 
 func (d *Docker) bindCopies(project *compose.Project) {
 	for _, name := range d.copyableServices() {
-		for _, c := range d.services[name].extension.Copy {
+		for _, c := range d.services[name].Copy {
 			compose.BindVolume(
 				project,
 				name,
@@ -584,9 +572,11 @@ func (d *Docker) copyFiles() error {
 	}
 
 	for _, name := range d.copyableServices() {
-		for _, c := range d.services[name].extension.Copy {
+		svc := d.services[name]
+
+		for _, c := range svc.Copy {
 			if err := d.transport.CopyPath(
-				d.copyLocalPath(name, c),
+				svc.CopyLocalPath(c),
 				d.copyRemotePath(name, c),
 			); err != nil {
 				return err

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -38,12 +37,6 @@ const ngrokDeploymentTimeout = time.Minute
 // Injected so the dependency-ordered walk is drivable without a cluster.
 type deployFn func(ctx context.Context, svc compose.Service) error
 
-type serviceTuple struct {
-	compose   compose.Service
-	extension resolver.K8sService
-	dir       string
-}
-
 type Options struct {
 	K8sExt         config.XMiniEnvK8s
 	Source         compose.Source
@@ -59,7 +52,7 @@ type Helm struct {
 	k8sExt            config.XMiniEnvK8s
 	source            compose.Source
 	project           compose.Project
-	services          map[string]serviceTuple
+	services          map[string]resolver.K8sService
 	servicesToPublish []config.NgrokEndpointConfig
 	chartBuilder      *ChartBuilder
 	actionConfig      *helmaction.Configuration
@@ -227,7 +220,7 @@ func (h *Helm) initProject(
 	dirs compose.ServiceDirs,
 	raw compose.RawServices,
 ) error {
-	services := map[string]serviceTuple{}
+	services := map[string]resolver.K8sService{}
 	servicesToPublish := []config.NgrokEndpointConfig{}
 
 	for _, svc := range project.Services {
@@ -235,6 +228,7 @@ func (h *Helm) initProject(
 			K8sExt:       h.k8sExt,
 			Service:      svc,
 			Raw:          raw.Get(svc.Name),
+			Dir:          dirs.Dir(svc.Name),
 			GitClient:    h.gitClient,
 			NgrokEnabled: h.ngrokAuthToken != "",
 		})
@@ -242,11 +236,7 @@ func (h *Helm) initProject(
 			return err
 		}
 
-		services[svc.Name] = serviceTuple{
-			compose:   svc,
-			extension: *svcExt,
-			dir:       dirs.Dir(svc.Name),
-		}
+		services[svc.Name] = *svcExt
 
 		// Port is zero unless ngrok is configured and usable.
 		if svcExt.Ngrok.Port != 0 {
@@ -289,15 +279,6 @@ func (h *Helm) initProject(
 	return nil
 }
 
-func joinAll(dir string, paths []string) []string {
-	joined := make([]string, 0, len(paths))
-	for _, p := range paths {
-		joined = append(joined, filepath.Join(dir, p))
-	}
-
-	return joined
-}
-
 func (h *Helm) deployService(
 	ctx context.Context,
 	svc compose.Service,
@@ -311,7 +292,7 @@ func (h *Helm) deployService(
 		)
 	}
 
-	if internalService.extension.Skip {
+	if internalService.Skip {
 		log.
 			Warn().
 			Str("service", svc.Name).
@@ -320,12 +301,12 @@ func (h *Helm) deployService(
 		return nil
 	}
 
-	values, err := internalService.extension.ChartValues()
+	values, err := internalService.ChartValues()
 	if err != nil {
 		return err
 	}
 
-	timeout := internalService.extension.DeploymentTimeout
+	timeout := internalService.DeploymentTimeout
 	if timeout == "" {
 		timeout = config.HelmDefaultDeploymentTimeout
 	}
@@ -341,9 +322,9 @@ func (h *Helm) deployService(
 
 	chart, err := h.chartBuilder.Build(
 		svc.Name,
-		internalService.extension.DeploymentType,
-		joinAll(internalService.dir, internalService.extension.Manifests),
-		joinAll(internalService.dir, internalService.extension.ConfigMapFrom),
+		internalService.DeploymentType,
+		internalService.ManifestPaths(),
+		internalService.ConfigMapFromPaths(),
 	)
 	if err != nil {
 		return err
@@ -354,7 +335,7 @@ func (h *Helm) deployService(
 		chart,
 		values,
 		parsedTimeout,
-		internalService.extension.Recreate,
+		internalService.Recreate,
 	)
 }
 
@@ -362,16 +343,16 @@ func (h *Helm) buildAndPushServiceImages(ctx context.Context) error {
 	dockerServices := []image.ServiceProperties{}
 
 	for name, svc := range h.services {
-		if svc.extension.Skip {
+		if svc.Skip {
 			log.Warn().Str("service", name).Msg("detected skip: skipping")
 
 			continue
 		}
 
-		if svc.compose.Build != nil {
+		if svc.Compose.Build != nil {
 			dockerServices = append(dockerServices, image.NewServiceProperties(
-				svc.compose,
-				svc.extension.Image.ServiceImage,
+				svc.Compose,
+				svc.Image.ServiceImage,
 			))
 		}
 	}
