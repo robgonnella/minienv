@@ -1,3 +1,13 @@
+# [0.6.0](https://github.com/robgonnella/minienv/compare/v0.5.0...v0.6.0) - 2026-09-19
+
+### 🚀 Features
+
+- supports k8s extension env vars from host [_(83c83a6)_](https://github.com/robgonnella/minienv/commit/83c83a6f5d5d4719316f5c450319a838bb4a90f3)
+
+### 🚜 Refactor
+
+- minor refactor to deployer initialization [_(c878bd0)_](https://github.com/robgonnella/minienv/commit/c878bd08d8cac53cb542f7d796d406cff4ad0071)
+
 # [0.5.0](https://github.com/robgonnella/minienv/compare/v0.4.0...v0.5.0) - 2026-09-19
 
 ### 🚀 Features
