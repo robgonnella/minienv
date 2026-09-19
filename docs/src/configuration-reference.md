@@ -127,11 +127,13 @@ on the next deploy. Values compose could not resolve (the bare `- SOME_VAR`
 form, with nothing set locally) are dropped rather than set empty.
 
 An entry here replaces the compose variable of the same name wherever it would
-have gone. A literal `value` is written into the manifest, so **do not put
-secrets there** if the manifests are visible to others. Sources under `envFrom`
-are listed after the service's Secret, so a key they also define wins. A file
-under `manifests` must not produce a Secret named after the service, since the
-two would collide in the release.
+have gone, and is placed by the same rule: a `value` written as `${VAR}` is
+taken from the local environment and goes into the Secret, while a literal
+`value` is written into the manifest, so **do not put secrets there** if the
+manifests are visible to others. `valueFrom` entries are passed through
+untouched. Sources under `envFrom` are listed after the service's Secret, so a
+key they also define wins. A file under `manifests` must not produce a Secret
+named after the service, since the two would collide in the release.
 
 ```yaml
 x-minienv-k8s-service:

@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer/docker"
 	imagemocks "github.com/robgonnella/minienv/internal/image/mocks"
@@ -21,11 +22,9 @@ var _ = Describe("Docker", func() {
 			})
 		}
 
+		// Init validates before it loads anything, so no Source is needed.
 		It("rejects an empty namespace on Init", func() {
-			err := newDeployer("").Init(
-				context.Background(),
-				config.ComposeProject{},
-			)
+			err := newDeployer("").Init(context.Background())
 
 			Expect(err).To(MatchError(docker.ErrInvalidExtension))
 		})
@@ -43,9 +42,10 @@ var _ = Describe("Docker", func() {
 		})
 
 		It("accepts a populated namespace", func() {
-			err := newDeployer("my-namespace").Init(
+			err := newDeployer("my-namespace").InitProject(
 				context.Background(),
-				config.ComposeProject{},
+				compose.Project{},
+				nil,
 			)
 
 			Expect(err).ToNot(HaveOccurred())
@@ -53,10 +53,7 @@ var _ = Describe("Docker", func() {
 
 		// Would otherwise aim Destroy's removal at ~/.minienv itself.
 		It("rejects a namespace that normalizes away to nothing", func() {
-			err := newDeployer("!!!").Init(
-				context.Background(),
-				config.ComposeProject{},
-			)
+			err := newDeployer("!!!").Init(context.Background())
 
 			Expect(err).To(MatchError(docker.ErrInvalidExtension))
 		})
@@ -102,16 +99,16 @@ volumes:
 				Return(nil).
 				Once()
 
+			// Driven through Init rather than InitProject: this is the one
+			// place the deployer's own compose load is exercised end to end.
 			subject := docker.New(docker.Options{
 				DockerExt:   config.XMiniEnvDocker{Namespace: "my-namespace"},
+				Source:      sourceOf(projectOnDisk(composeFile)),
 				Transport:   mockTransport,
 				ImageClient: mockImage,
 			})
 
-			Expect(subject.Init(
-				context.Background(),
-				projectOnDisk(composeFile),
-			)).To(Succeed())
+			Expect(subject.Init(context.Background())).To(Succeed())
 
 			rendered = captureDeploy(subject, mockTransport).get("compose.yml")
 		})
@@ -167,8 +164,11 @@ volumes:
 				ImageClient: mockImage,
 			})
 
-			Expect(subject.Init(context.Background(), projectOnDisk(compose))).
-				To(Succeed())
+			Expect(subject.InitProject(
+				context.Background(),
+				projectOnDisk(compose),
+				nil,
+			)).To(Succeed())
 
 			return captureDeploy(subject, mockTransport).get("compose.yml")
 		}
@@ -244,12 +244,15 @@ services:
 
 			subject := docker.New(docker.Options{
 				DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
-				ServiceDirs: map[string]string{"api": workDir, "worker": workDir},
 				Transport:   mockTransport,
 				ImageClient: mockImage,
 			})
 
-			Expect(subject.Init(context.Background(), project)).To(Succeed())
+			Expect(subject.InitProject(
+				context.Background(),
+				project,
+				compose.ServiceDirs{"api": workDir, "worker": workDir},
+			)).To(Succeed())
 
 			files, copied := captureDeployAndCopies(subject, mockTransport)
 			rendered = files.get("compose.yml")
@@ -332,14 +335,17 @@ services:
 
 			subject := docker.New(docker.Options{
 				DockerExt:   config.XMiniEnvDocker{Namespace: testNamespace},
-				ServiceDirs: map[string]string{"api": apiDir, "db": dbDir},
 				Transport:   mockTransport,
 				ImageClient: mockImage,
 			})
 
 			project := projectOnDiskWith(copyCompose, nil)
 
-			Expect(subject.Init(context.Background(), project)).To(Succeed())
+			Expect(subject.InitProject(
+				context.Background(),
+				project,
+				compose.ServiceDirs{"api": apiDir, "db": dbDir},
+			)).To(Succeed())
 
 			files, copied := captureDeployAndCopies(subject, mockTransport)
 			rendered = files.get("compose.yml")
@@ -375,12 +381,12 @@ services:
 				Transport: mockTransport,
 			})
 
-			Expect(subject.Init(context.Background(), projectOnDisk(`
+			Expect(subject.InitProject(context.Background(), projectOnDisk(`
 name: test-project
 services:
   api:
     image: repo/api:v1
-`))).To(Succeed())
+`), nil)).To(Succeed())
 
 			Expect(captureDeploy(subject, mockTransport)).
 				To(HaveKey("~/.minienv/mybranch/compose.yml"))

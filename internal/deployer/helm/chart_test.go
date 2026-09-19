@@ -14,9 +14,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer/helm"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
+	"github.com/robgonnella/minienv/internal/resolver"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
 	helmengine "helm.sh/helm/v3/pkg/engine"
@@ -225,6 +227,25 @@ func envFromSources(
 	return containers[0].EnvFrom
 }
 
+// literalEnvironment restates a spec-built compose environment in the list
+// form the uninterpolated load would produce had every value been written
+// literally in the file.
+func literalEnvironment(svc compose.Service) []any {
+	env := make([]any, 0, len(svc.Environment))
+
+	for key, value := range svc.Environment {
+		if value == nil {
+			env = append(env, key)
+
+			continue
+		}
+
+		env = append(env, key+"="+*value)
+	}
+
+	return env
+}
+
 func writeTempFile(name string, data []byte) string {
 	GinkgoHelper()
 
@@ -260,35 +281,39 @@ var _ = Describe("ChartBuilder", func() {
 
 	// Specs render against values production actually produces rather than a
 	// hand-written map, so a key the templates read cannot drift from the one
-	// ToChartValuesMap writes.
-	resolvedValuesWithHostEnv := func(
-		svc config.ComposeService,
-		hostKeys []string,
+	// ChartValues writes.
+	resolvedValuesWithRaw := func(
+		svc compose.Service,
+		raw compose.RawService,
 	) map[string]any {
 		GinkgoHelper()
 
-		svcExt, err := config.NewXMiniEnvK8sService(
+		svcExt, err := resolver.NewK8sService(
 			context.Background(),
-			config.XMiniEnvK8sServiceOptions{
+			resolver.K8sServiceOptions{
 				K8sExt:       k8sExt,
 				Service:      svc,
+				Raw:          raw,
 				GitClient:    mockGit,
 				NgrokEnabled: false,
-				HostEnvKeys:  hostKeys,
 			},
 		)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		values, err := svcExt.ToChartValuesMap()
+		values, err := svcExt.ChartValues()
 		Expect(err).ShouldNot(HaveOccurred())
 
 		return values
 	}
 
-	resolvedValues := func(svc config.ComposeService) map[string]any {
+	// Without a raw view every compose value reads as literal, so nothing
+	// lands in the Secret.
+	resolvedValues := func(svc compose.Service) map[string]any {
 		GinkgoHelper()
 
-		return resolvedValuesWithHostEnv(svc, nil)
+		return resolvedValuesWithRaw(svc, compose.RawService{
+			Environment: literalEnvironment(svc),
+		})
 	}
 
 	BeforeEach(func() {
@@ -363,12 +388,12 @@ var _ = Describe("ChartBuilder", func() {
 
 		Context("rendered against resolved service values", func() {
 			var (
-				svc      config.ComposeService
+				svc      compose.Service
 				rendered map[string]string
 			)
 
 			BeforeEach(func() {
-				svc = config.ComposeService{
+				svc = compose.Service{
 					Name:  "hello",
 					Image: "reg/hello:v1",
 					Ports: []types.ServicePortConfig{
@@ -455,7 +480,7 @@ var _ = Describe("ChartBuilder", func() {
 
 		Context("with a declared manifest", func() {
 			var (
-				svc      config.ComposeService
+				svc      compose.Service
 				declared []string
 				built    *helmchart.Chart
 				rendered map[string]string
@@ -464,7 +489,7 @@ var _ = Describe("ChartBuilder", func() {
 			const configMap = "testdata/configmap.yaml"
 
 			BeforeEach(func() {
-				svc = config.ComposeService{
+				svc = compose.Service{
 					Name:  "hello",
 					Image: "reg/hello:v1",
 					Ports: []types.ServicePortConfig{
@@ -536,7 +561,7 @@ var _ = Describe("ChartBuilder", func() {
 
 		Context("with configMapFrom files", func() {
 			var (
-				svc      config.ComposeService
+				svc      compose.Service
 				declared []string
 				built    *helmchart.Chart
 				rendered map[string]string
@@ -548,7 +573,7 @@ var _ = Describe("ChartBuilder", func() {
 			)
 
 			BeforeEach(func() {
-				svc = config.ComposeService{
+				svc = compose.Service{
 					Name:  "hello",
 					Image: "reg/hello:v1",
 				}
@@ -672,7 +697,7 @@ var _ = Describe("ChartBuilder", func() {
 				)
 				Expect(err).ShouldNot(HaveOccurred())
 
-				rendered = render(chart, resolvedValues(config.ComposeService{
+				rendered = render(chart, resolvedValues(compose.Service{
 					Name:  "hello",
 					Image: "reg/hello:v1",
 				}))
@@ -703,11 +728,10 @@ var _ = Describe("ChartBuilder", func() {
 
 		Context("with host-sourced environment", func() {
 			var (
-				svc      config.ComposeService
+				svc      compose.Service
+				raw      compose.RawService
 				rendered map[string]string
 			)
-
-			hostKeys := []string{"DB_PASSWORD"}
 
 			renderWithHostEnv := func() map[string]string {
 				GinkgoHelper()
@@ -720,16 +744,22 @@ var _ = Describe("ChartBuilder", func() {
 				)
 				Expect(err).ShouldNot(HaveOccurred())
 
-				return render(chart, resolvedValuesWithHostEnv(svc, hostKeys))
+				return render(chart, resolvedValuesWithRaw(svc, raw))
 			}
 
 			BeforeEach(func() {
-				svc = config.ComposeService{
+				svc = compose.Service{
 					Name:  "hello",
 					Image: "reg/hello:v1",
 					Environment: types.MappingWithEquals{
 						"DB_PASSWORD": new("hunter2"),
 						"LOG_LEVEL":   new("debug"),
+					},
+				}
+				raw = compose.RawService{
+					Environment: []any{
+						"DB_PASSWORD=${DB_PASSWORD}",
+						"LOG_LEVEL=debug",
 					},
 				}
 			})
@@ -775,6 +805,42 @@ var _ = Describe("ChartBuilder", func() {
 
 				Expect(podAnnotation(renderWithHostEnv(), "checksum/secret")).
 					ToNot(Equal(podAnnotation(rendered, "checksum/secret")))
+			})
+
+			Context("with a templated extension env entry of the same name", func() {
+				BeforeEach(func() {
+					svc.Extensions = types.Extensions{
+						config.K8sServiceExtension: map[string]any{
+							"env": []map[string]any{
+								{
+									"name":  "DB_PASSWORD",
+									"value": "from-extension",
+								},
+							},
+						},
+					}
+					raw.Extensions = map[string]any{
+						config.K8sServiceExtension: map[string]any{
+							"env": []any{
+								map[string]any{
+									"name":  "DB_PASSWORD",
+									"value": "${EXTENSION_PASSWORD}",
+								},
+							},
+						},
+					}
+				})
+
+				It("renders the extension value in the Secret", func() {
+					secret := secretNamed(rendered, "hello/templates/secret.yaml")
+					Expect(secret.StringData).To(Equal(map[string]string{
+						"DB_PASSWORD": "from-extension",
+					}))
+
+					deployment := templateNamed(rendered, "deployment.yaml")
+					Expect(deployment).ToNot(ContainSubstring("hunter2"))
+					Expect(deployment).ToNot(ContainSubstring("from-extension"))
+				})
 			})
 
 			Context("alongside extension envFrom sources", func() {
@@ -865,7 +931,7 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("renders configMapFrom files and stamps the job pod", func() {
-			svc := config.ComposeService{
+			svc := compose.Service{
 				Name:  "migrate",
 				Image: "reg/migrate:v1",
 				Extensions: types.Extensions{
@@ -893,7 +959,7 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("renders host-sourced environment as a Secret on the job", func() {
-			svc := config.ComposeService{
+			svc := compose.Service{
 				Name:  "migrate",
 				Image: "reg/migrate:v1",
 				Environment: types.MappingWithEquals{
@@ -916,7 +982,9 @@ var _ = Describe("ChartBuilder", func() {
 
 			rendered := render(
 				chart,
-				resolvedValuesWithHostEnv(svc, []string{"DB_PASSWORD"}),
+				resolvedValuesWithRaw(svc, compose.RawService{
+					Environment: []any{"DB_PASSWORD=${DB_PASSWORD}"},
+				}),
 			)
 			secret := secretNamed(rendered, "migrate/templates/secret.yaml")
 
@@ -930,7 +998,7 @@ var _ = Describe("ChartBuilder", func() {
 		})
 
 		It("mounts volumes onto the job pod", func() {
-			svc := config.ComposeService{
+			svc := compose.Service{
 				Name:  "migrate",
 				Image: "reg/migrate:v1",
 				Extensions: types.Extensions{
@@ -1039,13 +1107,13 @@ var _ = Describe("ChartBuilder", func() {
 
 		Context("rendered against resolved job values", func() {
 			var (
-				svc      config.ComposeService
+				svc      compose.Service
 				chart    *helmchart.Chart
 				rendered map[string]string
 			)
 
 			BeforeEach(func() {
-				svc = config.ComposeService{
+				svc = compose.Service{
 					Name:    "migrate",
 					Image:   "reg/migrate:v1",
 					Command: types.ShellCommand{"/bin/sh", "-c", "echo ready"},

@@ -35,8 +35,11 @@ var _ = Describe("Docker ngrok config", func() {
 			NgrokAuthToken: token,
 		})
 
-		Expect(subject.Init(context.Background(), projectOnDisk(compose))).
-			To(Succeed())
+		Expect(subject.InitProject(
+			context.Background(),
+			projectOnDisk(compose),
+			nil,
+		)).To(Succeed())
 
 		return captureDeploy(subject, mockTransport)
 	}

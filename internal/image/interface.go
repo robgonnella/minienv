@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 )
 
@@ -17,7 +18,7 @@ type ServiceProperties struct {
 }
 
 func NewServiceProperties(
-	composeSvc config.ComposeService,
+	composeSvc compose.Service,
 	extSvcImage config.ServiceImage,
 ) ServiceProperties {
 	return ServiceProperties{

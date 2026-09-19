@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer/helm"
 	helmaction "helm.sh/helm/v3/pkg/action"
@@ -188,7 +189,7 @@ var _ = Describe("namespace lifecycle", func() {
 		})
 
 		JustBeforeEach(func() {
-			subject.SetProject(config.ComposeProject{Name: "test-project"})
+			subject.SetProject(compose.Project{Name: "test-project"})
 		})
 
 		It("keeps the namespace by default", func() {
@@ -250,19 +251,20 @@ var _ = Describe("dry-run without a cluster", func() {
 	})
 
 	It("deploys a service without touching helm", func() {
-		svc := config.ComposeService{Name: "hello", Image: "reg/hello:v1"}
-		project := config.ComposeProject{
+		svc := compose.Service{Name: "hello", Image: "reg/hello:v1"}
+		project := compose.Project{
 			Name:     "test-project",
 			Services: types.Services{"hello": svc},
 		}
 
-		Expect(subject.InitProject(context.Background(), project)).To(Succeed())
+		Expect(subject.InitProject(context.Background(), project, nil, nil)).
+			To(Succeed())
 
 		Expect(subject.DeployService(context.Background(), svc)).To(Succeed())
 	})
 
 	It("destroys a project without touching helm or the api", func() {
-		subject.SetProject(config.ComposeProject{Name: "test-project"})
+		subject.SetProject(compose.Project{Name: "test-project"})
 
 		Expect(subject.Destroy(context.Background())).To(Succeed())
 	})

@@ -1,13 +1,6 @@
-// Package config models the x-minienv extension fields and resolves them
-// against the surrounding docker-compose configuration.
+// Package config models the x-minienv extension fields. It holds types only:
+// cmd/schema reflects these structs, doc comments included, into schema.json.
 package config
-
-import "github.com/compose-spec/compose-go/v2/types"
-
-// ComposeService wraps the compose service definition for easier
-// differentiation.
-type ComposeService = types.ServiceConfig
-type ComposeProject = types.Project
 
 // XMiniEnv top-level extension configuration for deploying to various targets.
 type XMiniEnv struct {

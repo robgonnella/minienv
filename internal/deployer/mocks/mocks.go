@@ -8,7 +8,6 @@ import (
 	"context"
 	"net/url"
 
-	"github.com/robgonnella/minienv/internal/config"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -142,16 +141,16 @@ func (_c *MockDeployer_Destroy_Call) RunAndReturn(run func(ctx context.Context) 
 }
 
 // Init provides a mock function for the type MockDeployer
-func (_mock *MockDeployer) Init(ctx context.Context, project config.ComposeProject) error {
-	ret := _mock.Called(ctx, project)
+func (_mock *MockDeployer) Init(ctx context.Context) error {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Init")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, config.ComposeProject) error); ok {
-		r0 = returnFunc(ctx, project)
+	if returnFunc, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -165,24 +164,18 @@ type MockDeployer_Init_Call struct {
 
 // Init is a helper method to define mock.On call
 //   - ctx context.Context
-//   - project config.ComposeProject
-func (_e *MockDeployer_Expecter) Init(ctx any, project any) *MockDeployer_Init_Call {
-	return &MockDeployer_Init_Call{Call: _e.mock.On("Init", ctx, project)}
+func (_e *MockDeployer_Expecter) Init(ctx any) *MockDeployer_Init_Call {
+	return &MockDeployer_Init_Call{Call: _e.mock.On("Init", ctx)}
 }
 
-func (_c *MockDeployer_Init_Call) Run(run func(ctx context.Context, project config.ComposeProject)) *MockDeployer_Init_Call {
+func (_c *MockDeployer_Init_Call) Run(run func(ctx context.Context)) *MockDeployer_Init_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 config.ComposeProject
-		if args[1] != nil {
-			arg1 = args[1].(config.ComposeProject)
-		}
 		run(
 			arg0,
-			arg1,
 		)
 	})
 	return _c
@@ -193,7 +186,7 @@ func (_c *MockDeployer_Init_Call) Return(err error) *MockDeployer_Init_Call {
 	return _c
 }
 
-func (_c *MockDeployer_Init_Call) RunAndReturn(run func(ctx context.Context, project config.ComposeProject) error) *MockDeployer_Init_Call {
+func (_c *MockDeployer_Init_Call) RunAndReturn(run func(ctx context.Context) error) *MockDeployer_Init_Call {
 	_c.Call.Return(run)
 	return _c
 }

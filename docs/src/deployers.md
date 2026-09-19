@@ -23,14 +23,14 @@ Per-service overrides go under `x-minienv-k8s-service`.
 
 Per compose service:
 
-| Resource       | When                                                                            |
-| -------------- | ------------------------------------------------------------------------------- |
-| Deployment     | `deploymentType: service` (the default)                                         |
-| Job            | `deploymentType: job`                                                           |
-| Service        | `deploymentType: service` and `service.create` is true                          |
-| ServiceAccount | `serviceAccount.create` is true                                                 |
-| ConfigMap      | `configMapFrom` names at least one file                                         |
-| Secret         | compose `environment` takes a value from the local environment or an `env_file` |
+| Resource       | When                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------- |
+| Deployment     | `deploymentType: service` (the default)                                                           |
+| Job            | `deploymentType: job`                                                                             |
+| Service        | `deploymentType: service` and `service.create` is true                                            |
+| ServiceAccount | `serviceAccount.create` is true                                                                   |
+| ConfigMap      | `configMapFrom` names at least one file                                                           |
+| Secret         | compose `environment` or an `env` value takes a value from the local environment or an `env_file` |
 
 Once per namespace:
 
@@ -47,7 +47,9 @@ Compose `environment` is split by where each value came from. A value written
 literally in the compose file is rendered inline on the container. A value
 taken from the local environment — `${VAR}`, or the bare `- VAR` form — or
 from an `env_file` goes into a Secret named after the service and reaches the
-container through `envFrom`, so it never appears in the Deployment.
+container through `envFrom`, so it never appears in the Deployment. An `env`
+entry under `x-minienv-k8s-service` whose `value` is `${VAR}` is placed the
+same way.
 
 Nothing else is derived from the compose file — no Ingress,
 PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget.

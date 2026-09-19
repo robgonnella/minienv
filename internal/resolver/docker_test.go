@@ -1,4 +1,4 @@
-package config_test
+package resolver_test
 
 import (
 	"context"
@@ -8,19 +8,21 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
+	"github.com/robgonnella/minienv/internal/resolver"
 )
 
-var _ = Describe("XMiniEnvDockerService", func() {
+var _ = Describe("DockerService", func() {
 	var (
 		dockerExt config.XMiniEnvDocker
-		svc       config.ComposeService
+		svc       compose.Service
 		mockGit   *gitmocks.MockClient
 	)
 
-	newSvcExt := func() (*config.XMiniEnvDockerService, error) {
-		return config.NewXMiniEnvDockerService(
+	newSvcExt := func() (*resolver.DockerService, error) {
+		return resolver.NewDockerService(
 			context.Background(),
 			svc,
 			dockerExt,
@@ -32,7 +34,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 	BeforeEach(func() {
 		dockerExt = config.XMiniEnvDocker{Namespace: "namespace"}
 		mockGit = gitmocks.NewMockClient(GinkgoT())
-		svc = config.ComposeService{Name: "test-service"}
+		svc = compose.Service{Name: "test-service"}
 	})
 
 	Describe("resolving the image from the compose service", func() {
@@ -74,7 +76,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrImageDigestUnsupported))
+			Expect(err).To(MatchError(resolver.ErrImageDigestUnsupported))
 		})
 
 		It("lets the extension override the compose image", func() {
@@ -98,15 +100,15 @@ var _ = Describe("XMiniEnvDockerService", func() {
 		It("errors when there is no image anywhere", func() {
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrImageRepositoryMissing))
+			Expect(err).To(MatchError(resolver.ErrImageRepositoryMissing))
 		})
 	})
 
 	Describe("resolving ngrok", func() {
 		// ngrok resolves to nothing without a token, so every spec here needs
 		// one; the token-absent case is asserted on its own below.
-		newEnabledSvcExt := func() (*config.XMiniEnvDockerService, error) {
-			return config.NewXMiniEnvDockerService(
+		newEnabledSvcExt := func() (*resolver.DockerService, error) {
+			return resolver.NewDockerService(
 				context.Background(),
 				svc,
 				dockerExt,
@@ -142,7 +144,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 			_, err := newEnabledSvcExt()
 
-			Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
+			Expect(err).To(MatchError(resolver.ErrNgrokPortMismatch))
 		})
 
 		It("rejects a port when the service declares none", func() {
@@ -152,7 +154,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 			_, err := newEnabledSvcExt()
 
-			Expect(err).To(MatchError(config.ErrNgrokPortMismatch))
+			Expect(err).To(MatchError(resolver.ErrNgrokPortMismatch))
 		})
 
 		It("rejects a container port that does not fit a uint16", func() {
@@ -164,7 +166,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 			_, err := newEnabledSvcExt()
 
-			Expect(err).To(MatchError(config.ErrInvalidPort))
+			Expect(err).To(MatchError(resolver.ErrInvalidPort))
 		})
 
 		It("inherits the top-level traffic policy", func() {
@@ -305,7 +307,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.ErrCopyHostPath))
+				Expect(err).To(MatchError(resolver.ErrCopyHostPath))
 			},
 			Entry("an absolute path", "/etc/app.yml"),
 			Entry("a path climbing out", "../app.yml"),
@@ -324,7 +326,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 				_, err := newSvcExt()
 
-				Expect(err).To(MatchError(config.ErrCopyContainerPath))
+				Expect(err).To(MatchError(resolver.ErrCopyContainerPath))
 			},
 			Entry("a relative path", "etc/app.yml"),
 			Entry("a dot-relative path", "./etc/app.yml"),
@@ -345,7 +347,7 @@ var _ = Describe("XMiniEnvDockerService", func() {
 
 			_, err := newSvcExt()
 
-			Expect(err).To(MatchError(config.ErrCopyContainerPath))
+			Expect(err).To(MatchError(resolver.ErrCopyContainerPath))
 		})
 	})
 

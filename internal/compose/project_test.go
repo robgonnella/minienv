@@ -16,8 +16,8 @@ import (
 
 // newProject returns a fresh fixture per spec: every function under test
 // mutates the project in place.
-func newProject() *config.ComposeProject {
-	return &config.ComposeProject{
+func newProject() *compose.Project {
+	return &compose.Project{
 		Name: "demo",
 		Services: types.Services{
 			"api": {
@@ -58,7 +58,7 @@ func newProject() *config.ComposeProject {
 	}
 }
 
-var _ = Describe("Compose", func() {
+var _ = Describe("Project", func() {
 	Describe("ReloadWithNewName", func() {
 		const composeFile = `
 name: original
@@ -78,7 +78,7 @@ volumes:
 
 			Expect(os.WriteFile(file, []byte(composeFile), 0o600)).To(Succeed())
 
-			project := config.ComposeProject{
+			project := compose.Project{
 				Name:         "original",
 				WorkingDir:   dir,
 				ComposeFiles: []string{file},
@@ -110,7 +110,7 @@ services:
     image: reg/api:${TAG_VAR}
 `), 0o600)).To(Succeed())
 
-			project := config.ComposeProject{
+			project := compose.Project{
 				Name:         "original",
 				WorkingDir:   dir,
 				ComposeFiles: []string{file},
@@ -134,7 +134,7 @@ services:
 			Expect(os.WriteFile(file, []byte(composeFile), 0o600)).To(Succeed())
 
 			env := types.Mapping{"GREETING_VAR": "hello"}
-			project := config.ComposeProject{
+			project := compose.Project{
 				Name:         "original",
 				WorkingDir:   dir,
 				ComposeFiles: []string{file},

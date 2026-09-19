@@ -1,5 +1,6 @@
-// Package compose holds the in-place rewrites that turn a locally loaded
-// compose project into the one a remote host runs.
+// Package compose owns every compose-go call: loading a project, walking its
+// includes, and the in-place rewrites that turn a locally loaded project into
+// the one a remote host runs.
 package compose
 
 import (
@@ -14,6 +15,9 @@ import (
 	"github.com/robgonnella/minienv/internal/errs"
 )
 
+type Project = types.Project
+type Service = types.ServiceConfig
+
 const bindMountType = "bind"
 
 // ReloadWithNewName re-parses rather than renaming in place: compose derives
@@ -21,9 +25,9 @@ const bindMountType = "bind"
 // load redoes that derivation.
 func ReloadWithNewName(
 	ctx context.Context,
-	project config.ComposeProject,
+	project Project,
 	name string,
-) (*config.ComposeProject, error) {
+) (*Project, error) {
 	normalizedName := composeloader.NormalizeProjectName(name)
 
 	details, err := composeloader.LoadConfigFiles(
@@ -66,7 +70,7 @@ func ReloadWithNewName(
 
 // RemoveServices deletes the named services along with every depends_on edge
 // pointing at them, which compose would otherwise reject as dangling.
-func RemoveServices(project *config.ComposeProject, names []string) {
+func RemoveServices(project *Project, names []string) {
 	if len(names) == 0 {
 		return
 	}
@@ -84,14 +88,14 @@ func RemoveServices(project *config.ComposeProject, names []string) {
 	}
 }
 
-func ClearPortMappings(project *config.ComposeProject) {
+func ClearPortMappings(project *Project) {
 	for i, svc := range project.Services {
 		svc.Ports = nil
 		project.Services[i] = svc
 	}
 }
 
-func ClearBuildSettings(project *config.ComposeProject) {
+func ClearBuildSettings(project *Project) {
 	for i, svc := range project.Services {
 		svc.Build = nil
 		project.Services[i] = svc
@@ -100,7 +104,7 @@ func ClearBuildSettings(project *config.ComposeProject) {
 
 // ClearEnvAndLabelFiles drops paths that name the developer's machine. Compose
 // has already merged what they contained into environment and labels.
-func ClearEnvAndLabelFiles(project *config.ComposeProject) {
+func ClearEnvAndLabelFiles(project *Project) {
 	for i, svc := range project.Services {
 		svc.EnvFiles = nil
 		svc.LabelFiles = nil
@@ -108,7 +112,7 @@ func ClearEnvAndLabelFiles(project *config.ComposeProject) {
 	}
 }
 
-func ClearEmptyCommandsAndEntryPoints(project *config.ComposeProject) {
+func ClearEmptyCommandsAndEntryPoints(project *Project) {
 	for i, svc := range project.Services {
 		// An empty slice marshals as `command: []`, which compose reads as
 		// "override to empty".
@@ -124,7 +128,7 @@ func ClearEmptyCommandsAndEntryPoints(project *config.ComposeProject) {
 	}
 }
 
-func ClearServiceVolumes(project *config.ComposeProject) {
+func ClearServiceVolumes(project *Project) {
 	for i, svc := range project.Services {
 		vols := make([]types.ServiceVolumeConfig, 0, len(svc.Volumes))
 
@@ -143,7 +147,7 @@ func ClearServiceVolumes(project *config.ComposeProject) {
 }
 
 func SetImages(
-	project *config.ComposeProject,
+	project *Project,
 	extensionMap map[string]config.ServiceImage,
 ) error {
 	for i, svc := range project.Services {
@@ -178,7 +182,7 @@ func SetImages(
 // InjectNgrokService turns configChecksum into a label; see
 // config.NgrokConfigChecksumLabel.
 func InjectNgrokService(
-	project *config.ComposeProject,
+	project *Project,
 	remoteConfigPath string,
 	configChecksum string,
 ) {
@@ -191,7 +195,7 @@ func InjectNgrokService(
 	}
 
 	serviceName := "ngrok"
-	service := config.ComposeService{
+	service := Service{
 		Name:  serviceName,
 		Image: fmt.Sprintf("%s:%s", config.NgrokImageRepo, config.NgrokImageTag),
 		Labels: types.Labels{
@@ -226,7 +230,7 @@ func InjectNgrokService(
 }
 
 func BindVolume(
-	project *config.ComposeProject,
+	project *Project,
 	svcName string,
 	hostPath string,
 	containerPath string,
@@ -245,7 +249,7 @@ func BindVolume(
 	project.Services[svcName] = svc
 }
 
-func Marshal(project *config.ComposeProject) ([]byte, error) {
+func Marshal(project *Project) ([]byte, error) {
 	out, err := project.MarshalYAML()
 	if err != nil {
 		return nil, errs.Errorf(

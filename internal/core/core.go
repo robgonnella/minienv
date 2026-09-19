@@ -11,7 +11,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/deployer"
 	"github.com/robgonnella/minienv/internal/errs"
 	"github.com/rs/zerolog/log"
@@ -21,24 +20,17 @@ import (
 const tablePadding = 3
 
 type Core struct {
-	project  config.ComposeProject
 	deployer deployer.Deployer
 }
 
-func New(
-	project config.ComposeProject,
-	deployer deployer.Deployer,
-) *Core {
-	return &Core{
-		project:  project,
-		deployer: deployer,
-	}
+func New(deployer deployer.Deployer) *Core {
+	return &Core{deployer: deployer}
 }
 
 func (c *Core) Deploy(ctx context.Context) error {
 	log.Info().Str("deployer", c.deployer.String()).Msg("initializing")
 
-	if err := c.deployer.Init(ctx, c.project); err != nil {
+	if err := c.deployer.Init(ctx); err != nil {
 		return errs.Errorf(
 			ErrDeployerInit,
 			"failed to initialize deployer: %w",
@@ -60,7 +52,7 @@ func (c *Core) Deploy(ctx context.Context) error {
 func (c *Core) Destroy(ctx context.Context) error {
 	log.Info().Str("deployer", c.deployer.String()).Msg("initializing")
 
-	if err := c.deployer.Init(ctx, c.project); err != nil {
+	if err := c.deployer.Init(ctx); err != nil {
 		return errs.Errorf(
 			ErrDeployerInit,
 			"failed to initialize deployer: %w",
