@@ -1,3 +1,13 @@
+# [0.5.0](https://github.com/robgonnella/minienv/compare/v0.4.0...v0.5.0) - 2026-09-19
+
+### 🚀 Features
+
+- handles host vars for k8s [_(d1f48f1)_](https://github.com/robgonnella/minienv/commit/d1f48f1f0b2871bd7c24f159826535c772bd9ef2)
+
+### 🧹 Chore
+
+- minor cleanup [_(bed13f8)_](https://github.com/robgonnella/minienv/commit/bed13f8a0909d2b76018e5ed082cebdc16e01e3b)
+
 # [0.4.0](https://github.com/robgonnella/minienv/compare/v0.3.0...v0.4.0) - 2026-09-18
 
 ### 🚀 Features
