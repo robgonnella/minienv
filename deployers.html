@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5fb2b97d.js";
+            window.path_to_searchindex_js = "searchindex-cc5dbe71.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -206,6 +206,7 @@ maintain in your repository.</p>
 <tr><td>Service</td><td><code>deploymentType: service</code> and <code>service.create</code> is true</td></tr>
 <tr><td>ServiceAccount</td><td><code>serviceAccount.create</code> is true</td></tr>
 <tr><td>ConfigMap</td><td><code>configMapFrom</code> names at least one file</td></tr>
+<tr><td>Secret</td><td>compose <code>environment</code> takes a value from the local environment or an <code>env_file</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -224,11 +225,15 @@ maintain in your repository.</p>
 destroy it is left in place, unless <code>removeNamespaceOnDestroy</code> is <code>true</code> — then
 the whole namespace is deleted, including anything in it that minienv did not
 create.</p>
+<p>Compose <code>environment</code> is split by where each value came from. A value written
+literally in the compose file is rendered inline on the container. A value
+taken from the local environment — <code>${VAR}</code>, or the bare <code>- VAR</code> form — or
+from an <code>env_file</code> goes into a Secret named after the service and reaches the
+container through <code>envFrom</code>, so it never appears in the Deployment.</p>
 <p>Nothing else is derived from the compose file — no Ingress,
-PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget, and
-compose <code>environment</code> is rendered inline rather than into a ConfigMap or
-Secret. Anything else a service needs is declared explicitly, with
-<code>configMapFrom</code> or <code>manifests</code>.</p>
+PersistentVolumeClaim, HorizontalPodAutoscaler or PodDisruptionBudget.
+Anything else a service needs is declared explicitly, with <code>configMapFrom</code> or
+<code>manifests</code>.</p>
 <h2 id="docker"><a class="header" href="#docker">Docker</a></h2>
 <p>Deploys the whole project to a single remote host as one <code>docker compose</code>
 project, over a transport.</p>
