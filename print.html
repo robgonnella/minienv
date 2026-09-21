@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-347c7a87.js";
+            window.path_to_searchindex_js = "searchindex-7ca71d9c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -473,8 +473,8 @@ service you are not building:</p>
 deploy — set <code>image.repository</code> and <code>image.tag</code> in the extension instead.</p>
 </blockquote>
 <h2 id="tagging-per-commit-with-git"><a class="header" href="#tagging-per-commit-with-git">Tagging per commit with <code>+git</code></a></h2>
-<p>The literal string <code>+git</code> in a tag is replaced with the current short commit
-SHA:</p>
+<p>The literal string <code>+git</code> in a tag is replaced with the short commit SHA of the
+repository containing the compose file that declares the service:</p>
 <pre><code class="language-yaml">x-minienv-k8s-service:
   image:
     repository: myorg/api
@@ -482,7 +482,8 @@ SHA:</p>
 </code></pre>
 <p>Every commit gets a unique tag, so the target always pulls the image you just
 built instead of a cached one. It works as a suffix too — <code>tag: v1-+git</code>
-produces something like <code>v1-a1b2c3d</code>.</p>
+produces something like <code>v1-a1b2c3d</code>. A service pulled in through <code>include</code>
+from another repository gets that repository’s SHA.</p>
 <h2 id="platforms"><a class="header" href="#platforms">Platforms</a></h2>
 <p>Override when the target’s architecture differs from your laptop, or when you
 need both:</p>
