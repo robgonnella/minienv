@@ -470,7 +470,8 @@ func (s *K8sService) resolveServiceImage(
 		Platforms:  s.Image.Platforms,
 	}
 
-	if err := resolveServiceImage(ctx, image, svc, gitClient); err != nil {
+	err := resolveServiceImage(ctx, image, svc, s.Dir, gitClient)
+	if err != nil {
 		return err
 	}
 

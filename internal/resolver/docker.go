@@ -188,5 +188,5 @@ func (s *DockerService) resolveServiceImage(
 		return nil
 	}
 
-	return resolveServiceImage(ctx, &s.Image, svc, gitClient)
+	return resolveServiceImage(ctx, &s.Image, svc, s.Dir, gitClient)
 }

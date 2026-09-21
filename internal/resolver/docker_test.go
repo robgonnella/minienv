@@ -13,6 +13,7 @@ import (
 	"github.com/robgonnella/minienv/internal/config"
 	gitmocks "github.com/robgonnella/minienv/internal/git/mocks"
 	"github.com/robgonnella/minienv/internal/resolver"
+	"github.com/stretchr/testify/mock"
 )
 
 var _ = Describe("DockerService", func() {
@@ -235,6 +236,22 @@ var _ = Describe("DockerService", func() {
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(svcExt.Skip).To(BeTrue())
+		})
+
+		It("expands a +git tag from the service directory", func() {
+			svc.Image = "reg/app:+git"
+			dir = "/repo/web"
+
+			mockGit.
+				EXPECT().
+				ShortSha(mock.Anything, "/repo/web").
+				Return("abc1234", nil).
+				Once()
+
+			svcExt, err := newSvcExt()
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(svcExt.Image.Tag).To(Equal("abc1234"))
 		})
 
 		It("does not expand a +git tag when skipped", func() {
