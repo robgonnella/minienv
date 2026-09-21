@@ -14,14 +14,15 @@ import (
 
 const defaultImagePlatform = "linux/amd64"
 
-// A "+git" tag is resolved here rather than at deploy time so every chart in
-// one run embeds the same sha.
+// A "+git" tag is resolved against the declaring compose file's directory, so
+// a service included from another repository embeds that repository's sha.
 func expandGitTag(
 	ctx context.Context,
 	svcExtImage *config.ServiceImage,
+	dir string,
 	gitClient git.Client,
 ) error {
-	sha, err := gitClient.ShortSha(ctx)
+	sha, err := gitClient.ShortSha(ctx, dir)
 	if err != nil {
 		return errs.Errorf(
 			ErrGitShortSha,
@@ -65,6 +66,7 @@ func resolveServiceImage(
 	ctx context.Context,
 	svcExtImage *config.ServiceImage,
 	svc compose.Service,
+	dir string,
 	gitClient git.Client,
 ) error {
 	svcImageRepo, svcImageTag, err := parseImageRef(svc.Image)
@@ -101,7 +103,7 @@ func resolveServiceImage(
 	}
 
 	if strings.Contains(svcExtImage.Tag, "+git") {
-		if err := expandGitTag(ctx, svcExtImage, gitClient); err != nil {
+		if err := expandGitTag(ctx, svcExtImage, dir, gitClient); err != nil {
 			return err
 		}
 	}

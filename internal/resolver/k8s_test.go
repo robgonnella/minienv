@@ -138,12 +138,17 @@ var _ = Describe("K8sService", func() {
 		Context("when the tag contains +git", func() {
 			BeforeEach(func() {
 				svc.Image = "reg/test-service:+git"
+				dir = "/repo/api"
 			})
 
 			// git.Client is responsible for handing back a bare sha; the
 			// trailing-newline contract is pinned in internal/git's own specs.
-			It("substitutes the short sha into the tag", func() {
-				mockGit.EXPECT().ShortSha(mock.Anything).Return("abc1234", nil).Once()
+			It("substitutes the service directory's short sha", func() {
+				mockGit.
+					EXPECT().
+					ShortSha(mock.Anything, "/repo/api").
+					Return("abc1234", nil).
+					Once()
 
 				result, err := newSvcExt()
 
@@ -154,7 +159,7 @@ var _ = Describe("K8sService", func() {
 			It("returns a config error when git fails", func() {
 				mockGit.
 					EXPECT().
-					ShortSha(mock.Anything).
+					ShortSha(mock.Anything, "/repo/api").
 					Return("", errNotARepo).
 					Once()
 

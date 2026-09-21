@@ -12,32 +12,28 @@ import (
 )
 
 type GitClient struct {
-	// Empty means the calling process's own directory. Specs set it to reach
-	// ShortSha's error branch without os.Chdir.
-	dir string
-
 	mu sync.Mutex
-	// A client resolves one sha and reuses it, so a run embeds the same sha in
-	// every image tag off a single git process rather than one per service.
-	cachedSha string
+	// One git process per directory rather than per service, so services
+	// declared from the same directory share a sha.
+	cache map[string]string
 }
 
 func NewGitClient() *GitClient {
-	return &GitClient{}
+	return &GitClient{cache: map[string]string{}}
 }
 
-// ShortSha returns the abbreviated commit hash of HEAD. The trailing newline
-// git writes is stripped here so callers can embed the value directly.
-func (c *GitClient) ShortSha(ctx context.Context) (string, error) {
+// ShortSha returns the abbreviated commit hash of HEAD for the repository
+// containing dir; empty dir means the calling process's own directory.
+func (c *GitClient) ShortSha(ctx context.Context, dir string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.cachedSha != "" {
-		return c.cachedSha, nil
+	if sha, ok := c.cache[dir]; ok {
+		return sha, nil
 	}
 
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
-	cmd.Dir = c.dir
+	cmd.Dir = dir
 
 	data, err := cmd.Output()
 	if err != nil {
@@ -57,7 +53,8 @@ func (c *GitClient) ShortSha(ctx context.Context) (string, error) {
 		return "", errs.Errorf(ErrShortSha, "git rev-parse failed: %w", err)
 	}
 
-	c.cachedSha = strings.TrimSpace(string(data))
+	sha := strings.TrimSpace(string(data))
+	c.cache[dir] = sha
 
-	return c.cachedSha, nil
+	return sha, nil
 }

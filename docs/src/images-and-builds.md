@@ -39,8 +39,8 @@ An untagged `image: myapp` resolves to `myapp:latest` — see
 
 ## Tagging per commit with `+git`
 
-The literal string `+git` in a tag is replaced with the current short commit
-SHA:
+The literal string `+git` in a tag is replaced with the short commit SHA of the
+repository containing the compose file that declares the service:
 
 ```yaml
 x-minienv-k8s-service:
@@ -51,7 +51,8 @@ x-minienv-k8s-service:
 
 Every commit gets a unique tag, so the target always pulls the image you just
 built instead of a cached one. It works as a suffix too — `tag: v1-+git`
-produces something like `v1-a1b2c3d`.
+produces something like `v1-a1b2c3d`. A service pulled in through `include`
+from another repository gets that repository's SHA.
 
 ## Platforms
 
