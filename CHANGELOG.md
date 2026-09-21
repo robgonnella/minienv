@@ -1,3 +1,9 @@
+# [0.6.1](https://github.com/robgonnella/minienv/compare/v0.6.0...v0.6.1) - 2026-09-21
+
+### 🐛 Bug Fixes
+
+- fixes issue with getting short-shas for included compose projects [_(a34848e)_](https://github.com/robgonnella/minienv/commit/a34848e6898c60c5c5e3a0f08be97cf76cb8905a)
+
 # [0.6.0](https://github.com/robgonnella/minienv/compare/v0.5.0...v0.6.0) - 2026-09-19
 
 ### 🚀 Features
