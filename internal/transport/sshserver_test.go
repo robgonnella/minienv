@@ -27,17 +27,18 @@ const sshDirMode = 0o700
 
 // An ssh server in this process, on loopback.
 type testServer struct {
-	listener net.Listener
-	hostKey  ssh.PublicKey
-
-	mu        sync.Mutex
-	commands  []string
-	exitCode  int
-	refuseAll bool
-	closed    bool
-	sftpHome  string
-
-	wg sync.WaitGroup
+	listener    net.Listener
+	hostKey     ssh.PublicKey
+	mu          sync.Mutex
+	commands    []string
+	exitCode    int
+	refuseAll   bool
+	hang        bool
+	closed      bool
+	sftpHome    string
+	release     chan struct{}
+	releaseOnce sync.Once
+	wg          sync.WaitGroup
 }
 
 // Registers its own teardown: --randomize-all means a leaked accept goroutine
@@ -63,6 +64,7 @@ func newTestServer() *testServer {
 		listener: listener,
 		hostKey:  sshHostPub,
 		sftpHome: GinkgoT().TempDir(),
+		release:  make(chan struct{}),
 	}
 
 	config := &ssh.ServerConfig{
@@ -98,6 +100,23 @@ func (s *testServer) RefuseSessions() {
 	defer s.mu.Unlock()
 
 	s.refuseAll = true
+}
+
+// Hang accepts every exec and never reports an exit status, so the client
+// stays blocked in the command until it gives up or Release is called.
+func (s *testServer) Hang() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.hang = true
+}
+
+func (s *testServer) Release() {
+	s.mu.Lock()
+	s.hang = false
+	s.mu.Unlock()
+
+	s.releaseOnce.Do(func() { close(s.release) })
 }
 
 func (s *testServer) Commands() []string {
@@ -194,6 +213,12 @@ func (s *testServer) handleChannel(newChannel ssh.NewChannel) {
 
 		_ = req.Reply(true, nil)
 
+		if s.hanging() {
+			<-s.release
+
+			return
+		}
+
 		status := make([]byte, execPayloadPrefixLen)
 		binary.BigEndian.PutUint32(status, uint32(s.exit()))
 		_, _ = channel.SendRequest("exit-status", false, status)
@@ -249,8 +274,32 @@ func (s *testServer) stop() {
 	s.closed = true
 	s.mu.Unlock()
 
+	s.Release()
+
 	_ = s.listener.Close()
 	s.wg.Wait()
+}
+
+func (s *testServer) hanging() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.hang
+}
+
+// A listening socket that is never accepted from: the TCP connect completes
+// from the backlog, and the client then waits forever for a server banner.
+func silentPort() uint16 {
+	GinkgoHelper()
+
+	var lc net.ListenConfig
+
+	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	Expect(err).ToNot(HaveOccurred())
+
+	DeferCleanup(func() { _ = listener.Close() })
+
+	return uint16(listener.Addr().(*net.TCPAddr).Port)
 }
 
 func (s *testServer) exit() int {
