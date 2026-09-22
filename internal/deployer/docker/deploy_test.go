@@ -144,21 +144,21 @@ func captureDeployAndCopies(
 
 	mockTransport.
 		EXPECT().
-		CreateFile(mock.Anything, mock.Anything).
-		Run(func(path string, content []byte) {
+		CreateFile(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, path string, content []byte) {
 			files[path] = string(content)
 		}).
 		Return(nil)
 	// Maybe: most specs declare no copy paths at all.
 	mockTransport.
 		EXPECT().
-		CopyPath(mock.Anything, mock.Anything).
-		Run(func(localPath, remotePath string) {
+		CopyPath(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, localPath, remotePath string) {
 			copies[localPath] = remotePath
 		}).
 		Return(nil).
 		Maybe()
-	mockTransport.EXPECT().RunCommand(mock.Anything).Return(nil)
+	mockTransport.EXPECT().RunCommand(mock.Anything, mock.Anything).Return(nil)
 	mockTransport.EXPECT().Close().Return(nil)
 
 	Expect(subject.Deploy(context.Background())).To(Succeed())
@@ -449,12 +449,12 @@ services:
 
 				mockTransport.
 					EXPECT().
-					CreateFile(mock.Anything, mock.Anything).
+					CreateFile(mock.Anything, mock.Anything, mock.Anything).
 					Return(nil)
 				mockTransport.
 					EXPECT().
-					RunCommand(mock.Anything).
-					Run(func(cmd string) {
+					RunCommand(mock.Anything, mock.Anything).
+					Run(func(_ context.Context, cmd string) {
 						issued = append(issued, cmd)
 					}).
 					Return(nil)
@@ -493,12 +493,12 @@ services:
 
 				mockTransport.
 					EXPECT().
-					CreateFile(mock.Anything, mock.Anything).
+					CreateFile(mock.Anything, mock.Anything, mock.Anything).
 					Return(nil)
 				mockTransport.
 					EXPECT().
-					RunCommand(mock.Anything).
-					Run(func(cmd string) {
+					RunCommand(mock.Anything, mock.Anything).
+					Run(func(_ context.Context, cmd string) {
 						issued = append(issued, cmd)
 					}).
 					Return(nil)
@@ -512,10 +512,28 @@ services:
 			})
 		})
 
+		It("hands the caller's context to the transport", func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			fromCaller := mock.MatchedBy(func(c context.Context) bool {
+				return c == ctx
+			})
+
+			mockTransport.
+				EXPECT().
+				CreateFile(fromCaller, mock.Anything, mock.Anything).
+				Return(nil)
+			mockTransport.EXPECT().RunCommand(fromCaller, mock.Anything).Return(nil)
+			mockTransport.EXPECT().Close().Return(nil)
+
+			Expect(subject.Deploy(ctx)).To(Succeed())
+		})
+
 		It("does not run the up command when a write fails", func() {
 			mockTransport.
 				EXPECT().
-				CreateFile(mock.Anything, mock.Anything).
+				CreateFile(mock.Anything, mock.Anything, mock.Anything).
 				Return(errTransport).
 				Once()
 			mockTransport.EXPECT().Close().Return(nil).Once()
@@ -529,12 +547,12 @@ services:
 
 			mockTransport.
 				EXPECT().
-				CreateFile(mock.Anything, mock.Anything).
+				CreateFile(mock.Anything, mock.Anything, mock.Anything).
 				Return(nil)
 			mockTransport.
 				EXPECT().
-				RunCommand(mock.Anything).
-				Run(func(cmd string) { issued = append(issued, cmd) }).
+				RunCommand(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, cmd string) { issued = append(issued, cmd) }).
 				Return(nil)
 			mockTransport.EXPECT().Close().Return(nil)
 
@@ -569,16 +587,16 @@ services:
 
 			mockTransport.
 				EXPECT().
-				CreateFile(mock.Anything, mock.Anything).
+				CreateFile(mock.Anything, mock.Anything, mock.Anything).
 				Return(nil)
 			mockTransport.
 				EXPECT().
-				RunCommand(mock.Anything).
-				Run(func(cmd string) { issued = append(issued, cmd) }).
+				RunCommand(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, cmd string) { issued = append(issued, cmd) }).
 				Return(nil)
 			mockTransport.
 				EXPECT().
-				CopyPath(mock.Anything, mock.Anything).
+				CopyPath(mock.Anything, mock.Anything, mock.Anything).
 				Return(errTransport).
 				Once()
 			mockTransport.EXPECT().Close().Return(nil)
@@ -642,8 +660,8 @@ services:
 
 			mockTransport.
 				EXPECT().
-				RunCommand(mock.Anything).
-				Run(func(cmd string) { issued = cmd }).
+				RunCommand(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, cmd string) { issued = cmd }).
 				Return(nil).
 				Once()
 			mockTransport.EXPECT().Close().Return(nil).Once()
@@ -656,6 +674,22 @@ services:
 
 			Expect(issued).To(ContainSubstring("cd " + remoteDir))
 			Expect(issued).To(ContainSubstring("docker compose down"))
+		})
+
+		It("hands the caller's context to the transport", func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			mockTransport.
+				EXPECT().
+				RunCommand(mock.MatchedBy(func(c context.Context) bool {
+					return c == ctx
+				}), mock.Anything).
+				Return(nil).
+				Once()
+			mockTransport.EXPECT().Close().Return(nil).Once()
+
+			Expect(subject.Destroy(ctx)).To(Succeed())
 		})
 
 		It("removes the directory even when compose down fails", func() {

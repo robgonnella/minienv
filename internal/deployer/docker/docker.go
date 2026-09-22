@@ -148,17 +148,18 @@ func (d *Docker) Deploy(ctx context.Context) error {
 
 	defer d.closeTransport()
 
-	if err := d.writeRemoteFiles(remoteContent); err != nil {
+	if err := d.writeRemoteFiles(ctx, remoteContent); err != nil {
 		return err
 	}
 
-	if err := d.copyFiles(); err != nil {
+	if err := d.copyFiles(ctx); err != nil {
 		return err
 	}
 
 	// --remove-orphans reaps the ngrok container left by a previous deploy that
 	// published when this one does not.
 	return d.transport.RunCommand(
+		ctx,
 		fmt.Sprintf(
 			"cd %s && docker compose up -d --remove-orphans",
 			d.remotePaths.projectDir,
@@ -166,8 +167,7 @@ func (d *Docker) Deploy(ctx context.Context) error {
 	)
 }
 
-// Destroy takes no ctx: transport.Client honours no cancellation to thread.
-func (d *Docker) Destroy(_ context.Context) error {
+func (d *Docker) Destroy(ctx context.Context) error {
 	if err := d.validateExtension(); err != nil {
 		return err
 	}
@@ -186,6 +186,7 @@ func (d *Docker) Destroy(_ context.Context) error {
 	// The directory holds the .env carrying the auth token, so removal is
 	// sequenced rather than chained on down succeeding. Its status is kept.
 	return d.transport.RunCommand(
+		ctx,
 		fmt.Sprintf(
 			"cd %[1]s 2>/dev/null || exit 0; "+
 				"docker compose down --volumes --remove-orphans; "+
@@ -333,8 +334,12 @@ func (d *Docker) buildAndPushServiceImages(ctx context.Context) error {
 	return nil
 }
 
-func (d *Docker) writeRemoteFiles(content *remoteContent) error {
+func (d *Docker) writeRemoteFiles(
+	ctx context.Context,
+	content *remoteContent,
+) error {
 	if err := d.transport.CreateFile(
+		ctx,
 		d.remotePaths.composeFile,
 		content.compose,
 	); err != nil {
@@ -345,6 +350,7 @@ func (d *Docker) writeRemoteFiles(content *remoteContent) error {
 	// auth token a previous publishing deploy left beside it.
 	if len(d.servicesToPublish) == 0 {
 		return d.transport.RunCommand(
+			ctx,
 			fmt.Sprintf(
 				"rm -f %s %s",
 				d.remotePaths.dotEnvFile,
@@ -354,13 +360,18 @@ func (d *Docker) writeRemoteFiles(content *remoteContent) error {
 	}
 
 	if err := d.transport.CreateFile(
+		ctx,
 		d.remotePaths.dotEnvFile,
 		content.dotEnv,
 	); err != nil {
 		return err
 	}
 
-	return d.transport.CreateFile(d.remotePaths.ngrokConfig, content.ngrok)
+	return d.transport.CreateFile(
+		ctx,
+		d.remotePaths.ngrokConfig,
+		content.ngrok,
+	)
 }
 
 // Paths only: the rendered compose file is fully interpolated by this point, so
@@ -564,9 +575,10 @@ func (d *Docker) bindCopies(project *compose.Project) {
 
 // Replaced rather than merged, so a path dropped from the config leaves
 // nothing behind.
-func (d *Docker) copyFiles() error {
+func (d *Docker) copyFiles(ctx context.Context) error {
 	if err := d.transport.RunCommand(
-		"rm -rf " + d.remotePaths.copiesDir,
+		ctx,
+		"rm -rf "+d.remotePaths.copiesDir,
 	); err != nil {
 		return err
 	}
@@ -576,6 +588,7 @@ func (d *Docker) copyFiles() error {
 
 		for _, c := range svc.Copy {
 			if err := d.transport.CopyPath(
+				ctx,
 				svc.CopyLocalPath(c),
 				d.copyRemotePath(name, c),
 			); err != nil {

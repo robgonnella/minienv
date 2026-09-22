@@ -55,5 +55,5 @@ func setupLogging() {
 
 func main() {
 	setupLogging()
-	command.Execute()
+	os.Exit(command.Execute())
 }

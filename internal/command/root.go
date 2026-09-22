@@ -2,7 +2,9 @@ package command
 
 import (
 	"context"
-	goos "os"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/robgonnella/minienv/internal/core"
 	"github.com/robgonnella/minienv/internal/git"
@@ -24,6 +26,10 @@ compose config`,
 based on your existing docker-compose config. It allows you to effortlessly
 deploy any docker-compose configuration to various remote environments, and
 make those environments accessible for review and testing.`,
+		SilenceErrors: true,
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			cmd.SilenceUsage = true
+		},
 	}
 
 	flags := cmd.PersistentFlags()
@@ -44,10 +50,20 @@ make those environments accessible for review and testing.`,
 
 // Execute runs the CLI. Every layer below should take its context from the one
 // created here, so cancellation has a single origin.
-func Execute() {
-	if err := newRootCmd().ExecuteContext(context.Background()); err != nil {
-		log.Fatal().Err(err).Msg("command failed")
+func Execute() int {
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	if err := newRootCmd().ExecuteContext(ctx); err != nil {
+		log.Error().Err(err).Msg("command failed")
+		return 1
 	}
+
+	return 0
 }
 
 func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
@@ -71,7 +87,7 @@ func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 		return nil, err
 	}
 
-	ngrokAPIKey := goos.Getenv("NGROK_API_KEY")
+	ngrokAPIKey := os.Getenv("NGROK_API_KEY")
 	if ngrokAPIKey == "" {
 		log.
 			Warn().
@@ -95,8 +111,8 @@ func getLoaderOptions(cmd *cobra.Command) (*loader.LoaderOpts, error) {
 		ImageClient:      imageClient,
 		GitClient:        gitClient,
 		PublishClient:    publishClient,
-		NgrokAuthToken:   goos.Getenv("NGROK_AUTHTOKEN"),
-		HelmDriver:       goos.Getenv("HELM_DRIVER"),
+		NgrokAuthToken:   os.Getenv("NGROK_AUTHTOKEN"),
+		HelmDriver:       os.Getenv("HELM_DRIVER"),
 	}, nil
 }
 

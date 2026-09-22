@@ -6,6 +6,7 @@ import "github.com/robgonnella/minienv/internal/errs"
 
 const (
 	ErrInvalidExtension   errs.Kind = "transport.invalid_extension"
+	ErrCancelled          errs.Kind = "transport.cancelled"
 	ErrUserHomeDir        errs.Kind = "transport.user_home_dir"
 	ErrSSHTransportUser   errs.Kind = "transport.ssh_transport_user"
 	ErrSSHIdentityResolve errs.Kind = "transport.ssh_identity_resolve"

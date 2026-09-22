@@ -5,6 +5,8 @@
 package transportmocks
 
 import (
+	"context"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -80,16 +82,16 @@ func (_c *MockClient_Close_Call) RunAndReturn(run func() error) *MockClient_Clos
 }
 
 // CopyPath provides a mock function for the type MockClient
-func (_mock *MockClient) CopyPath(localPath string, remotePath string) error {
-	ret := _mock.Called(localPath, remotePath)
+func (_mock *MockClient) CopyPath(ctx context.Context, localPath string, remotePath string) error {
+	ret := _mock.Called(ctx, localPath, remotePath)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CopyPath")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, string) error); ok {
-		r0 = returnFunc(localPath, remotePath)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = returnFunc(ctx, localPath, remotePath)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -102,17 +104,143 @@ type MockClient_CopyPath_Call struct {
 }
 
 // CopyPath is a helper method to define mock.On call
+//   - ctx context.Context
 //   - localPath string
 //   - remotePath string
-func (_e *MockClient_Expecter) CopyPath(localPath any, remotePath any) *MockClient_CopyPath_Call {
-	return &MockClient_CopyPath_Call{Call: _e.mock.On("CopyPath", localPath, remotePath)}
+func (_e *MockClient_Expecter) CopyPath(ctx any, localPath any, remotePath any) *MockClient_CopyPath_Call {
+	return &MockClient_CopyPath_Call{Call: _e.mock.On("CopyPath", ctx, localPath, remotePath)}
 }
 
-func (_c *MockClient_CopyPath_Call) Run(run func(localPath string, remotePath string)) *MockClient_CopyPath_Call {
+func (_c *MockClient_CopyPath_Call) Run(run func(ctx context.Context, localPath string, remotePath string)) *MockClient_CopyPath_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockClient_CopyPath_Call) Return(err error) *MockClient_CopyPath_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockClient_CopyPath_Call) RunAndReturn(run func(ctx context.Context, localPath string, remotePath string) error) *MockClient_CopyPath_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateFile provides a mock function for the type MockClient
+func (_mock *MockClient) CreateFile(ctx context.Context, filepath string, content []byte) error {
+	ret := _mock.Called(ctx, filepath, content)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateFile")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte) error); ok {
+		r0 = returnFunc(ctx, filepath, content)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockClient_CreateFile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateFile'
+type MockClient_CreateFile_Call struct {
+	*mock.Call
+}
+
+// CreateFile is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filepath string
+//   - content []byte
+func (_e *MockClient_Expecter) CreateFile(ctx any, filepath any, content any) *MockClient_CreateFile_Call {
+	return &MockClient_CreateFile_Call{Call: _e.mock.On("CreateFile", ctx, filepath, content)}
+}
+
+func (_c *MockClient_CreateFile_Call) Run(run func(ctx context.Context, filepath string, content []byte)) *MockClient_CreateFile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []byte
+		if args[2] != nil {
+			arg2 = args[2].([]byte)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockClient_CreateFile_Call) Return(err error) *MockClient_CreateFile_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockClient_CreateFile_Call) RunAndReturn(run func(ctx context.Context, filepath string, content []byte) error) *MockClient_CreateFile_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RunCommand provides a mock function for the type MockClient
+func (_mock *MockClient) RunCommand(ctx context.Context, cmd string) error {
+	ret := _mock.Called(ctx, cmd)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RunCommand")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, cmd)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockClient_RunCommand_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunCommand'
+type MockClient_RunCommand_Call struct {
+	*mock.Call
+}
+
+// RunCommand is a helper method to define mock.On call
+//   - ctx context.Context
+//   - cmd string
+func (_e *MockClient_Expecter) RunCommand(ctx any, cmd any) *MockClient_RunCommand_Call {
+	return &MockClient_RunCommand_Call{Call: _e.mock.On("RunCommand", ctx, cmd)}
+}
+
+func (_c *MockClient_RunCommand_Call) Run(run func(ctx context.Context, cmd string)) *MockClient_RunCommand_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
@@ -126,120 +254,12 @@ func (_c *MockClient_CopyPath_Call) Run(run func(localPath string, remotePath st
 	return _c
 }
 
-func (_c *MockClient_CopyPath_Call) Return(err error) *MockClient_CopyPath_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockClient_CopyPath_Call) RunAndReturn(run func(localPath string, remotePath string) error) *MockClient_CopyPath_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CreateFile provides a mock function for the type MockClient
-func (_mock *MockClient) CreateFile(filepath string, content []byte) error {
-	ret := _mock.Called(filepath, content)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CreateFile")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, []byte) error); ok {
-		r0 = returnFunc(filepath, content)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockClient_CreateFile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateFile'
-type MockClient_CreateFile_Call struct {
-	*mock.Call
-}
-
-// CreateFile is a helper method to define mock.On call
-//   - filepath string
-//   - content []byte
-func (_e *MockClient_Expecter) CreateFile(filepath any, content any) *MockClient_CreateFile_Call {
-	return &MockClient_CreateFile_Call{Call: _e.mock.On("CreateFile", filepath, content)}
-}
-
-func (_c *MockClient_CreateFile_Call) Run(run func(filepath string, content []byte)) *MockClient_CreateFile_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		var arg1 []byte
-		if args[1] != nil {
-			arg1 = args[1].([]byte)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockClient_CreateFile_Call) Return(err error) *MockClient_CreateFile_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockClient_CreateFile_Call) RunAndReturn(run func(filepath string, content []byte) error) *MockClient_CreateFile_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RunCommand provides a mock function for the type MockClient
-func (_mock *MockClient) RunCommand(cmd string) error {
-	ret := _mock.Called(cmd)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RunCommand")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(cmd)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockClient_RunCommand_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunCommand'
-type MockClient_RunCommand_Call struct {
-	*mock.Call
-}
-
-// RunCommand is a helper method to define mock.On call
-//   - cmd string
-func (_e *MockClient_Expecter) RunCommand(cmd any) *MockClient_RunCommand_Call {
-	return &MockClient_RunCommand_Call{Call: _e.mock.On("RunCommand", cmd)}
-}
-
-func (_c *MockClient_RunCommand_Call) Run(run func(cmd string)) *MockClient_RunCommand_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
 func (_c *MockClient_RunCommand_Call) Return(err error) *MockClient_RunCommand_Call {
 	_c.Call.Return(err)
 	return _c
 }
 
-func (_c *MockClient_RunCommand_Call) RunAndReturn(run func(cmd string) error) *MockClient_RunCommand_Call {
+func (_c *MockClient_RunCommand_Call) RunAndReturn(run func(ctx context.Context, cmd string) error) *MockClient_RunCommand_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -2,10 +2,12 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"os/user"
 	"path"
@@ -22,11 +24,36 @@ import (
 )
 
 const (
-	// An unset Timeout means the dial has no deadline at all, and ssh.Dial
-	// takes no context, so a black-holing host would hang with nothing to
-	// cancel it.
+	// Bounds the TCP connect: a black-holing host would otherwise hang until
+	// the context is cancelled, which an unattended run never does.
 	sshDialTimeout = 30 * time.Second
 )
+
+// Neither ssh nor sftp takes a context, so a cancel closes the connection
+// under the blocked call and reports ctx.Err() over the closed-conn error.
+func await(ctx context.Context, unblock func(), op func() error) error {
+	if err := ctx.Err(); err != nil {
+		return cancelled(err)
+	}
+
+	done := make(chan error, 1)
+
+	go func() { done <- op() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		unblock()
+		<-done
+
+		return cancelled(ctx.Err())
+	}
+}
+
+func cancelled(err error) error {
+	return errs.Errorf(ErrCancelled, "transport call cancelled: %w", err)
+}
 
 func runRemoteCommand(client *ssh.Client, cmd string) error {
 	session, err := client.NewSession()
@@ -128,42 +155,49 @@ func (s *SSHTransport) Close() error {
 
 // CreateFile writes content to file, replacing whatever was there.
 func (s *SSHTransport) CreateFile(
+	ctx context.Context,
 	file string,
 	content []byte,
 ) error {
-	client, err := s.sftp()
+	client, err := s.sftp(ctx)
 	if err != nil {
 		return err
 	}
 
-	target, err := resolveRemotePath(client, file)
-	if err != nil {
-		return err
-	}
+	return await(ctx, s.reset, func() error {
+		target, err := resolveRemotePath(client, file)
+		if err != nil {
+			return err
+		}
 
-	if err := makeRemoteParent(client, target); err != nil {
-		return err
-	}
+		if err := makeRemoteParent(client, target); err != nil {
+			return err
+		}
 
-	if err := writeRemoteFile(
-		client,
-		bytes.NewReader(content),
-		target,
-	); err != nil {
-		return err
-	}
+		if err := writeRemoteFile(
+			client,
+			bytes.NewReader(content),
+			target,
+		); err != nil {
+			return err
+		}
 
-	log.
-		Info().
-		Str("file", target).
-		Msg("created file on remote server")
+		log.
+			Info().
+			Str("file", target).
+			Msg("created file on remote server")
 
-	return nil
+		return nil
+	})
 }
 
 // CopyPath reproduces localPath at remotePath byte for byte, permissions
 // included, recursing when it names a directory.
-func (s *SSHTransport) CopyPath(localPath, remotePath string) error {
+func (s *SSHTransport) CopyPath(
+	ctx context.Context,
+	localPath string,
+	remotePath string,
+) error {
 	info, err := os.Stat(localPath)
 	if err != nil {
 		return errs.Errorf(
@@ -173,49 +207,69 @@ func (s *SSHTransport) CopyPath(localPath, remotePath string) error {
 		)
 	}
 
-	client, err := s.sftp()
+	client, err := s.sftp(ctx)
 	if err != nil {
 		return err
 	}
 
-	target, err := resolveRemotePath(client, remotePath)
-	if err != nil {
-		return err
-	}
+	return await(ctx, s.reset, func() error {
+		target, err := resolveRemotePath(client, remotePath)
+		if err != nil {
+			return err
+		}
 
-	if info.IsDir() {
-		return s.copyTree(client, localPath, target)
-	}
+		if info.IsDir() {
+			return s.copyTree(client, localPath, target)
+		}
 
-	return copyFile(client, localPath, target, info.Mode())
+		return copyFile(client, localPath, target, info.Mode())
+	})
 }
 
-func (s *SSHTransport) RunCommand(cmd string) error {
-	client, err := s.connect()
+// RunCommand returns on cancellation by dropping the connection; whether the
+// remote process outlives that is up to the server, not something it enforces.
+func (s *SSHTransport) RunCommand(ctx context.Context, cmd string) error {
+	client, err := s.connect(ctx)
 	if err != nil {
 		return err
 	}
 
-	return runRemoteCommand(client, cmd)
+	return await(ctx, s.reset, func() error {
+		return runRemoteCommand(client, cmd)
+	})
 }
 
-func (s *SSHTransport) sftp() (*sftp.Client, error) {
+func (s *SSHTransport) reset() {
+	_ = s.Close()
+}
+
+func (s *SSHTransport) sftp(ctx context.Context) (*sftp.Client, error) {
 	if s.sftpClient != nil {
 		return s.sftpClient, nil
 	}
 
-	client, err := s.connect()
+	client, err := s.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	sftpClient, err := sftp.NewClient(client)
-	if err != nil {
-		return nil, errs.Errorf(
-			ErrSFTPClientCreate,
-			"failed to open an sftp session: %w",
-			err,
-		)
+	var sftpClient *sftp.Client
+
+	if err := await(ctx, s.reset, func() error {
+		created, err := sftp.NewClient(client)
+		if err != nil {
+			return errs.Errorf(
+				ErrSFTPClientCreate,
+				"failed to open an sftp session: %w",
+				err,
+			)
+		}
+
+		sftpClient = created
+
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	s.sftpClient = sftpClient
@@ -241,12 +295,12 @@ func resolveRemotePath(client *sftp.Client, remotePath string) (string, error) {
 	return path.Join(home, strings.TrimPrefix(remotePath, "~")), nil
 }
 
-func (s *SSHTransport) connect() (*ssh.Client, error) {
+func (s *SSHTransport) connect(ctx context.Context) (*ssh.Client, error) {
 	if s.client != nil {
 		return s.client, nil
 	}
 
-	client, err := s.createClient()
+	client, err := s.createClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +350,7 @@ func (s *SSHTransport) identitySigner() (ssh.Signer, error) {
 	return signer, nil
 }
 
-func (s *SSHTransport) createClient() (*ssh.Client, error) {
+func (s *SSHTransport) createClient(ctx context.Context) (*ssh.Client, error) {
 	username, err := s.username()
 	if err != nil {
 		return nil, err
@@ -323,18 +377,54 @@ func (s *SSHTransport) createClient() (*ssh.Client, error) {
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         sshDialTimeout,
 	}
 
-	addr := fmt.Sprintf("%s:%d", s.config.Host, port)
+	return dial(
+		ctx,
+		fmt.Sprintf("%s:%d", s.config.Host, port),
+		sshConfig,
+	)
+}
 
-	client, err := ssh.Dial("tcp", addr, sshConfig)
+func dial(
+	ctx context.Context,
+	addr string,
+	sshConfig *ssh.ClientConfig,
+) (*ssh.Client, error) {
+	dialer := &net.Dialer{Timeout: sshDialTimeout}
+
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, cancelled(ctxErr)
+		}
+
 		return nil, errs.Errorf(
 			ErrSSHClientCreate,
 			"failed to create ssh client: %w",
 			err,
 		)
+	}
+
+	var client *ssh.Client
+
+	if err := await(ctx, func() { _ = conn.Close() }, func() error {
+		sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, sshConfig)
+		if err != nil {
+			_ = conn.Close()
+
+			return errs.Errorf(
+				ErrSSHClientCreate,
+				"failed to create ssh client: %w",
+				err,
+			)
+		}
+
+		client = ssh.NewClient(sshConn, chans, reqs)
+
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return client, nil

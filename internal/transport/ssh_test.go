@@ -1,8 +1,10 @@
 package transport_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -12,6 +14,9 @@ import (
 
 // Any non-zero status; the value itself carries no meaning to the code.
 const remoteFailureExitCode = 3
+
+// Long enough for the call to be blocked on the server when it fires.
+const cancelAfter = 200 * time.Millisecond
 
 var _ = Describe("SSHTransport", func() {
 	Describe("validating the config", func() {
@@ -82,24 +87,24 @@ var _ = Describe("SSHTransport", func() {
 
 		Describe("connecting", func() {
 			It("dials with the configured identity", func() {
-				Expect(subject.RunCommand("true")).To(Succeed())
+				Expect(subject.RunCommand(context.Background(), "true")).To(Succeed())
 				Expect(srv.Commands()).To(ConsistOf("true"))
 			})
 
 			It("reuses one connection across calls", func() {
-				Expect(subject.RunCommand("one")).To(Succeed())
-				Expect(subject.RunCommand("two")).To(Succeed())
+				Expect(subject.RunCommand(context.Background(), "one")).To(Succeed())
+				Expect(subject.RunCommand(context.Background(), "two")).To(Succeed())
 
 				Expect(srv.Commands()).To(Equal([]string{"one", "two"}))
 			})
 
 			It("closes after a real dial", func() {
-				Expect(subject.RunCommand("true")).To(Succeed())
+				Expect(subject.RunCommand(context.Background(), "true")).To(Succeed())
 				Expect(subject.Close()).To(Succeed())
 			})
 
 			It("stays closeable twice", func() {
-				Expect(subject.RunCommand("true")).To(Succeed())
+				Expect(subject.RunCommand(context.Background(), "true")).To(Succeed())
 				Expect(subject.Close()).To(Succeed())
 				Expect(subject.Close()).To(Succeed())
 			})
@@ -107,30 +112,83 @@ var _ = Describe("SSHTransport", func() {
 			It("reports a refused session", func() {
 				srv.RefuseSessions()
 
-				Expect(subject.RunCommand("true")).
+				Expect(subject.RunCommand(context.Background(), "true")).
 					To(MatchError(transport.ErrSSHSessionCreate))
 			})
 		})
 
 		Describe("RunCommand", func() {
 			It("returns nil on a zero exit", func() {
-				Expect(subject.RunCommand("true")).To(Succeed())
+				Expect(subject.RunCommand(context.Background(), "true")).To(Succeed())
 			})
 
 			It("reports a non-zero exit", func() {
 				srv.FailWith(remoteFailureExitCode)
 
-				Expect(subject.RunCommand("false")).
+				Expect(subject.RunCommand(context.Background(), "false")).
 					To(MatchError(transport.ErrSSHCommandRun))
 			})
 
 			It("reports a plain command in full", func() {
 				srv.FailWith(remoteFailureExitCode)
 
-				err := subject.RunCommand("docker compose up -d")
+				err := subject.RunCommand(context.Background(), "docker compose up -d")
 
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("docker compose up -d"))
+			})
+		})
+
+		Describe("cancellation", func() {
+			It("refuses an already-cancelled context without dialing", func() {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				err := subject.RunCommand(ctx, "true")
+
+				Expect(err).To(MatchError(transport.ErrCancelled))
+				Expect(err).To(MatchError(context.Canceled))
+				Expect(srv.Commands()).To(BeEmpty())
+			})
+
+			It("returns once the context expires under a hanging command", func() {
+				srv.Hang()
+
+				ctx, cancel := context.WithTimeout(context.Background(), cancelAfter)
+				defer cancel()
+
+				err := subject.RunCommand(ctx, "sleep")
+
+				Expect(err).To(MatchError(transport.ErrCancelled))
+				Expect(err).To(MatchError(context.DeadlineExceeded))
+				Expect(srv.Commands()).To(ConsistOf("sleep"))
+			})
+
+			It("redials after a cancelled call", func() {
+				srv.Hang()
+
+				ctx, cancel := context.WithTimeout(context.Background(), cancelAfter)
+				defer cancel()
+
+				Expect(subject.RunCommand(ctx, "one")).
+					To(MatchError(transport.ErrCancelled))
+
+				srv.Release()
+
+				Expect(subject.RunCommand(context.Background(), "two")).To(Succeed())
+				Expect(srv.Commands()).To(Equal([]string{"one", "two"}))
+			})
+
+			It("returns once the context expires under a hanging write", func() {
+				Expect(subject.CreateFile(context.Background(), "~/a", []byte("a"))).
+					To(Succeed())
+
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				Expect(subject.CreateFile(ctx, "~/b", []byte("b"))).
+					To(MatchError(transport.ErrCancelled))
+				Expect(filepath.Join(srv.SFTPHome(), "b")).ToNot(BeAnExistingFile())
 			})
 		})
 
@@ -142,7 +200,7 @@ var _ = Describe("SSHTransport", func() {
 			})
 
 			It("masks a command that could be carrying a credential", func() {
-				err := subject.RunCommand("cat /etc/shadow")
+				err := subject.RunCommand(context.Background(), "cat /etc/shadow")
 
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("cat <REDACTED>"))
@@ -163,6 +221,7 @@ var _ = Describe("SSHTransport", func() {
 
 			It("says nothing about the content it was writing", func() {
 				err := subject.CreateFile(
+					context.Background(),
 					blocked+"/.env",
 					[]byte("NGROK_AUTHTOKEN="+secret),
 				)
@@ -172,7 +231,7 @@ var _ = Describe("SSHTransport", func() {
 			})
 
 			It("keeps the path of the file it was writing", func() {
-				err := subject.CreateFile(blocked+"/.env", []byte(secret))
+				err := subject.CreateFile(context.Background(), blocked+"/.env", []byte(secret))
 
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring(".env"))
@@ -185,7 +244,7 @@ var _ = Describe("SSHTransport", func() {
 			}
 
 			It("creates the parent directory before writing", func() {
-				Expect(subject.CreateFile("~/dir/compose.yml", []byte("a"))).
+				Expect(subject.CreateFile(context.Background(), "~/dir/compose.yml", []byte("a"))).
 					To(Succeed())
 
 				Expect(landed("dir/compose.yml")).To(BeAnExistingFile())
@@ -194,7 +253,7 @@ var _ = Describe("SSHTransport", func() {
 			It("writes the body exactly as given", func() {
 				body := "services:\n  api:\n    image: repo/api:v1\n"
 
-				Expect(subject.CreateFile("~/compose.yml", []byte(body))).
+				Expect(subject.CreateFile(context.Background(), "~/compose.yml", []byte(body))).
 					To(Succeed())
 
 				Expect(os.ReadFile(landed("compose.yml"))).
@@ -204,22 +263,22 @@ var _ = Describe("SSHTransport", func() {
 			It("writes shell syntax as the literal text it is", func() {
 				body := "GREETING=$HOME\nSUB=`id`\nOTHER=$(whoami)\n"
 
-				Expect(subject.CreateFile("~/.env", []byte(body))).To(Succeed())
+				Expect(subject.CreateFile(context.Background(), "~/.env", []byte(body))).To(Succeed())
 
 				Expect(os.ReadFile(landed(".env"))).To(Equal([]byte(body)))
 			})
 
 			It("adds nothing to a body that ends without a newline", func() {
-				Expect(subject.CreateFile("~/compose.yml", []byte("a"))).
+				Expect(subject.CreateFile(context.Background(), "~/compose.yml", []byte("a"))).
 					To(Succeed())
 
 				Expect(os.ReadFile(landed("compose.yml"))).To(Equal([]byte("a")))
 			})
 
 			It("replaces a longer body rather than writing over part of it", func() {
-				Expect(subject.CreateFile("~/compose.yml", []byte("a long body"))).
+				Expect(subject.CreateFile(context.Background(), "~/compose.yml", []byte("a long body"))).
 					To(Succeed())
-				Expect(subject.CreateFile("~/compose.yml", []byte("short"))).
+				Expect(subject.CreateFile(context.Background(), "~/compose.yml", []byte("short"))).
 					To(Succeed())
 
 				Expect(os.ReadFile(landed("compose.yml"))).
@@ -231,7 +290,7 @@ var _ = Describe("SSHTransport", func() {
 
 				Expect(os.MkdirAll(blocked, 0o500)).To(Succeed())
 
-				Expect(subject.CreateFile(blocked+"/compose.yml", []byte("a"))).
+				Expect(subject.CreateFile(context.Background(), blocked+"/compose.yml", []byte("a"))).
 					To(MatchError(transport.ErrSFTPRemoteWrite))
 			})
 		})
@@ -262,7 +321,7 @@ var _ = Describe("SSHTransport", func() {
 				body := "declared: yes"
 				file := writeLocal("app.yml", body, 0o600)
 
-				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+				Expect(subject.CopyPath(context.Background(), file, "~/copies/app.yml")).To(Succeed())
 
 				Expect(os.ReadFile(landed("copies/app.yml"))).
 					To(Equal([]byte(body)))
@@ -272,7 +331,7 @@ var _ = Describe("SSHTransport", func() {
 				body := "declared: yes\n"
 				file := writeLocal("app.yml", body, 0o600)
 
-				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+				Expect(subject.CopyPath(context.Background(), file, "~/copies/app.yml")).To(Succeed())
 
 				Expect(os.ReadFile(landed("copies/app.yml"))).
 					To(Equal([]byte(body)))
@@ -282,7 +341,7 @@ var _ = Describe("SSHTransport", func() {
 				body := string([]byte{0x00, 0xff, 0x1b, 0x0a, 0x00, 0x80})
 				file := writeLocal("blob.bin", body, 0o600)
 
-				Expect(subject.CopyPath(file, "~/copies/blob.bin")).
+				Expect(subject.CopyPath(context.Background(), file, "~/copies/blob.bin")).
 					To(Succeed())
 
 				Expect(os.ReadFile(landed("copies/blob.bin"))).
@@ -292,7 +351,7 @@ var _ = Describe("SSHTransport", func() {
 			It("keeps a file executable", func() {
 				file := writeLocal("run.sh", "#!/bin/sh\necho hi\n", 0o755)
 
-				Expect(subject.CopyPath(file, "~/copies/run.sh")).To(Succeed())
+				Expect(subject.CopyPath(context.Background(), file, "~/copies/run.sh")).To(Succeed())
 
 				info, err := os.Stat(landed("copies/run.sh"))
 				Expect(err).ToNot(HaveOccurred())
@@ -302,7 +361,7 @@ var _ = Describe("SSHTransport", func() {
 			It("leaves an unexecutable file unexecutable", func() {
 				file := writeLocal("app.yml", "declared: yes", 0o644)
 
-				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+				Expect(subject.CopyPath(context.Background(), file, "~/copies/app.yml")).To(Succeed())
 
 				info, err := os.Stat(landed("copies/app.yml"))
 				Expect(err).ToNot(HaveOccurred())
@@ -314,6 +373,7 @@ var _ = Describe("SSHTransport", func() {
 				writeLocal("tree/deep/inner.yml", "inner", 0o600)
 
 				Expect(subject.CopyPath(
+					context.Background(),
 					filepath.Join(local, "tree"),
 					"~/copies/tree",
 				)).To(Succeed())
@@ -331,6 +391,7 @@ var _ = Describe("SSHTransport", func() {
 				)).To(Succeed())
 
 				Expect(subject.CopyPath(
+					context.Background(),
 					filepath.Join(local, "empty"),
 					"~/copies/empty",
 				)).To(Succeed())
@@ -343,7 +404,7 @@ var _ = Describe("SSHTransport", func() {
 			It("resolves a home-relative remote path", func() {
 				file := writeLocal("app.yml", "declared: yes", 0o600)
 
-				Expect(subject.CopyPath(file, "~/copies/app.yml")).To(Succeed())
+				Expect(subject.CopyPath(context.Background(), file, "~/copies/app.yml")).To(Succeed())
 
 				Expect(landed("copies/app.yml")).To(BeAnExistingFile())
 				Expect(landed("~")).ToNot(BeAnExistingFile())
@@ -353,13 +414,14 @@ var _ = Describe("SSHTransport", func() {
 				file := writeLocal("app.yml", "declared: yes", 0o600)
 				target := landed("abs/app.yml")
 
-				Expect(subject.CopyPath(file, target)).To(Succeed())
+				Expect(subject.CopyPath(context.Background(), file, target)).To(Succeed())
 
 				Expect(target).To(BeAnExistingFile())
 			})
 
 			It("reports a local path that is not there", func() {
 				err := subject.CopyPath(
+					context.Background(),
 					filepath.Join(local, "nope.yml"),
 					"~/copies/nope.yml",
 				)
@@ -373,7 +435,7 @@ var _ = Describe("SSHTransport", func() {
 
 				Expect(os.MkdirAll(blocked, 0o500)).To(Succeed())
 
-				Expect(subject.CopyPath(file, blocked+"/app.yml")).
+				Expect(subject.CopyPath(context.Background(), file, blocked+"/app.yml")).
 					To(MatchError(transport.ErrSFTPRemoteWrite))
 			})
 		})
@@ -404,7 +466,7 @@ var _ = Describe("SSHTransport", func() {
 
 			DeferCleanup(func() { _ = client.Close() })
 
-			return client.RunCommand("true")
+			return client.RunCommand(context.Background(), "true")
 		}
 
 		It("reads a key given by a relative path", func() {
@@ -440,6 +502,33 @@ var _ = Describe("SSHTransport", func() {
 		})
 	})
 
+	Describe("cancelling a stalled handshake", func() {
+		It("returns once the context expires", func() {
+			writeKnownHosts("")
+
+			client, err := transport.NewSSHTransport(
+				transport.SSHTransportOptions{
+					Config: config.XMiniEnvSSH{
+						Host:     "127.0.0.1",
+						Port:     silentPort(),
+						User:     "tester",
+						Identity: writeIdentity(GinkgoT().TempDir()),
+					},
+				})
+			Expect(err).ToNot(HaveOccurred())
+
+			DeferCleanup(func() { _ = client.Close() })
+
+			ctx, cancel := context.WithTimeout(context.Background(), cancelAfter)
+			defer cancel()
+
+			err = client.RunCommand(ctx, "true")
+
+			Expect(err).To(MatchError(transport.ErrCancelled))
+			Expect(err).To(MatchError(context.DeadlineExceeded))
+		})
+	})
+
 	Describe("verifying the host key", func() {
 		It("refuses a host that known_hosts does not list", func() {
 			srv := newTestServer()
@@ -464,7 +553,7 @@ var _ = Describe("SSHTransport", func() {
 
 			DeferCleanup(func() { _ = client.Close() })
 
-			Expect(client.RunCommand("true")).
+			Expect(client.RunCommand(context.Background(), "true")).
 				To(MatchError(transport.ErrSSHClientCreate))
 		})
 
@@ -487,7 +576,7 @@ var _ = Describe("SSHTransport", func() {
 
 			DeferCleanup(func() { _ = client.Close() })
 
-			Expect(client.RunCommand("true")).
+			Expect(client.RunCommand(context.Background(), "true")).
 				To(MatchError(transport.ErrSSHHostKeyCallback))
 		})
 
@@ -510,7 +599,7 @@ var _ = Describe("SSHTransport", func() {
 
 			DeferCleanup(func() { _ = client.Close() })
 
-			Expect(client.RunCommand("true")).
+			Expect(client.RunCommand(context.Background(), "true")).
 				To(MatchError(transport.ErrUserHomeDir))
 		})
 	})
