@@ -1,3 +1,9 @@
+# [0.6.2](https://github.com/robgonnella/minienv/compare/v0.6.1...v0.6.2) - 2026-09-22
+
+### 🐛 Bug Fixes
+
+- ensures graceful exit and rollback [_(b2c495d)_](https://github.com/robgonnella/minienv/commit/b2c495d0befc24c8f2c3c682cd998e2ffb9fdd81)
+
 # [0.6.1](https://github.com/robgonnella/minienv/compare/v0.6.0...v0.6.1) - 2026-09-21
 
 ### 🐛 Bug Fixes
