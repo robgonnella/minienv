@@ -6,7 +6,6 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/robgonnella/minienv/internal/compose"
 	"github.com/robgonnella/minienv/internal/config"
 	"github.com/robgonnella/minienv/internal/errs"
@@ -43,21 +42,18 @@ func NewDockerService(
 	}
 
 	svcExt := &DockerService{Compose: svc, Dir: opts.Dir}
-	if err := mapstructure.Decode(
+
+	if err := decodeServiceExtension(
 		rawSvcExt,
+		"x-minienv-docker-service",
 		&svcExt.XMiniEnvDockerService,
 	); err != nil {
-		return nil, errs.Errorf(
-			ErrExtensionDecode,
-			"failed to parse x-minienv-docker-service extension: %w",
-			err,
-		)
+		return nil, err
 	}
 
 	if err := svcExt.resolve(
 		ctx,
 		opts.DockerExt,
-		rawSvcExt,
 		svc,
 		opts.GitClient,
 		opts.NgrokEnabled,
@@ -83,15 +79,10 @@ func (s *DockerService) CopyLocalPath(c config.XMiniEnvDockerCopy) string {
 func (s *DockerService) resolve(
 	ctx context.Context,
 	dockerExt config.XMiniEnvDocker,
-	rawSvcExt any,
 	svc compose.Service,
 	gitClient git.Client,
 	ngrokEnabled bool,
 ) error {
-	if err := s.resolveCommonProperties(rawSvcExt); err != nil {
-		return err
-	}
-
 	if err := s.resolveServiceImage(ctx, svc, gitClient); err != nil {
 		return err
 	}
@@ -137,21 +128,6 @@ func (s *DockerService) resolveCopy() error {
 		targets[declared.ContainerPath] = true
 		s.Copy[i].HostPath = cleaned
 	}
-
-	return nil
-}
-
-func (s *DockerService) resolveCommonProperties(rawSvcExt any) error {
-	common := config.XMiniEnvCommonService{}
-	if err := mapstructure.Decode(rawSvcExt, &common); err != nil {
-		return errs.Errorf(
-			ErrExtensionDecode,
-			"failed to parse common service properties: %w",
-			err,
-		)
-	}
-
-	s.XMiniEnvCommonService = common
 
 	return nil
 }

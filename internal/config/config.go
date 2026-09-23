@@ -65,5 +65,5 @@ type XMiniEnvCommonService struct {
 	// Ngrok configuration for exposing services publicly
 	Ngrok NgrokServiceLevel `json:"ngrok,omitzero" mapstructure:"ngrok,omitzero"`
 	// Prevents the targeted service from being deployed to the cluster
-	Skip bool `json:"skip,omitempty" mapstructure:"skip,omitempty"`
+	Skip bool `json:"skip,omitempty" jsonschema:"oneof_type=boolean;string" mapstructure:"skip,omitempty"`
 }

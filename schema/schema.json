@@ -49,7 +49,14 @@
     "ChartService": {
       "properties": {
         "create": {
-          "type": "boolean",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ],
           "description": "Whether or not to create a Kubernetes service"
         },
         "type": {
@@ -74,7 +81,14 @@
     "ChartServiceAccount": {
       "properties": {
         "create": {
-          "type": "boolean",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ],
           "description": "Whether or not to create a Kubernetes service account"
         },
         "name": {
@@ -82,7 +96,14 @@
           "description": "The name for the service account"
         },
         "automount": {
-          "type": "boolean",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ],
           "description": "Whether or not to automount the service account"
         },
         "annotations": {
@@ -244,7 +265,14 @@
           "description": "Ngrok configuration for exposing services publicly"
         },
         "skip": {
-          "type": "boolean",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ],
           "description": "Prevents the targeted service from being deployed to the cluster"
         },
         "image": {
@@ -313,7 +341,14 @@
           "description": "Ngrok configuration for exposing services publicly"
         },
         "skip": {
-          "type": "boolean",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ],
           "description": "Prevents the targeted service from being deployed to the cluster"
         },
         "replicas": {
@@ -428,7 +463,14 @@
           "description": "Affinity configuration for the deployment pods"
         },
         "recreate": {
-          "type": "boolean",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ],
           "description": "Recreates the service on each deploy even if values have not changed"
         },
         "deploymentType": {

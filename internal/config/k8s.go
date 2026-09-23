@@ -17,11 +17,11 @@ type ChartImagePullSecret struct {
 // ChartServiceAccount is the service account configuration for the deployment.
 type ChartServiceAccount struct {
 	// Whether or not to create a Kubernetes service account
-	Create *bool `json:"create,omitempty" mapstructure:"create,omitempty"`
+	Create *bool `json:"create,omitempty" jsonschema:"oneof_type=boolean;string" mapstructure:"create,omitempty"`
 	// The name for the service account
 	Name string `json:"name,omitempty" mapstructure:"name,omitempty"`
 	// Whether or not to automount the service account
-	Automount *bool `json:"automount,omitempty" mapstructure:"automount,omitempty"`
+	Automount *bool `json:"automount,omitempty" jsonschema:"oneof_type=boolean;string" mapstructure:"automount,omitempty"`
 	// Additional annotations for the service account
 	Annotations map[string]string `json:"annotations,omitempty" mapstructure:"annotations,omitempty"`
 }
@@ -40,7 +40,7 @@ type ChartServicePort struct {
 // ChartService is the Kubernetes service configuration.
 type ChartService struct {
 	// Whether or not to create a Kubernetes service
-	Create *bool `json:"create,omitempty" mapstructure:"create,omitempty"`
+	Create *bool `json:"create,omitempty" jsonschema:"oneof_type=boolean;string" mapstructure:"create,omitempty"`
 	// The type of service to create
 	ServiceType string `json:"type,omitempty" mapstructure:"type,omitempty"`
 	// The ports to associate with pod container and service mapping
@@ -123,7 +123,7 @@ type XMiniEnvK8sService struct {
 	ChartValues `mapstructure:",squash"`
 
 	// Recreates the service on each deploy even if values have not changed
-	Recreate bool `json:"recreate,omitempty" mapstructure:"recreate"`
+	Recreate bool `json:"recreate,omitempty" jsonschema:"oneof_type=boolean;string" mapstructure:"recreate"`
 	// Controls the type of deployment (service | job). Default is "service"
 	DeploymentType K8sDeploymentType `json:"deploymentType,omitempty" jsonschema:"enum=service,enum=job,default=service" mapstructure:"deploymentType,omitempty"`
 	// Controls the Helm timeout for deploying the targeted service
