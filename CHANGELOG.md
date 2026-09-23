@@ -1,3 +1,9 @@
+# [0.7.0](https://github.com/robgonnella/minienv/compare/v0.6.2...v0.7.0) - 2026-09-23
+
+### 🚀 Features
+
+- allows setting "skip" via env [_(0d578d8)_](https://github.com/robgonnella/minienv/commit/0d578d87ee91fd7b0e3fc328e3543cb27c055552)
+
 # [0.6.2](https://github.com/robgonnella/minienv/compare/v0.6.1...v0.6.2) - 2026-09-22
 
 ### 🐛 Bug Fixes
