@@ -53,7 +53,7 @@ services:
 
   job:
     x-minienv-k8s-service:
-      skip: false
+      skip: ${SKIP_JOB:-false}
       deploymentType: job
     image: alpine:3.24
     command:

@@ -1386,6 +1386,56 @@ var _ = Describe("K8sService", func() {
 			Expect(result.Skip).To(BeTrue())
 		})
 
+		DescribeTable(
+			"decodes an interpolated skip string",
+			func(value string, want bool) {
+				svc.Extensions = types.Extensions{
+					config.K8sServiceExtension: map[string]any{"skip": value},
+				}
+
+				result, err := newSvcExt()
+
+				Expect(err).ShouldNot(HaveOccurred())
+				Expect(result.Skip).To(Equal(want))
+			},
+			Entry("true", "true", true),
+			Entry("false", "false", false),
+			Entry("unset variable", "", false),
+		)
+
+		It("rejects a skip string that is not a bool", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{"skip": "garbage"},
+			}
+
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(resolver.ErrExtensionDecode))
+		})
+
+		It("decodes an interpolated bool string in chart values", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{
+					"serviceAccount": map[string]any{"automount": "true"},
+				},
+			}
+
+			result, err := newSvcExt()
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(result.ServiceAccount.Automount).To(HaveValue(BeTrue()))
+		})
+
+		It("rejects a string for a non-bool field", func() {
+			svc.Extensions = types.Extensions{
+				config.K8sServiceExtension: map[string]any{"replicas": "three"},
+			}
+
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(resolver.ErrExtensionDecode))
+		})
+
 		It("does not require an image when skipped", func() {
 			svc = compose.Service{
 				Name: "test-service",

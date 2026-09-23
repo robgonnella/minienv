@@ -238,6 +238,34 @@ var _ = Describe("DockerService", func() {
 			Expect(svcExt.Skip).To(BeTrue())
 		})
 
+		DescribeTable(
+			"decodes an interpolated skip string",
+			func(value string, want bool) {
+				svc.Image = "reg/app:v1"
+				svc.Extensions = map[string]any{
+					config.DockerServiceExtension: map[string]any{"skip": value},
+				}
+
+				svcExt, err := newSvcExt()
+
+				Expect(err).ToNot(HaveOccurred())
+				Expect(svcExt.Skip).To(Equal(want))
+			},
+			Entry("true", "true", true),
+			Entry("false", "false", false),
+			Entry("unset variable", "", false),
+		)
+
+		It("rejects a skip string that is not a bool", func() {
+			svc.Extensions = map[string]any{
+				config.DockerServiceExtension: map[string]any{"skip": "garbage"},
+			}
+
+			_, err := newSvcExt()
+
+			Expect(err).To(MatchError(resolver.ErrExtensionDecode))
+		})
+
 		It("expands a +git tag from the service directory", func() {
 			svc.Image = "reg/app:+git"
 			dir = "/repo/web"

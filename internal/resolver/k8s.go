@@ -69,15 +69,13 @@ func NewK8sService(
 	}
 
 	svcExtConfig := &K8sService{Compose: svc, Dir: opts.Dir}
-	if err := mapstructure.Decode(
+
+	if err := decodeServiceExtension(
 		svcExt,
+		"x-minienv-k8s-service",
 		&svcExtConfig.XMiniEnvK8sService,
 	); err != nil {
-		return nil, errs.Errorf(
-			ErrExtensionDecode,
-			"failed to parse x-minienv-k8s-service extension: %w",
-			err,
-		)
+		return nil, err
 	}
 
 	if err := svcExtConfig.resolve(ctx, svcExt, opts); err != nil {
@@ -171,10 +169,6 @@ func (s *K8sService) resolve(
 	rawSvcExt any,
 	opts K8sServiceOptions,
 ) error {
-	if err := s.resolveCommonProperties(rawSvcExt); err != nil {
-		return err
-	}
-
 	if err := s.resolveChartValues(rawSvcExt); err != nil {
 		return err
 	}
@@ -413,29 +407,14 @@ func probeForCmd(cmd string, ports []config.ChartServicePort) map[string]any {
 	return createHTTPGetProbe(ports, parsedURL)
 }
 
-func (s *K8sService) resolveCommonProperties(rawSvcExt any) error {
-	common := config.XMiniEnvCommonService{}
-	if err := mapstructure.Decode(rawSvcExt, &common); err != nil {
-		return errs.Errorf(
-			ErrExtensionDecode,
-			"failed to parse common service properties: %w",
-			err,
-		)
-	}
-
-	s.XMiniEnvCommonService = common
-
-	return nil
-}
-
 func (s *K8sService) resolveChartValues(rawSvcExt any) error {
 	chartValues := config.ChartValues{}
-	if err := mapstructure.Decode(rawSvcExt, &chartValues); err != nil {
-		return errs.Errorf(
-			ErrExtensionDecode,
-			"failed to parse k8s chart values: %w",
-			err,
-		)
+	if err := decodeServiceExtension(
+		rawSvcExt,
+		"k8s chart values",
+		&chartValues,
+	); err != nil {
+		return err
 	}
 
 	s.XMiniEnvK8sService.ChartValues = chartValues

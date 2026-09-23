@@ -58,6 +58,8 @@ services:
       - 8081:8080
 
   job:
+    x-minienv-docker-service:
+      skip: ${SKIP_JOB:-false}
     image: alpine:3.24
     command:
       - /bin/sh
