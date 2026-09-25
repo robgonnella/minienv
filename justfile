@@ -1,3 +1,6 @@
+VM_NAME := "minienv"
+VM_SSH_PORT := "2220"
+
 # prints all available recipes
 default:
     @just --list
@@ -71,6 +74,32 @@ docs:
 # serves the documentation book locally with live reload
 docs-serve:
     mdbook serve docs --open
+
+# creates local vm
+create-vm:
+    limactl start template:docker \
+      --name="{{ VM_NAME }}" \
+      --set ".ssh.localPort={{ VM_SSH_PORT }}"
+
+# starts local vm
+start-vm:
+    limactl start minienv
+
+# stops local vm
+stop-vm:
+    limactl stop "{{ VM_NAME }}"
+
+# deletes local vm
+delete-vm:
+    limactl delete "{{ VM_NAME }}"
+
+# ssh into local vm
+ssh-vm:
+    exec ssh -p "{{ VM_SSH_PORT }}" -i ~/.lima/_config/user "$USER@127.0.0.1"
+
+# prunes lima cache
+lima-prune:
+    limactl prune
 
 # runs the entry point using "go run"
 _run *args:

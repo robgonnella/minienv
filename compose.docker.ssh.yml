@@ -5,10 +5,10 @@ x-minienv:
     namespace: $MINIENV_NAMESPACE
     transport:
       ssh:
-        host: localhost
-        user: rob
-        port: 22220
-        identity: $HOME/.ssh/id_rsa
+        host: 127.0.0.1
+        user: $USER
+        port: 2220
+        identity: ~/.lima/_config/user
 
 services:
   hello:
