@@ -1,3 +1,9 @@
+# [0.7.1](https://github.com/robgonnella/minienv/compare/v0.7.0...v0.7.1) - 2026-09-25
+
+### 🧹 Chore
+
+- adds justfile targets testing against local VM [_(a8e7095)_](https://github.com/robgonnella/minienv/commit/a8e70959a786bce3fb4a92ef53639ba27399ba63)
+
 # [0.7.0](https://github.com/robgonnella/minienv/compare/v0.6.2...v0.7.0) - 2026-09-23
 
 ### 🚀 Features
