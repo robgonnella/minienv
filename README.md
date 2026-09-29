@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/robgonnella/minienv)
+
 # minienv
 
 Effortless remote mini environments generated directly from docker compose
