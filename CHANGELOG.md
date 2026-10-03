@@ -1,3 +1,9 @@
+# [0.7.1](https://github.com/robgonnella/minienv/compare/v0.7.0...v0.7.1) - 2026-10-03
+
+### 📚 Documentation
+
+- updates docs for installing [_(9271355)_](https://github.com/robgonnella/minienv/commit/9271355b7ee6bfd3d2c3e5a465561d2a3d2cc741)
+
 # [0.7.0](https://github.com/robgonnella/minienv/compare/v0.6.2...v0.7.0) - 2026-09-23
 
 ### 🚀 Features
