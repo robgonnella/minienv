@@ -9,16 +9,38 @@
 | A reachable Kubernetes context                             | Only for the `k8s` deployer                    |
 | An SSH-reachable host with `docker` and its compose plugin | Only for the `docker` deployer                 |
 
-You do **not** need the `helm` binary installed.
-
 For the `docker` deployer, the remote host must already be in your
 `~/.ssh/known_hosts`. minienv offers no prompt or bypass, so connect once by
 hand first. Encrypted identity files are not supported.
 
 ## Install
 
+### Pre-built binary
+
+From github releases: <https://github.com/robgonnella/minienv/releases>
+
+### Using go
+
 ```sh
 go install github.com/robgonnella/minienv/cmd/minienv@latest
+```
+
+### Aqua
+
+```bash
+aqua g -i robgonnella/minienv
+```
+
+### Mise
+
+```bash
+mise use aqua:robgonnella/minienv
+```
+
+```toml
+# mise.toml
+[tools]
+"aqua:robgonnella/minienv" = "<version>"
 ```
 
 Check it:
