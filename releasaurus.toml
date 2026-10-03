@@ -1,3 +1,7 @@
+[defaults.versioning.named_parsers]
+ci.skip = true
+chore.skip = true
+
 [[package]]
 name = "minienv"
 tag_prefix = "v"
