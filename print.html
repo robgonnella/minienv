@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7ca71d9c.js";
+            window.path_to_searchindex_js = "searchindex-1d63a13e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -260,12 +260,24 @@ or <a href="http://opensource.org/licenses/MIT">http://opensource.org/licenses/M
 </tbody>
 </table>
 </div>
-<p>You do <strong>not</strong> need the <code>helm</code> binary installed.</p>
 <p>For the <code>docker</code> deployer, the remote host must already be in your
 <code>~/.ssh/known_hosts</code>. minienv offers no prompt or bypass, so connect once by
 hand first. Encrypted identity files are not supported.</p>
 <h2 id="install"><a class="header" href="#install">Install</a></h2>
+<h3 id="pre-built-binary"><a class="header" href="#pre-built-binary">Pre-built binary</a></h3>
+<p>From github releases: <a href="https://github.com/robgonnella/minienv/releases">https://github.com/robgonnella/minienv/releases</a></p>
+<h3 id="using-go"><a class="header" href="#using-go">Using go</a></h3>
 <pre><code class="language-sh">go install github.com/robgonnella/minienv/cmd/minienv@latest
+</code></pre>
+<h3 id="aqua"><a class="header" href="#aqua">Aqua</a></h3>
+<pre><code class="language-bash">aqua g -i robgonnella/minienv
+</code></pre>
+<h3 id="mise"><a class="header" href="#mise">Mise</a></h3>
+<pre><code class="language-bash">mise use aqua:robgonnella/minienv
+</code></pre>
+<pre><code class="language-toml"># mise.toml
+[tools]
+"aqua:robgonnella/minienv" = "&lt;version&gt;"
 </code></pre>
 <p>Check it:</p>
 <pre><code class="language-sh">minienv version
