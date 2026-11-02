@@ -159,20 +159,17 @@ func (l *Loader) loadActiveDeployer(
 func (l *Loader) loadActiveDockerTransport(
 	ext *config.XMiniEnvDocker,
 ) (transport.Client, error) {
-	activeTransports := []transport.Client{}
+	configured := 0
 
 	if ext.Transport.SSH != nil {
-		sshTransport, err := transport.NewSSHTransport(
-			transport.SSHTransportOptions{Config: *ext.Transport.SSH},
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		activeTransports = append(activeTransports, sshTransport)
+		configured++
 	}
 
-	if len(activeTransports) > 1 {
+	if ext.Transport.AwsSsm != nil {
+		configured++
+	}
+
+	if configured > 1 {
 		return nil, errs.Errorf(
 			ErrMultipleDockerTransports,
 			"detected multiple active configurations for docker transport. "+
@@ -181,7 +178,26 @@ func (l *Loader) loadActiveDockerTransport(
 		)
 	}
 
-	if len(activeTransports) == 0 {
+	switch {
+	case ext.Transport.SSH != nil:
+		sshTransport, err := transport.NewSSHTransport(
+			transport.SSHTransportOptions{Config: *ext.Transport.SSH},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		return sshTransport, nil
+	case ext.Transport.AwsSsm != nil:
+		ssmTransport, err := transport.NewAwsSsmTransport(
+			transport.AwsSsmTransportOptions{Config: *ext.Transport.AwsSsm},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		return ssmTransport, nil
+	default:
 		return nil, errs.Errorf(
 			ErrNoActiveDockerTransport,
 			"failed to find an active configuration for docker transport. "+
@@ -190,6 +206,4 @@ func (l *Loader) loadActiveDockerTransport(
 			strings.Join(ext.Transport.ConfigFields(), ", "),
 		)
 	}
-
-	return activeTransports[0], nil
 }

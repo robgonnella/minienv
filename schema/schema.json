@@ -216,6 +216,25 @@
       "type": "object",
       "description": "XMiniEnv top-level extension configuration for deploying to various targets."
     },
+    "XMiniEnvAwsSsm": {
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "The managed instance id to connect to"
+        },
+        "profile": {
+          "type": "string",
+          "description": "The named AWS profile to resolve credentials and region from"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "target",
+        "profile"
+      ],
+      "description": "XMiniEnvAwsSsm holds the fields required for deploying to an AWS Systems Manager managed instance through Session Manager command sessions, which run as the instance's ssm-user."
+    },
     "XMiniEnvDocker": {
       "properties": {
         "namespace": {
@@ -296,6 +315,10 @@
         "ssh": {
           "$ref": "#/$defs/XMiniEnvSSH",
           "description": "Copies files and runs commands on the remote server over SSH"
+        },
+        "awsSsm": {
+          "$ref": "#/$defs/XMiniEnvAwsSsm",
+          "description": "Copies files and runs commands on the remote server using aws-ssm"
         }
       },
       "additionalProperties": false,

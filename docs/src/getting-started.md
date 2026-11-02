@@ -7,9 +7,10 @@
 | `docker` with `buildx`                                     | Only for services that have a `build:` section |
 | `git`                                                      | Only if you use a `+git` image tag             |
 | A reachable Kubernetes context                             | Only for the `k8s` deployer                    |
-| An SSH-reachable host with `docker` and its compose plugin | Only for the `docker` deployer                 |
+| An SSH-reachable host with `docker` and its compose plugin | Only for the `docker` deployer's `ssh` transport |
+| A Systems Manager managed instance whose `ssm-user` can run `docker` and its compose plugin, and `session-manager-plugin` on `PATH` | Only for the `docker` deployer's `awsSsm` transport |
 
-For the `docker` deployer, the remote host must already be in your
+For the `ssh` transport, the remote host must already be in your
 `~/.ssh/known_hosts`. minienv offers no prompt or bypass, so connect once by
 hand first. Encrypted identity files are not supported.
 

@@ -1,0 +1,10 @@
+x-minienv:
+  docker:
+    namespace: test-namespace
+    transport:
+      awsSsm:
+        profile: dev
+
+services:
+  hello:
+    image: reg/hello:v1
