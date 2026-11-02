@@ -59,9 +59,12 @@ Anything else a service needs is declared explicitly, with `configMapFrom` or
 ## Docker
 
 Deploys the whole project to a single remote host as one `docker compose`
-project, over a transport.
+project, over a transport. The host runs `docker` and its compose plugin;
+exactly one block under `transport` says how minienv reaches it.
 
-Needs an SSH-reachable host running `docker` and its compose plugin:
+### `transport.ssh`
+
+Connects over SSH with a private key:
 
 ```yaml
 x-minienv:
@@ -72,6 +75,50 @@ x-minienv:
         host: dev-box.example.com
         identity: ~/.ssh/id_ed25519
 ```
+
+The host key must already be in `~/.ssh/known_hosts` on the machine running
+minienv. It verifies against that file and offers no prompt or bypass, so
+connect once by hand before the first deploy.
+
+### `transport.awsSsm`
+
+Runs each command on the instance through an AWS Systems Manager Session
+Manager command session, as the instance's `ssm-user`. No key, no sshd, no
+inbound port:
+
+```yaml
+x-minienv:
+  docker:
+    namespace: my-branch
+    transport:
+      awsSsm:
+        target: i-0123456789abcdef0
+        profile: dev
+```
+
+What it needs:
+
+- The instance registered with Systems Manager, with `ssm-user` able to run
+  `docker` (in the `docker` group). The project lands under
+  `/home/ssm-user/.minienv/<namespace>`.
+- `tar`, `gzip` and `base64` in `ssm-user`'s shell — part of the base install
+  on Amazon Linux, Ubuntu, Debian, RHEL and Alpine. `copy` entries arrive as
+  a compressed archive, and a missing `tar` fails that step with a message
+  saying so rather than extracting.
+- `session-manager-plugin` 1.2.497.0 or newer on `PATH`. minienv starts each
+  session itself and hands it to the plugin; the session token travels in
+  the plugin's environment, never in its arguments.
+- Credentials allowed `ssm:StartSession` on the target with the
+  `AWS-StartNonInteractiveCommand` document, and `ssm:TerminateSession`.
+  Region and credentials resolve the way the AWS SDK resolves them; `profile`
+  names a shared-config profile to resolve them from.
+
+Files reach the instance as `base64` inside the session's command, in chunks,
+and directories as a compressed `tar` the same way. That means their
+contents — the rendered `compose.yml`, and the `.env` holding your ngrok
+token when something publishes — pass through the `StartSession` API as
+parameters. Treat whatever records those parameters, such as CloudTrail or
+session logging, as holding them.
 
 Per-service overrides go under `x-minienv-docker-service`.
 

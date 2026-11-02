@@ -18,11 +18,21 @@ type XMiniEnvSSH struct {
 	// The target host for the SSH connection
 	Host string `json:"host" mapstructure:"host"`
 	// The user for the SSH connection
-	User string `json:"user" mapstructure:"user"`
+	User string `json:"user,omitempty" mapstructure:"user,omitempty"`
 	// The port for the SSH connection
-	Port uint16 `json:"port" mapstructure:"port"`
+	Port uint16 `json:"port,omitempty" mapstructure:"port,omitempty"`
 	// The RSA private key identity file for the SSH connection
 	Identity string `json:"identity" mapstructure:"identity"`
+}
+
+// XMiniEnvAwsSsm holds the fields required for deploying to an AWS Systems
+// Manager managed instance through Session Manager command sessions, which
+// run as the instance's ssm-user.
+type XMiniEnvAwsSsm struct {
+	// The managed instance id to connect to
+	Target string `json:"target" mapstructure:"target"`
+	// The named AWS profile to resolve credentials and region from
+	Profile string `json:"profile,omitempty" mapstructure:"profile,omitempty"`
 }
 
 // XMiniEnvDockerTransport holds the transport mechanism for copying files
@@ -31,11 +41,13 @@ type XMiniEnvSSH struct {
 type XMiniEnvDockerTransport struct {
 	// Copies files and runs commands on the remote server over SSH
 	SSH *XMiniEnvSSH `json:"ssh,omitempty" mapstructure:"ssh,omitempty"`
+	// Copies files and runs commands on the remote server using aws-ssm
+	AwsSsm *XMiniEnvAwsSsm `json:"awsSsm,omitempty" mapstructure:"awsSsm,omitempty"`
 }
 
 // ConfigFields returns the available "json" config fields for this extension.
 func (x *XMiniEnvDockerTransport) ConfigFields() []string {
-	return []string{"ssh"}
+	return []string{"ssh", "awsSsm"}
 }
 
 // XMiniEnvDockerCopy copies a file or directory to the remote server and bind
