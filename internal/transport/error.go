@@ -5,9 +5,10 @@ package transport
 import "github.com/robgonnella/minienv/internal/errs"
 
 const (
-	ErrInvalidExtension   errs.Kind = "transport.invalid_extension"
-	ErrCancelled          errs.Kind = "transport.cancelled"
-	ErrUserHomeDir        errs.Kind = "transport.user_home_dir"
+	ErrInvalidExtension errs.Kind = "transport.invalid_extension"
+	ErrCancelled        errs.Kind = "transport.cancelled"
+	ErrUserHomeDir      errs.Kind = "transport.user_home_dir"
+
 	ErrSSHTransportUser   errs.Kind = "transport.ssh_transport_user"
 	ErrSSHIdentityResolve errs.Kind = "transport.ssh_identity_resolve"
 	ErrSSHIdentityRead    errs.Kind = "transport.ssh_identity_read"
@@ -24,4 +25,10 @@ const (
 	ErrSFTPClientClose    errs.Kind = "transport.sftp_client_close"
 	ErrSFTPRealPath       errs.Kind = "transport.sftp_real_path"
 	ErrSFTPRemoteWrite    errs.Kind = "transport.sftp_remote_write"
+
+	ErrAwsSsmConfigure    errs.Kind = "transport.aws_ssm_configure"
+	ErrAwsSsmSessionStart errs.Kind = "transport.aws_ssm_session_start"
+	ErrAwsSsmPluginRun    errs.Kind = "transport.aws_ssm_plugin_run"
+	ErrAwsSsmCommandRun   errs.Kind = "transport.aws_ssm_command_run"
+	ErrAwsSsmLocalPath    errs.Kind = "transport.aws_ssm_local_path"
 )

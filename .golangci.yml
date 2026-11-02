@@ -72,7 +72,7 @@ linters:
     rules:
       # WalkDir hands every error to the callback before returning it, so what
       # comes back has already been wrapped there.
-      - path: internal/transport/ssh\.go
+      - path: internal/transport/(ssh|ssm)\.go
         linters:
           - wrapcheck
         text: "filepath.WalkDir"
