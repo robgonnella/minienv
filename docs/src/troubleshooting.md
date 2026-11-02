@@ -128,10 +128,23 @@ mapping to compose `ports:` if you expected one.
 
 ## minienv cannot reach the remote host
 
-For the `docker` deployer, the host key must already be in your
+For the `ssh` transport, the host key must already be in your
 `~/.ssh/known_hosts`. minienv verifies it and offers no prompt or bypass, so
-connect once by hand before the first deploy. Encrypted identity files are not
-supported.
+connect once by hand before the first deploy. Encrypted identity files are
+not supported.
+
+For the `awsSsm` transport:
+
+- `session-manager-plugin failed: exec: "session-manager-plugin": executable
+  file not found in $PATH` means the plugin is not installed or not on
+  `PATH`.
+- A command that "ended without reporting a status" means the session closed
+  before the command finished — usually `session-manager-plugin` older than
+  1.2.497.0, or `ssm-user` lacking a shell on the instance.
+- A `permission denied` from `docker` means `ssm-user` is not in the `docker`
+  group.
+
+The plugin's own diagnostics are passed through on stderr.
 
 ## Teardown failed and left containers behind
 

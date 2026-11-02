@@ -113,5 +113,30 @@ var _ = Describe("Loader", func() {
 
 			Expect(err).To(MatchError(transport.ErrInvalidExtension))
 		})
+
+		It("builds a core from a docker extension with an awsSsm transport", func() {
+			core, err := newLoader(
+				fixture("docker-aws-ssm.compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(core).ToNot(BeNil())
+		})
+
+		It("surfaces an awsSsm block missing its required fields", func() {
+			_, err := newLoader(
+				fixture("docker-bad-aws-ssm.compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).To(MatchError(transport.ErrInvalidExtension))
+		})
+
+		It("errors when both transports are configured", func() {
+			_, err := newLoader(
+				fixture("docker-multiple-transports.compose.yml"),
+			).LoadCore(context.Background())
+
+			Expect(err).To(MatchError(loader.ErrMultipleDockerTransports))
+		})
 	})
 })

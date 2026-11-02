@@ -28,6 +28,8 @@ configuring more than one is an error.
 | `docker.transport.ssh.identity`        | string  | **yes**  | —          | Path to the private key file                                                                              |
 | `docker.transport.ssh.user`            | string  | no       | local user | User for the SSH connection                                                                               |
 | `docker.transport.ssh.port`            | integer | no       | `22`       | Port for the SSH connection                                                                               |
+| `docker.transport.awsSsm.target`       | string  | **yes**  | —          | Systems Manager managed instance id to connect to                                                         |
+| `docker.transport.awsSsm.profile`      | string  | no       | —          | Named AWS profile to resolve credentials and region from                                                  |
 | `docker.ngrok.trafficPolicy`           | string  | no       | `""`       | ngrok `on_http_request` policy applied to every service that does not set its own                         |
 
 #### `docker.transport`
@@ -35,10 +37,28 @@ configuring more than one is an error.
 Exactly one transport must be configured; configuring none, like configuring
 more than one, is an error.
 
+##### `ssh`
+
 > **The host key must already be trusted.** minienv verifies against
 > `~/.ssh/known_hosts` on the machine running it and offers no prompt or
 > bypass, so connect once by hand before the first deploy. Encrypted identity
 > files are not supported.
+
+##### `awsSsm`
+
+Runs every command as the instance's `ssm-user` through a Session Manager
+session on the `AWS-StartNonInteractiveCommand` document, driven by
+`session-manager-plugin` (1.2.497.0 or newer) on `PATH`. Credentials need
+`ssm:StartSession` on the target and that document, and
+`ssm:TerminateSession`; region and credentials resolve the way the AWS SDK
+resolves them, from `profile` when it is set. `ssm-user` must be able to run
+`docker`.
+
+> **File contents travel as session parameters.** Each file is sent `base64`
+> encoded inside the session's command, so anything that records
+> `StartSession` parameters — CloudTrail, session logging — holds the rendered
+> `compose.yml` and, when something publishes, the `.env` with the ngrok
+> token.
 
 ## `x-minienv-k8s-service`
 

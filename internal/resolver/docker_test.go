@@ -427,10 +427,10 @@ var _ = Describe("DockerService", func() {
 	})
 
 	Describe("XMiniEnvDockerTransport", func() {
-		It("names ssh as its only config field", func() {
+		It("names every transport as a config field", func() {
 			transport := config.XMiniEnvDockerTransport{}
 
-			Expect(transport.ConfigFields()).To(Equal([]string{"ssh"}))
+			Expect(transport.ConfigFields()).To(Equal([]string{"ssh", "awsSsm"}))
 		})
 	})
 })
