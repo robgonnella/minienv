@@ -10,6 +10,7 @@ require (
 	github.com/compose-spec/compose-go/v2 v2.14.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/invopop/jsonschema v0.14.0
+	github.com/mattn/go-shellwords v1.0.14
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.43.0
 	github.com/pkg/sftp v1.13.11
@@ -101,7 +102,6 @@ require (
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.29 // indirect
-	github.com/mattn/go-shellwords v1.0.14 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect

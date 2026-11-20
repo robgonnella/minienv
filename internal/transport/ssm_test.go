@@ -16,6 +16,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/mattn/go-shellwords"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/robgonnella/minienv/internal/config"
@@ -104,8 +105,8 @@ type runner = func(
 	stdout io.Writer,
 ) error
 
-// Runs the session's command in a local shell with HOME pointed at a temp
-// directory, wrapped in what the plugin prints around it.
+// Word-splits and execs the session's command as the ssm agent does, with no
+// shell, HOME pointed at a temp directory, wrapped in the plugin's output.
 func localShell(home string) runner {
 	return func(
 		ctx context.Context,
@@ -114,12 +115,13 @@ func localShell(home string) runner {
 	) error {
 		_, _ = io.WriteString(stdout, testBanner)
 
-		cmd := exec.CommandContext(
-			ctx,
-			"sh",
-			"-c",
-			inv.Input.Parameters["command"][0],
-		)
+		argv, err := shellwords.Parse(inv.Input.Parameters["command"][0])
+		if err != nil {
+			return fmt.Errorf("split command: %w", err)
+		}
+
+		// #nosec G204 -- argv is the command the transport under test built.
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 
 		cmd.Env = append(os.Environ(), "HOME="+home)
 		cmd.Stdout = stdout
@@ -227,6 +229,7 @@ var _ = Describe("AwsSsmTransport", func() {
 					To(Equal("AWS-StartNonInteractiveCommand"))
 				Expect(start.Parameters).To(HaveKey("command"))
 				Expect(start.Parameters["command"]).To(HaveLen(1))
+				Expect(start.Parameters["command"][0]).To(HavePrefix("sh -c '"))
 				Expect(start.Parameters["command"][0]).To(ContainSubstring("true"))
 			})
 

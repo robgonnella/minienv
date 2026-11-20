@@ -266,10 +266,10 @@ func (t *AwsSsmTransport) runScript(
 		return err
 	}
 
-	inv, err := t.startSession(
-		ctx,
-		"(\n"+script+"\n)\nprintf '%s=%s\\n' '"+marker+"' \"$?\"\n",
-	)
+	wrapped := "(\n" + script + "\n)\n" +
+		"printf '%s=%s\\n' '" + marker + "' \"$?\"\n"
+
+	inv, err := t.startSession(ctx, "sh -c "+shellQuote(wrapped))
 	if err != nil {
 		return err
 	}
