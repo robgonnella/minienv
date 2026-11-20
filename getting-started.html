@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1d63a13e.js";
+            window.path_to_searchindex_js = "searchindex-73f5f634.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -191,11 +191,12 @@
 <tr><td><code>docker</code> with <code>buildx</code></td><td>Only for services that have a <code>build:</code> section</td></tr>
 <tr><td><code>git</code></td><td>Only if you use a <code>+git</code> image tag</td></tr>
 <tr><td>A reachable Kubernetes context</td><td>Only for the <code>k8s</code> deployer</td></tr>
-<tr><td>An SSH-reachable host with <code>docker</code> and its compose plugin</td><td>Only for the <code>docker</code> deployer</td></tr>
+<tr><td>An SSH-reachable host with <code>docker</code> and its compose plugin</td><td>Only for the <code>docker</code> deployer’s <code>ssh</code> transport</td></tr>
+<tr><td>A Systems Manager managed instance whose <code>ssm-user</code> can run <code>docker</code> and its compose plugin, and <code>session-manager-plugin</code> on <code>PATH</code></td><td>Only for the <code>docker</code> deployer’s <code>awsSsm</code> transport</td></tr>
 </tbody>
 </table>
 </div>
-<p>For the <code>docker</code> deployer, the remote host must already be in your
+<p>For the <code>ssh</code> transport, the remote host must already be in your
 <code>~/.ssh/known_hosts</code>. minienv offers no prompt or bypass, so connect once by
 hand first. Encrypted identity files are not supported.</p>
 <h2 id="install"><a class="header" href="#install">Install</a></h2>

@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1d63a13e.js";
+            window.path_to_searchindex_js = "searchindex-73f5f634.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -256,11 +256,12 @@ or <a href="http://opensource.org/licenses/MIT">http://opensource.org/licenses/M
 <tr><td><code>docker</code> with <code>buildx</code></td><td>Only for services that have a <code>build:</code> section</td></tr>
 <tr><td><code>git</code></td><td>Only if you use a <code>+git</code> image tag</td></tr>
 <tr><td>A reachable Kubernetes context</td><td>Only for the <code>k8s</code> deployer</td></tr>
-<tr><td>An SSH-reachable host with <code>docker</code> and its compose plugin</td><td>Only for the <code>docker</code> deployer</td></tr>
+<tr><td>An SSH-reachable host with <code>docker</code> and its compose plugin</td><td>Only for the <code>docker</code> deployer’s <code>ssh</code> transport</td></tr>
+<tr><td>A Systems Manager managed instance whose <code>ssm-user</code> can run <code>docker</code> and its compose plugin, and <code>session-manager-plugin</code> on <code>PATH</code></td><td>Only for the <code>docker</code> deployer’s <code>awsSsm</code> transport</td></tr>
 </tbody>
 </table>
 </div>
-<p>For the <code>docker</code> deployer, the remote host must already be in your
+<p>For the <code>ssh</code> transport, the remote host must already be in your
 <code>~/.ssh/known_hosts</code>. minienv offers no prompt or bypass, so connect once by
 hand first. Encrypted identity files are not supported.</p>
 <h2 id="install"><a class="header" href="#install">Install</a></h2>
@@ -829,6 +830,8 @@ configuring more than one is an error.</p>
 <tr><td><code>docker.transport.ssh.identity</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Path to the private key file</td></tr>
 <tr><td><code>docker.transport.ssh.user</code></td><td>string</td><td>no</td><td>local user</td><td>User for the SSH connection</td></tr>
 <tr><td><code>docker.transport.ssh.port</code></td><td>integer</td><td>no</td><td><code>22</code></td><td>Port for the SSH connection</td></tr>
+<tr><td><code>docker.transport.awsSsm.target</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Systems Manager managed instance id to connect to</td></tr>
+<tr><td><code>docker.transport.awsSsm.profile</code></td><td>string</td><td>no</td><td>—</td><td>Named AWS profile to resolve credentials and region from</td></tr>
 <tr><td><code>docker.ngrok.trafficPolicy</code></td><td>string</td><td>no</td><td><code>""</code></td><td>ngrok <code>on_http_request</code> policy applied to every service that does not set its own</td></tr>
 </tbody>
 </table>
@@ -836,11 +839,27 @@ configuring more than one is an error.</p>
 <h4 id="dockertransport"><a class="header" href="#dockertransport"><code>docker.transport</code></a></h4>
 <p>Exactly one transport must be configured; configuring none, like configuring
 more than one, is an error.</p>
+<h5 id="ssh"><a class="header" href="#ssh"><code>ssh</code></a></h5>
 <blockquote>
 <p><strong>The host key must already be trusted.</strong> minienv verifies against
 <code>~/.ssh/known_hosts</code> on the machine running it and offers no prompt or
 bypass, so connect once by hand before the first deploy. Encrypted identity
 files are not supported.</p>
+</blockquote>
+<h5 id="awsssm"><a class="header" href="#awsssm"><code>awsSsm</code></a></h5>
+<p>Runs every command as the instance’s <code>ssm-user</code> through a Session Manager
+session on the <code>AWS-StartNonInteractiveCommand</code> document, driven by
+<code>session-manager-plugin</code> (1.2.497.0 or newer) on <code>PATH</code>. Credentials need
+<code>ssm:StartSession</code> on the target and that document, and
+<code>ssm:TerminateSession</code>; region and credentials resolve the way the AWS SDK
+resolves them, from <code>profile</code> when it is set. <code>ssm-user</code> must be able to run
+<code>docker</code>.</p>
+<blockquote>
+<p><strong>File contents travel as session parameters.</strong> Each file is sent <code>base64</code>
+encoded inside the session’s command, so anything that records
+<code>StartSession</code> parameters — CloudTrail, session logging — holds the rendered
+<code>compose.yml</code> and, when something publishes, the <code>.env</code> with the ngrok
+token.</p>
 </blockquote>
 <h2 id="x-minienv-k8s-service"><a class="header" href="#x-minienv-k8s-service"><code>x-minienv-k8s-service</code></a></h2>
 <p>Under <code>services.&lt;name&gt;</code>. All fields are optional.</p>
@@ -1137,8 +1156,10 @@ Anything else a service needs is declared explicitly, with <code>configMapFrom</
 <code>manifests</code>.</p>
 <h2 id="docker-4"><a class="header" href="#docker-4">Docker</a></h2>
 <p>Deploys the whole project to a single remote host as one <code>docker compose</code>
-project, over a transport.</p>
-<p>Needs an SSH-reachable host running <code>docker</code> and its compose plugin:</p>
+project, over a transport. The host runs <code>docker</code> and its compose plugin;
+exactly one block under <code>transport</code> says how minienv reaches it.</p>
+<h3 id="transportssh"><a class="header" href="#transportssh"><code>transport.ssh</code></a></h3>
+<p>Connects over SSH with a private key:</p>
 <pre><code class="language-yaml">x-minienv:
   docker:
     namespace: my-branch
@@ -1147,6 +1168,44 @@ project, over a transport.</p>
         host: dev-box.example.com
         identity: ~/.ssh/id_ed25519
 </code></pre>
+<p>The host key must already be in <code>~/.ssh/known_hosts</code> on the machine running
+minienv. It verifies against that file and offers no prompt or bypass, so
+connect once by hand before the first deploy.</p>
+<h3 id="transportawsssm"><a class="header" href="#transportawsssm"><code>transport.awsSsm</code></a></h3>
+<p>Runs each command on the instance through an AWS Systems Manager Session
+Manager command session, as the instance’s <code>ssm-user</code>. No key, no sshd, no
+inbound port:</p>
+<pre><code class="language-yaml">x-minienv:
+  docker:
+    namespace: my-branch
+    transport:
+      awsSsm:
+        target: i-0123456789abcdef0
+        profile: dev
+</code></pre>
+<p>What it needs:</p>
+<ul>
+<li>The instance registered with Systems Manager, with <code>ssm-user</code> able to run
+<code>docker</code> (in the <code>docker</code> group). The project lands under
+<code>/home/ssm-user/.minienv/&lt;namespace&gt;</code>.</li>
+<li><code>tar</code>, <code>gzip</code> and <code>base64</code> in <code>ssm-user</code>’s shell — part of the base install
+on Amazon Linux, Ubuntu, Debian, RHEL and Alpine. <code>copy</code> entries arrive as
+a compressed archive, and a missing <code>tar</code> fails that step with a message
+saying so rather than extracting.</li>
+<li><code>session-manager-plugin</code> 1.2.497.0 or newer on <code>PATH</code>. minienv starts each
+session itself and hands it to the plugin; the session token travels in
+the plugin’s environment, never in its arguments.</li>
+<li>Credentials allowed <code>ssm:StartSession</code> on the target with the
+<code>AWS-StartNonInteractiveCommand</code> document, and <code>ssm:TerminateSession</code>.
+Region and credentials resolve the way the AWS SDK resolves them; <code>profile</code>
+names a shared-config profile to resolve them from.</li>
+</ul>
+<p>Files reach the instance as <code>base64</code> inside the session’s command, in chunks,
+and directories as a compressed <code>tar</code> the same way. That means their
+contents — the rendered <code>compose.yml</code>, and the <code>.env</code> holding your ngrok
+token when something publishes — pass through the <code>StartSession</code> API as
+parameters. Treat whatever records those parameters, such as CloudTrail or
+session logging, as holding them.</p>
 <p>Per-service overrides go under <code>x-minienv-docker-service</code>.</p>
 <h3 id="what-reaches-the-remote-host"><a class="header" href="#what-reaches-the-remote-host">What reaches the remote host</a></h3>
 <p>Before the project is sent, minienv:</p>
@@ -1258,10 +1317,21 @@ port.</p>
 <p>A service with no ports gets no Service and no ServiceAccount. Add a port
 mapping to compose <code>ports:</code> if you expected one.</p>
 <h2 id="minienv-cannot-reach-the-remote-host"><a class="header" href="#minienv-cannot-reach-the-remote-host">minienv cannot reach the remote host</a></h2>
-<p>For the <code>docker</code> deployer, the host key must already be in your
+<p>For the <code>ssh</code> transport, the host key must already be in your
 <code>~/.ssh/known_hosts</code>. minienv verifies it and offers no prompt or bypass, so
-connect once by hand before the first deploy. Encrypted identity files are not
-supported.</p>
+connect once by hand before the first deploy. Encrypted identity files are
+not supported.</p>
+<p>For the <code>awsSsm</code> transport:</p>
+<ul>
+<li><code>session-manager-plugin failed: exec: "session-manager-plugin": executable file not found in $PATH</code> means the plugin is not installed or not on
+<code>PATH</code>.</li>
+<li>A command that “ended without reporting a status” means the session closed
+before the command finished — usually <code>session-manager-plugin</code> older than
+1.2.497.0, or <code>ssm-user</code> lacking a shell on the instance.</li>
+<li>A <code>permission denied</code> from <code>docker</code> means <code>ssm-user</code> is not in the <code>docker</code>
+group.</li>
+</ul>
+<p>The plugin’s own diagnostics are passed through on stderr.</p>
 <h2 id="teardown-failed-and-left-containers-behind"><a class="header" href="#teardown-failed-and-left-containers-behind">Teardown failed and left containers behind</a></h2>
 <p>The directory holding your configuration and credentials is removed even when
 teardown fails. Containers or volumes may survive it; check on the host with

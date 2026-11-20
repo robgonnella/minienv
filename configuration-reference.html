@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1d63a13e.js";
+            window.path_to_searchindex_js = "searchindex-73f5f634.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -214,6 +214,8 @@ configuring more than one is an error.</p>
 <tr><td><code>docker.transport.ssh.identity</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Path to the private key file</td></tr>
 <tr><td><code>docker.transport.ssh.user</code></td><td>string</td><td>no</td><td>local user</td><td>User for the SSH connection</td></tr>
 <tr><td><code>docker.transport.ssh.port</code></td><td>integer</td><td>no</td><td><code>22</code></td><td>Port for the SSH connection</td></tr>
+<tr><td><code>docker.transport.awsSsm.target</code></td><td>string</td><td><strong>yes</strong></td><td>—</td><td>Systems Manager managed instance id to connect to</td></tr>
+<tr><td><code>docker.transport.awsSsm.profile</code></td><td>string</td><td>no</td><td>—</td><td>Named AWS profile to resolve credentials and region from</td></tr>
 <tr><td><code>docker.ngrok.trafficPolicy</code></td><td>string</td><td>no</td><td><code>""</code></td><td>ngrok <code>on_http_request</code> policy applied to every service that does not set its own</td></tr>
 </tbody>
 </table>
@@ -221,11 +223,27 @@ configuring more than one is an error.</p>
 <h4 id="dockertransport"><a class="header" href="#dockertransport"><code>docker.transport</code></a></h4>
 <p>Exactly one transport must be configured; configuring none, like configuring
 more than one, is an error.</p>
+<h5 id="ssh"><a class="header" href="#ssh"><code>ssh</code></a></h5>
 <blockquote>
 <p><strong>The host key must already be trusted.</strong> minienv verifies against
 <code>~/.ssh/known_hosts</code> on the machine running it and offers no prompt or
 bypass, so connect once by hand before the first deploy. Encrypted identity
 files are not supported.</p>
+</blockquote>
+<h5 id="awsssm"><a class="header" href="#awsssm"><code>awsSsm</code></a></h5>
+<p>Runs every command as the instance’s <code>ssm-user</code> through a Session Manager
+session on the <code>AWS-StartNonInteractiveCommand</code> document, driven by
+<code>session-manager-plugin</code> (1.2.497.0 or newer) on <code>PATH</code>. Credentials need
+<code>ssm:StartSession</code> on the target and that document, and
+<code>ssm:TerminateSession</code>; region and credentials resolve the way the AWS SDK
+resolves them, from <code>profile</code> when it is set. <code>ssm-user</code> must be able to run
+<code>docker</code>.</p>
+<blockquote>
+<p><strong>File contents travel as session parameters.</strong> Each file is sent <code>base64</code>
+encoded inside the session’s command, so anything that records
+<code>StartSession</code> parameters — CloudTrail, session logging — holds the rendered
+<code>compose.yml</code> and, when something publishes, the <code>.env</code> with the ngrok
+token.</p>
 </blockquote>
 <h2 id="x-minienv-k8s-service"><a class="header" href="#x-minienv-k8s-service"><code>x-minienv-k8s-service</code></a></h2>
 <p>Under <code>services.&lt;name&gt;</code>. All fields are optional.</p>

@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1d63a13e.js";
+            window.path_to_searchindex_js = "searchindex-73f5f634.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -238,8 +238,10 @@ Anything else a service needs is declared explicitly, with <code>configMapFrom</
 <code>manifests</code>.</p>
 <h2 id="docker"><a class="header" href="#docker">Docker</a></h2>
 <p>Deploys the whole project to a single remote host as one <code>docker compose</code>
-project, over a transport.</p>
-<p>Needs an SSH-reachable host running <code>docker</code> and its compose plugin:</p>
+project, over a transport. The host runs <code>docker</code> and its compose plugin;
+exactly one block under <code>transport</code> says how minienv reaches it.</p>
+<h3 id="transportssh"><a class="header" href="#transportssh"><code>transport.ssh</code></a></h3>
+<p>Connects over SSH with a private key:</p>
 <pre><code class="language-yaml">x-minienv:
   docker:
     namespace: my-branch
@@ -248,6 +250,44 @@ project, over a transport.</p>
         host: dev-box.example.com
         identity: ~/.ssh/id_ed25519
 </code></pre>
+<p>The host key must already be in <code>~/.ssh/known_hosts</code> on the machine running
+minienv. It verifies against that file and offers no prompt or bypass, so
+connect once by hand before the first deploy.</p>
+<h3 id="transportawsssm"><a class="header" href="#transportawsssm"><code>transport.awsSsm</code></a></h3>
+<p>Runs each command on the instance through an AWS Systems Manager Session
+Manager command session, as the instance’s <code>ssm-user</code>. No key, no sshd, no
+inbound port:</p>
+<pre><code class="language-yaml">x-minienv:
+  docker:
+    namespace: my-branch
+    transport:
+      awsSsm:
+        target: i-0123456789abcdef0
+        profile: dev
+</code></pre>
+<p>What it needs:</p>
+<ul>
+<li>The instance registered with Systems Manager, with <code>ssm-user</code> able to run
+<code>docker</code> (in the <code>docker</code> group). The project lands under
+<code>/home/ssm-user/.minienv/&lt;namespace&gt;</code>.</li>
+<li><code>tar</code>, <code>gzip</code> and <code>base64</code> in <code>ssm-user</code>’s shell — part of the base install
+on Amazon Linux, Ubuntu, Debian, RHEL and Alpine. <code>copy</code> entries arrive as
+a compressed archive, and a missing <code>tar</code> fails that step with a message
+saying so rather than extracting.</li>
+<li><code>session-manager-plugin</code> 1.2.497.0 or newer on <code>PATH</code>. minienv starts each
+session itself and hands it to the plugin; the session token travels in
+the plugin’s environment, never in its arguments.</li>
+<li>Credentials allowed <code>ssm:StartSession</code> on the target with the
+<code>AWS-StartNonInteractiveCommand</code> document, and <code>ssm:TerminateSession</code>.
+Region and credentials resolve the way the AWS SDK resolves them; <code>profile</code>
+names a shared-config profile to resolve them from.</li>
+</ul>
+<p>Files reach the instance as <code>base64</code> inside the session’s command, in chunks,
+and directories as a compressed <code>tar</code> the same way. That means their
+contents — the rendered <code>compose.yml</code>, and the <code>.env</code> holding your ngrok
+token when something publishes — pass through the <code>StartSession</code> API as
+parameters. Treat whatever records those parameters, such as CloudTrail or
+session logging, as holding them.</p>
 <p>Per-service overrides go under <code>x-minienv-docker-service</code>.</p>
 <h3 id="what-reaches-the-remote-host"><a class="header" href="#what-reaches-the-remote-host">What reaches the remote host</a></h3>
 <p>Before the project is sent, minienv:</p>

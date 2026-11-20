@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1d63a13e.js";
+            window.path_to_searchindex_js = "searchindex-73f5f634.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-b247f32b.js"></script>
@@ -264,10 +264,21 @@ port.</p>
 <p>A service with no ports gets no Service and no ServiceAccount. Add a port
 mapping to compose <code>ports:</code> if you expected one.</p>
 <h2 id="minienv-cannot-reach-the-remote-host"><a class="header" href="#minienv-cannot-reach-the-remote-host">minienv cannot reach the remote host</a></h2>
-<p>For the <code>docker</code> deployer, the host key must already be in your
+<p>For the <code>ssh</code> transport, the host key must already be in your
 <code>~/.ssh/known_hosts</code>. minienv verifies it and offers no prompt or bypass, so
-connect once by hand before the first deploy. Encrypted identity files are not
-supported.</p>
+connect once by hand before the first deploy. Encrypted identity files are
+not supported.</p>
+<p>For the <code>awsSsm</code> transport:</p>
+<ul>
+<li><code>session-manager-plugin failed: exec: "session-manager-plugin": executable file not found in $PATH</code> means the plugin is not installed or not on
+<code>PATH</code>.</li>
+<li>A command that “ended without reporting a status” means the session closed
+before the command finished — usually <code>session-manager-plugin</code> older than
+1.2.497.0, or <code>ssm-user</code> lacking a shell on the instance.</li>
+<li>A <code>permission denied</code> from <code>docker</code> means <code>ssm-user</code> is not in the <code>docker</code>
+group.</li>
+</ul>
+<p>The plugin’s own diagnostics are passed through on stderr.</p>
 <h2 id="teardown-failed-and-left-containers-behind"><a class="header" href="#teardown-failed-and-left-containers-behind">Teardown failed and left containers behind</a></h2>
 <p>The directory holding your configuration and credentials is removed even when
 teardown fails. Containers or volumes may survive it; check on the host with
