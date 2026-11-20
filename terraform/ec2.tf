@@ -99,3 +99,7 @@ resource "aws_instance" "app" {
   user_data                   = file("${path.module}/bootstrap.sh")
   depends_on                  = [aws_nat_gateway.main]
 }
+
+output "ec2_instance_id" {
+  value = aws_instance.app.id
+}
