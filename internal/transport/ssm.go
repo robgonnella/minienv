@@ -121,7 +121,13 @@ func (t *AwsSsmTransport) CreateFile(
 	file string,
 	content []byte,
 ) error {
-	if err := t.writeRemote(ctx, file, content); err != nil {
+	if err := t.writeRemote(
+		ctx,
+		file,
+		content,
+		"",
+		"write "+file,
+	); err != nil {
 		return err
 	}
 
@@ -153,11 +159,6 @@ func (t *AwsSsmTransport) CopyPath(
 	}
 
 	archivePath := remotePath + ssmArchiveSuffix
-
-	if err := t.writeRemote(ctx, archivePath, archive); err != nil {
-		return err
-	}
-
 	extractDir := path.Dir(remotePath)
 	script := "if ! command -v tar >/dev/null || " +
 		"! command -v gzip >/dev/null; then " +
@@ -176,8 +177,10 @@ func (t *AwsSsmTransport) CopyPath(
 		"rm -f " + shellPath(archivePath) + "; " +
 		"exit $__minienv_rc"
 
-	if err := t.runScript(
+	if err := t.writeRemote(
 		ctx,
+		archivePath,
+		archive,
 		script,
 		"copy "+localPath+" to "+remotePath,
 	); err != nil {
@@ -197,18 +200,19 @@ func (t *AwsSsmTransport) writeRemote(
 	ctx context.Context,
 	remotePath string,
 	content []byte,
+	finish string,
+	describe string,
 ) error {
 	part := shellPath(remotePath + ssmPartSuffix)
-	commit := " && mv -f " + part + " " + shellPath(remotePath)
-	describe := "write " + remotePath
+	mkdir := "mkdir -p " + shellPath(path.Dir(remotePath)) + " && "
 
-	prepare := "mkdir -p " + shellPath(path.Dir(remotePath)) + " && : > " + part
-	if len(content) == 0 {
-		prepare += commit
+	commit := " && mv -f " + part + " " + shellPath(remotePath)
+	if finish != "" {
+		commit += " && (\n" + finish + "\n)"
 	}
 
-	if err := t.runScript(ctx, prepare, describe); err != nil {
-		return err
+	if len(content) == 0 {
+		return t.runScript(ctx, mkdir+": > "+part+commit, describe)
 	}
 
 	for offset := 0; offset < len(content); offset += ssmWriteChunkSize {
@@ -216,8 +220,13 @@ func (t *AwsSsmTransport) writeRemote(
 		chunk := base64.StdEncoding.EncodeToString(content[offset:end])
 		script := "printf '%s' '" + chunk + "' | base64 -d >> " + part
 
-		if end == len(content) {
+		if offset == 0 {
+			script = mkdir + "printf '%s' '" + chunk + "' | base64 -d > " + part
+		}
+
+		if end == len(content) && fitsSession(script+commit) {
 			script += commit
+			commit = ""
 		}
 
 		if err := t.runScript(ctx, script, describe); err != nil {
@@ -227,7 +236,33 @@ func (t *AwsSsmTransport) writeRemote(
 		}
 	}
 
+	if commit == "" {
+		return nil
+	}
+
+	if err := t.runScript(ctx, ":"+commit, describe); err != nil {
+		t.removePart(ctx, remotePath)
+
+		return err
+	}
+
 	return nil
+}
+
+func fitsSession(script string) bool {
+	marker := ssmStatusMarker + strings.Repeat(
+		"0",
+		hex.EncodedLen(ssmStatusMarkerBytes),
+	)
+
+	return len(sessionCommand(script, marker)) <= ssmCommandMaxLen
+}
+
+func sessionCommand(script string, marker string) string {
+	wrapped := "(\n" + script + "\n)\n" +
+		"printf '%s=%s\\n' '" + marker + "' \"$?\"\n"
+
+	return "sh -c " + shellQuote(wrapped)
 }
 
 func (t *AwsSsmTransport) removePart(ctx context.Context, remotePath string) {
@@ -266,10 +301,7 @@ func (t *AwsSsmTransport) runScript(
 		return err
 	}
 
-	wrapped := "(\n" + script + "\n)\n" +
-		"printf '%s=%s\\n' '" + marker + "' \"$?\"\n"
-
-	inv, err := t.startSession(ctx, "sh -c "+shellQuote(wrapped))
+	inv, err := t.startSession(ctx, sessionCommand(script, marker))
 	if err != nil {
 		return err
 	}
@@ -535,6 +567,10 @@ func (f *statusFilter) Status() (int, bool) {
 }
 
 func (f *statusFilter) handleLine(line []byte) error {
+	if f.found {
+		return nil
+	}
+
 	text := strings.TrimRight(string(line), "\r\n")
 
 	if !f.started {

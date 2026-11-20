@@ -31,7 +31,7 @@ const (
 	testCommand   = "printf '%s' 'TkdST0tfQVVUSFRPS0VO' | base64 -d"
 	testToken     = "2abcTESTTOKENvalue_do_not_log"
 	testBanner    = "\nStarting session with SessionId: " + testSessionID + "\n"
-	testTrailer   = "Exiting session with sessionId: " + testSessionID + ".\n"
+	testTrailer   = "\n\nExiting session with sessionId: " + testSessionID + ".\n\n"
 )
 
 type fakeSessionAPI struct {
@@ -478,7 +478,21 @@ var _ = Describe("AwsSsmTransport", func() {
 					To(Succeed())
 
 				Expect(os.ReadFile(landed("blob"))).To(Equal(body))
-				Expect(api.Starts()).To(HaveLen(1 + 3))
+				Expect(api.Starts()).To(HaveLen(3))
+			})
+
+			It("writes a small file in one session", func() {
+				Expect(subject.CreateFile(context.Background(), "~/dir/compose.yml", []byte("a"))).
+					To(Succeed())
+
+				Expect(api.Starts()).To(HaveLen(1))
+			})
+
+			It("writes an empty body in one session", func() {
+				Expect(subject.CreateFile(context.Background(), "~/dir/empty", nil)).
+					To(Succeed())
+
+				Expect(api.Starts()).To(HaveLen(1))
 			})
 
 			It("keeps a full chunk to a deep path within the command limit", func() {
@@ -544,7 +558,7 @@ var _ = Describe("AwsSsmTransport", func() {
 				It("removes the partial file", func() {
 					subject.SetRunner(func(ctx context.Context, inv transport.PluginInvocation, stdout io.Writer) error {
 						sessions++
-						if sessions == 3 {
+						if sessions == 2 {
 							return pluginDied
 						}
 
@@ -563,7 +577,7 @@ var _ = Describe("AwsSsmTransport", func() {
 
 					subject.SetRunner(func(runCtx context.Context, inv transport.PluginInvocation, stdout io.Writer) error {
 						sessions++
-						if sessions == 3 {
+						if sessions == 2 {
 							cancel()
 
 							return pluginDied
@@ -583,9 +597,9 @@ var _ = Describe("AwsSsmTransport", func() {
 						sessions++
 
 						switch sessions {
-						case 3:
+						case 2:
 							return pluginDied
-						case 4:
+						case 3:
 							return errors.New("cleanup died")
 						default:
 							return shell(ctx, inv, stdout)
@@ -595,7 +609,7 @@ var _ = Describe("AwsSsmTransport", func() {
 					Expect(subject.CreateFile(context.Background(), "~/blob", body)).
 						To(MatchError(pluginDied))
 
-					Expect(sessions).To(Equal(4))
+					Expect(sessions).To(Equal(3))
 				})
 			})
 
@@ -749,6 +763,36 @@ var _ = Describe("AwsSsmTransport", func() {
 				entries, err := os.ReadDir(landed("copies"))
 				Expect(err).ToNot(HaveOccurred())
 				Expect(entries).To(HaveLen(1))
+			})
+
+			It("copies a small path in one session", func() {
+				src := write("file.txt", []byte("a"), 0o644)
+
+				Expect(subject.CopyPath(context.Background(), src, "~/copies/file.txt")).
+					To(Succeed())
+
+				Expect(api.Starts()).To(HaveLen(1))
+			})
+
+			It("extracts in a session of its own when the last chunk leaves no room", func() {
+				body := make([]byte, transport.SsmWriteChunkSize-4096)
+				_, err := rand.Read(body)
+				Expect(err).ToNot(HaveOccurred())
+
+				src := write("blob", body, 0o644)
+				deep := "~/" + strings.Repeat("'/", 200) + "blob"
+
+				Expect(subject.CopyPath(context.Background(), src, deep)).
+					To(Succeed())
+
+				Expect(os.ReadFile(landed(strings.Repeat("'/", 200) + "blob"))).
+					To(Equal(body))
+				Expect(api.Starts()).To(HaveLen(2))
+
+				for _, command := range api.Commands() {
+					Expect(len(command)).
+						To(BeNumerically("<=", transport.SsmCommandMaxLen))
+				}
 			})
 
 			It("refuses a symlinked directory inside a tree", func() {
