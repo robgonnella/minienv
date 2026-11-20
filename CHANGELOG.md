@@ -1,3 +1,17 @@
+# [0.8.0](https://github.com/robgonnella/minienv/compare/v0.7.0...v0.8.0) - 2026-11-20
+
+### 🚀 Features
+
+- adds support for AWS SSM transport [_(9b207235)_](https://github.com/robgonnella/minienv/commit/9b207235076617bef48a0231ca8c385ce504de31)
+
+### 🐛 Bug Fixes
+
+- _(aws-ssm)_ fixes issue with awsSsm transport [_(652daebb)_](https://github.com/robgonnella/minienv/commit/652daebbaa4897c7cd9bdeb2986b3950998f5dde)
+
+### 📚 Documentation
+
+- updates docs for installing [_(9271355b)_](https://github.com/robgonnella/minienv/commit/9271355b7ee6bfd3d2c3e5a465561d2a3d2cc741)
+
 # [0.7.0](https://github.com/robgonnella/minienv/compare/v0.6.2...v0.7.0) - 2026-09-23
 
 ### 🚀 Features
