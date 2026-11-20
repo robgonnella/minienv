@@ -1,0 +1,30 @@
+# prints help menu
+default:
+    @just --list
+
+# prints help menu
+help: default
+
+# initializes terraform
+init:
+    terraform init
+
+# formats terraform code
+fmt:
+    terraform fmt
+
+# validates terraform entries
+validate:
+    terraform validate
+
+# runs terraform plan
+plan:
+    terraform plan
+
+# runs terraform apply to deploy all defined infrastructure
+apply *args:
+    terraform apply {{ args }}
+
+# runs terraform destroy to destroy all defined infrastructure
+destroy:
+    terraform destroy
