@@ -1,3 +1,9 @@
+# [0.8.1](https://github.com/robgonnella/minienv/compare/v0.8.0...v0.8.1) - 2026-11-21
+
+### 🐛 Bug Fixes
+
+- _(aws-ssm)_ stop blank lines between logs and use fewer sessions [_(a8c77d1a)_](https://github.com/robgonnella/minienv/commit/a8c77d1a21f983fe2137ab6faa942af44813792e)
+
 # [0.8.0](https://github.com/robgonnella/minienv/compare/v0.7.0...v0.8.0) - 2026-11-20
 
 ### 🚀 Features
